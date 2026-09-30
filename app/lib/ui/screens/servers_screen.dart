@@ -83,7 +83,6 @@ class _ServersScreenState extends State<ServersScreen> {
           icon: Icons.add_rounded,
           size: _kToolSize,
           tooltip: l('servers.add'),
-          filled: true,
           onTap: () => showAddSheet(context),
         ),
       ],
@@ -481,10 +480,14 @@ class _GroupHeader extends StatelessWidget {
       if (s?.updatedAt != null) l('sub.updated', {'t': _time(s!.updatedAt!)}),
     ];
     final hasMeta = s != null && (frac != null || meta.isNotEmpty || (daysLeft ?? 0) < 0);
+    // The 36px menu square already leaves ~8px under the title glyphs; with
+    // only a caption below (no usage line and bar) the row gives up its
+    // bottom padding so the caption sits close to the name.
+    final tight = hasMeta && frac == null;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(Space.m, Space.s, Space.s, Space.s),
+        padding: EdgeInsets.fromLTRB(Space.m, Space.s, Space.s, tight ? 0 : Space.s),
         child: Row(children: [
           Expanded(
             child: PressableScale(
@@ -702,8 +705,11 @@ class _NodeRow extends StatelessWidget {
               shape: RoundedRectangleBorder(borderRadius: radius),
             ),
             child: Column(children: [
+              // Trailing: latency, 12px, 22px check — the same inset as the
+              // switcher's rows, so the latency column sits on one line
+              // across both lists.
               Padding(
-                padding: const EdgeInsets.fromLTRB(Space.l, Space.m - 1, Space.m, Space.m - 1),
+                padding: const EdgeInsets.fromLTRB(Space.l, Space.m - 1, Space.l, Space.m - 1),
                 child: Row(children: [
                   CountryCode(node.countryCode),
                   const SizedBox(width: Space.m),
@@ -741,8 +747,9 @@ class _NodeRow extends StatelessWidget {
                       onTest: () => app.pingNode(node.id),
                     ),
                   ),
+                  const SizedBox(width: Space.m),
                   SizedBox(
-                    width: 28,
+                    width: 22,
                     child: SpringValue(
                       target: selected ? 1 : 0,
                       spring: Springs.momentum,

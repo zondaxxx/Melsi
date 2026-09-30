@@ -159,23 +159,27 @@ class _Row extends StatelessWidget {
       dense: true,
       leading: CountryCode(node.countryCode),
       title: nodeTitle(node),
-      // Same "● Активен" idiom as the Servers list; it takes the
-      // subscription's slot so the row stays one line at 360px.
+      // One column pattern for every row — protocol · subscription — with
+      // the same "● Активен" idiom as the Servers list appended on the live
+      // one; the subscription name gives way first on a 360px phone.
       subtitleWidget: Row(children: [
         ProtocolBadge(node.protocol),
-        if (active) ...[
-          const SizedBox(width: Space.s + 2),
-          StatusDot(c.success, size: 6),
-          const SizedBox(width: 5),
-          Text(context.l('servers.active'), style: t.caption.copyWith(color: c.success)),
-        ] else if (sub != null) ...[
+        if (sub != null) ...[
           Text(' · ', style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
           Flexible(
             child: Text(sub.name,
                 maxLines: 1, overflow: TextOverflow.ellipsis, style: t.caption),
           ),
         ],
+        if (active) ...[
+          const SizedBox(width: Space.s + 2),
+          StatusDot(c.success, size: 6),
+          const SizedBox(width: 5),
+          Text(context.l('servers.active'), style: t.caption.copyWith(color: c.success)),
+        ],
       ]),
+      // Latency column ends 50px from the edge (16 gutter + 22 check + 12
+      // gap), exactly as on the Servers page.
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
         LatencyChip(
           ms: app.latencyOf(node),

@@ -137,33 +137,36 @@ class _AddSheetState extends State<AddSheet> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(children: [
-                    Expanded(
-                      child: _Source(
-                        icon: Icons.content_paste_rounded,
-                        label: l('add.clipboard'),
-                        onTap: _busy ? null : _paste,
-                      ),
-                    ),
-                    if (mobile) ...[
-                      const SizedBox(width: Space.s),
-                      Expanded(
-                        child: _Source(
-                          icon: Icons.qr_code_scanner_rounded,
-                          label: l('add.scan'),
-                          onTap: _busy ? null : _scan,
+                  // Shortcuts as outlined buttons with a leading glyph — the
+                  // same control Routing and Games use for "Выбрать
+                  // приложения". Intrinsic widths that wrap, so the three on
+                  // a phone never truncate their labels.
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 150),
+                    opacity: _busy ? 0.5 : 1,
+                    child: Wrap(
+                      spacing: Space.s,
+                      runSpacing: Space.s,
+                      children: [
+                        SecondaryButton(
+                          icon: Icons.content_paste_rounded,
+                          label: l('add.clipboard'),
+                          onTap: _busy ? null : _paste,
                         ),
-                      ),
-                    ],
-                    const SizedBox(width: Space.s),
-                    Expanded(
-                      child: _Source(
-                        icon: Icons.folder_open_outlined,
-                        label: l('add.file'),
-                        onTap: _busy ? null : _file,
-                      ),
+                        if (mobile)
+                          SecondaryButton(
+                            icon: Icons.qr_code_scanner_rounded,
+                            label: l('add.scan'),
+                            onTap: _busy ? null : _scan,
+                          ),
+                        SecondaryButton(
+                          icon: Icons.folder_open_outlined,
+                          label: l('add.file'),
+                          onTap: _busy ? null : _file,
+                        ),
+                      ],
                     ),
-                  ]),
+                  ),
                   const SizedBox(height: Space.xxl),
                   // Same 4px inset as every section label on the pages.
                   Padding(
@@ -187,22 +190,19 @@ class _AddSheetState extends State<AddSheet> {
                     decoration: InputDecoration(hintText: l('add.nameHint')),
                   ),
                   const SizedBox(height: Space.s + 2),
-                  // One-line helper; the full format list unfolds on demand so
-                  // it never competes with the input.
+                  // The field's placeholder already names the formats; below
+                  // it only the disclosure link remains, unfolding the full
+                  // list on demand so it never competes with the input.
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: Space.xs),
                     child: _formats
                         ? Text(l('add.formatsList'), style: context.t.footnote)
                         : Text.rich(
-                            TextSpan(children: [
-                              TextSpan(text: '${l('add.supported')} · '),
-                              TextSpan(
-                                // Kept on one line as a single link.
-                                text: l('add.formats').replaceAll(' ', '\u00A0'),
-                                recognizer: _formatsTap,
-                                style: TextStyle(color: context.c.label),
-                              ),
-                            ]),
+                            TextSpan(
+                              text: l('add.formats'),
+                              recognizer: _formatsTap,
+                              style: TextStyle(color: context.c.label),
+                            ),
                             style: context.t.footnote,
                           ),
                   ),
@@ -224,26 +224,3 @@ class _AddSheetState extends State<AddSheet> {
   }
 }
 
-class _Source extends StatelessWidget {
-  const _Source({required this.icon, required this.label, required this.onTap});
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return PressableScaleCard(
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(vertical: Space.m + 2, horizontal: Space.s),
-      child: Column(children: [
-        Icon(icon, size: 20, color: c.secondaryLabel),
-        const SizedBox(height: Space.s),
-        Text(label,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            style: context.t.caption.copyWith(color: c.label)),
-      ]),
-    );
-  }
-}

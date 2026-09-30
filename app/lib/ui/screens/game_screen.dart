@@ -18,6 +18,11 @@ import 'app_picker.dart';
 
 enum _GameFilter { all, pc, mobile }
 
+/// Presets that are storefronts / launchers rather than games. The preset
+/// data carries no flag, so the UI names them; they get their own eyebrow
+/// at the end of the list.
+const Set<String> _kLauncherIds = {'steam', 'epic', 'battlenet'};
+
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
 
@@ -39,7 +44,29 @@ class _GameScreenState extends State<GameScreen> {
           _GameFilter.pc => p.desktopProcesses.isNotEmpty,
           _GameFilter.mobile => p.androidPackages.isNotEmpty,
         }).toList();
+    final games = presets.where((p) => !_kLauncherIds.contains(p.id)).toList();
+    final launchers = presets.where((p) => _kLauncherIds.contains(p.id)).toList();
     final gameNode = app.nodeById(g.gameNodeId);
+
+    Widget chips(List<GamePreset> list) => Wrap(
+          spacing: Space.s,
+          runSpacing: Space.s,
+          children: [
+            for (final p in list)
+              _GameChip(
+                preset: p,
+                platforms: _filter == _GameFilter.all,
+                selected: g.gameIds.contains(p.id),
+                onTap: () => app.updateGame((x) {
+                  final ids = {...x.gameIds};
+                  final sel = ids.contains(p.id);
+                  sel ? ids.remove(p.id) : ids.add(p.id);
+                  x.gameIds = ids;
+                  if (!sel && !x.enabled) x.enabled = true;
+                }),
+              ),
+          ],
+        );
 
     return PageScaffold(
       title: l('tab.gameTitle'),
@@ -73,49 +100,33 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
         ),
-        // Capped so three segments never stretch across a 1200px column.
         SliverToBoxAdapter(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Segmented<_GameFilter>(
-                value: _filter,
-                onChanged: (f) => setState(() => _filter = f),
-                segments: [
-                  Segment(_GameFilter.all, l('game.all')),
-                  Segment(_GameFilter.pc, l('game.pc'), icon: Icons.desktop_windows_outlined),
-                  Segment(_GameFilter.mobile, l('game.mobile'), icon: Icons.smartphone_rounded),
-                ],
-              ),
-            ),
+          child: Segmented<_GameFilter>(
+            value: _filter,
+            onChanged: (f) => setState(() => _filter = f),
+            segments: [
+              Segment(_GameFilter.all, l('game.all')),
+              Segment(_GameFilter.pc, l('game.pc'), icon: Icons.desktop_windows_outlined),
+              Segment(_GameFilter.mobile, l('game.mobile'), icon: Icons.smartphone_rounded),
+            ],
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
         // Dense wrapped chips. Platform glyphs appear only in the mixed
         // "Все" list, where they carry information; under a platform filter
-        // they would repeat the filter on every chip.
-        SliverToBoxAdapter(
-          child: Wrap(
-            spacing: Space.s,
-            runSpacing: Space.s,
-            children: [
-              for (final p in presets)
-                _GameChip(
-                  preset: p,
-                  platforms: _filter == _GameFilter.all,
-                  selected: g.gameIds.contains(p.id),
-                  onTap: () => app.updateGame((x) {
-                    final ids = {...x.gameIds};
-                    final sel = ids.contains(p.id);
-                    sel ? ids.remove(p.id) : ids.add(p.id);
-                    x.gameIds = ids;
-                    if (!sel && !x.enabled) x.enabled = true;
-                  }),
-                ),
-            ],
+        // they would repeat the filter on every chip. Launchers follow the
+        // games under a small eyebrow — a subheading inside the section, not
+        // a section of its own.
+        SliverToBoxAdapter(child: chips(games)),
+        if (launchers.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(Space.xs, Space.xl, Space.xs, Space.s + 2),
+              child: Overline(l('game.launchers')),
+            ),
           ),
-        ),
+          SliverToBoxAdapter(child: chips(launchers)),
+        ],
         SliverToBoxAdapter(child: SectionHeader(l('game.custom'))),
         SliverToBoxAdapter(
           child: Panel(
@@ -247,11 +258,12 @@ class _GameScreenState extends State<GameScreen> {
 
 // ------------------------------------------------------------------ live panel
 
-/// The live game route: the server (code, name, protocol · mode · live
-/// "Активен" — the same inline idiom as the server lists),
-/// the latency sparkline with its scale printed as a word, then the same
-/// ПИНГ / ДЖИТТЕР / ПОТЕРИ row the Home server card uses. The ping is a
-/// metric like the others, not a display-size hero.
+/// The live game route: the server (code, name with the same "Авто" /
+/// "Закреплён" tag the Home server card wears, protocol · live "Активен" —
+/// the inline idiom of the server lists), the latency sparkline with its
+/// scale printed as a word, then the same ПИНГ / ДЖИТТЕР / ПОТЕРИ row the
+/// Home server card uses. The ping is a metric like the others, not a
+/// display-size hero.
 class _GameRoutePanel extends StatelessWidget {
   const _GameRoutePanel({required this.app});
   final AppState app;
@@ -285,17 +297,20 @@ class _GameRoutePanel extends StatelessWidget {
               const SizedBox(width: Space.m),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text((node == null ? null : nodeTitle(node)) ?? group.current ?? '—',
-                      maxLines: 1, overflow: TextOverflow.ellipsis, style: t.headline),
+                  Row(children: [
+                    Flexible(
+                      child: Text((node == null ? null : nodeTitle(node)) ?? group.current ?? '—',
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: t.headline),
+                    ),
+                    const SizedBox(width: Space.s),
+                    Tag(group.auto == false ? l('game.pinned') : l('game.nodeAuto')),
+                  ]),
                   const SizedBox(height: 3),
                   Row(children: [
                     if (node != null) ...[
                       ProtocolBadge(node.protocol),
-                      Text(' · ', style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
+                      const SizedBox(width: Space.s + 2),
                     ],
-                    Text((group.auto == false ? l('game.pinned') : l('game.nodeAuto')).toUpperCase(),
-                        style: t.monoSmall),
-                    const SizedBox(width: Space.s + 2),
                     const _LiveDot(),
                     const SizedBox(width: 5),
                     Text(l('servers.active'), style: t.caption.copyWith(color: c.success)),
@@ -347,10 +362,10 @@ class _GameRoutePanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(Space.l, Space.s + 2, Space.l, Space.m),
               child: Text(
                 group.lastSwitch!.at == null
-                    ? l('home.switchedReason', {'reason': group.lastSwitch!.reason!})
+                    ? l('home.switchedReason', {'reason': bindUnits(group.lastSwitch!.reason!)})
                     : l('home.switchedAgo', {
                         'ago': formatAgo(l, DateTime.now().difference(group.lastSwitch!.at!)),
-                        'reason': group.lastSwitch!.reason!,
+                        'reason': bindUnits(group.lastSwitch!.reason!),
                       }),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

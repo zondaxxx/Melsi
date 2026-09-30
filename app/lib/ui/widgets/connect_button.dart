@@ -1,5 +1,4 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/services.dart';
 
 import '../../l10n/l10n.dart';
@@ -12,15 +11,15 @@ import '../theme/theme.dart';
 ///
 /// * Idle: solid accent, "Подключиться".
 /// * Connecting / stopping: neutral, a small spinner, the action is "Отмена".
-/// * Connected: neutral with a visible 1px stroke (~30% label in dark),
-///   "Отключить".
+/// * Connected: neutral with a visible 1px stroke (30% label, both themes,
+///   so it reads as a control rather than another card), "Отключить".
 /// * Error: neutral with a red hairline, "Подключиться" (retry).
-/// * No server ([hasServer] false): neutral, "Добавить сервер" — the accent
-///   is never spent on an action that cannot do anything; [onTap] then
-///   opens the add flow (the caller decides).
+/// * No server ([hasServer] false): still the accent — it is the one
+///   primary action of an empty Home, "Добавить сервер" / "Выбрать сервер",
+///   and [onTap] opens the add flow or the switcher (the caller decides).
 ///
-/// Never taller than 52px; the caller constrains the width (full column on
-/// phones, the live column on desktop).
+/// 52px on phones, 56px on wide layouts; the caller constrains the width
+/// (full column on phones, the live column on desktop).
 ///
 /// Presses down instantly (spring scale) and fires a haptic on commit; colour
 /// springs between states. A medium haptic confirms the connection, a heavy
@@ -54,7 +53,7 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
       vsync: this, value: _target(widget.status, widget.hasServer));
 
   static double _target(VpnStatus s, bool hasServer) => switch (s) {
-        VpnStatus.stopped || VpnStatus.error => hasServer ? 0 : 1,
+        VpnStatus.stopped || VpnStatus.error => 0,
         _ => 1,
       };
 
@@ -94,9 +93,10 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
       _ when !widget.hasServer => widget.noServerLabel ?? l('servers.add'),
       _ => l('home.connect'),
     };
-    // Without a server the idle button is a quiet secondary control that
-    // leads to the add flow, not a primary action that fails silently.
-    final quiet = idle && !widget.hasServer;
+    // Without a server the idle button leads to the add flow / switcher: a
+    // real action, so it keeps the accent — the same primary as the empty
+    // Servers page. It only loses the error stroke, which is not its fault.
+    final adding = idle && !widget.hasServer;
     final enabled = s != VpnStatus.stopping;
 
     return PressableScale(
@@ -117,13 +117,13 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
             // Neutral state: a raised surface with a stroke strong enough to
             // read as a button on the dark background.
             final neutralBg = c.isDark ? c.surfaceRaised : c.surface;
-            final neutralEdge = c.isDark ? c.label.withValues(alpha: 0.3) : c.separator;
+            final neutralEdge = c.label.withValues(alpha: 0.3);
             final bg = Color.lerp(c.accent, neutralBg, v)!;
             final fg = Color.lerp(c.onAccent, c.label, v)!;
             final edge = Color.lerp(
-                c.accent, s == VpnStatus.error && !quiet ? c.danger : neutralEdge, v)!;
+                c.accent, s == VpnStatus.error && !adding ? c.danger : neutralEdge, v)!;
             return Container(
-              height: widget.height.clamp(0, 52),
+              height: widget.height,
               alignment: Alignment.center,
               decoration: ShapeDecoration(
                 color: bg,
@@ -139,10 +139,6 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
                     if (busy) ...[
                       CupertinoActivityIndicator(radius: 7, color: fg),
                       const SizedBox(width: Space.s + 2),
-                    ],
-                    if (quiet) ...[
-                      Icon(Icons.add_rounded, size: 18, color: fg),
-                      const SizedBox(width: Space.xs + 2),
                     ],
                     Text(label,
                         style: context.t.headline.copyWith(

@@ -28,6 +28,10 @@ import 'server_switcher.dart';
 const double _kMainMaxWidth = 600;
 const double _kRailWidth = 320;
 
+/// Two columns need the live column plus the rail; below this the rail
+/// stacks under the live column as on phones.
+const double _kTwoColumnMin = 700;
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -36,15 +40,20 @@ class HomeScreen extends StatelessWidget {
     final app = context.app;
     final l = context.l;
     final wide = context.isWide;
+    // Same content column as every other page, so the headline's left edge
+    // is the other tabs' title edge; on desktop the live column and the rail
+    // split that column between them.
     return PageScaffold(
       title: l('tab.home'),
-      maxContentWidth: wide ? 1040 : 760,
       compactLeading: wide ? const SizedBox.shrink() : const Wordmark(),
       slivers: [
         SliverToBoxAdapter(
           child: LayoutBuilder(builder: (context, box) {
-            final twoColumn = box.maxWidth >= 820;
-            final connected = app.displayStatus == VpnStatus.connected;
+            final twoColumn = box.maxWidth >= _kTwoColumnMin;
+            final status = app.displayStatus;
+            final connected = status == VpnStatus.connected;
+            // Telemetry exists only once a session does.
+            final session = connected || status == VpnStatus.connecting;
             final hasServer = app.activeNode != null;
 
             final traffic = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -58,7 +67,8 @@ class HomeScreen extends StatelessWidget {
               // Without a server the button leads to the add flow (or the
               // switcher when servers exist but none is chosen).
               ConnectButton(
-                status: app.displayStatus,
+                status: status,
+                height: wide ? 56 : 52,
                 hasServer: hasServer,
                 noServerLabel: app.nodes.isEmpty ? l('servers.add') : l('home.chooseServer'),
                 onTap: hasServer
@@ -67,11 +77,10 @@ class HomeScreen extends StatelessWidget {
               ),
               SectionHeader(l('home.server')),
               _NodePanel(app: app),
-              // On phones telemetry appears on connect (an empty chart is
-              // not information on a scrolling page). The wide layout keeps
-              // the card in place with dashes so the column holds its rhythm
-              // and nothing jumps when the tunnel comes up.
-              _Reveal(visible: connected || twoColumn, child: traffic),
+              // Telemetry appears with the session (dashes while the tunnel
+              // comes up, live once connected). An empty chart is not
+              // information, on a phone or a desktop.
+              _Reveal(visible: session, child: traffic),
             ]);
 
             Widget side({EdgeInsetsGeometry? firstHeaderPadding}) =>
@@ -96,11 +105,14 @@ class HomeScreen extends StatelessWidget {
               );
             }
             // Wide: live column on the left (capped, left-aligned; button and
-            // cards share the cap), controls in a fixed rail on the right. The rail's first header trades
-            // its top margin for the offset that centres the 11px overline
-            // on the 30px status line.
+            // cards share the cap), controls in a fixed rail on the right.
+            // The status row is centred on the line the other tabs' titles
+            // sit on, so the first line holds still on tab switch; the
+            // rail's first header trades its top margin for the offset that
+            // centres the 11px overline on the 30px status line.
             return Padding(
-              padding: const EdgeInsets.only(top: Space.xl),
+              padding: const EdgeInsets.only(
+                  top: (PageScaffold.titleLine - _Status.lineHeight) / 2),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Align(
@@ -165,6 +177,9 @@ class _Status extends StatelessWidget {
   static const double _dot = 10;
   static const double _gap = Space.m;
 
+  /// Height of the headline row (dot, status, timer).
+  static const double lineHeight = 30;
+
   @override
   Widget build(BuildContext context) {
     final l = context.l;
@@ -188,7 +203,7 @@ class _Status extends StatelessWidget {
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SizedBox(
-        height: 30,
+        height: lineHeight,
         child: Row(children: [
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
@@ -382,11 +397,14 @@ class _SwitchReason extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l;
+    // The engine writes the reason ("джиттер 3 мс против 21 мс"); binding
+    // each number to its unit keeps a lone "мс" off the second line.
+    final reason = bindUnits(sw.reason!);
     final text = sw.at == null
-        ? l('home.switchedReason', {'reason': sw.reason!})
+        ? l('home.switchedReason', {'reason': reason})
         : l('home.switchedAgo', {
             'ago': formatAgo(l, DateTime.now().difference(sw.at!)),
-            'reason': sw.reason!,
+            'reason': reason,
           });
     return Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: context.t.footnote);
   }
@@ -396,7 +414,9 @@ class _SwitchReason extends StatelessWidget {
 
 /// Speeds, a two-line sparkline with its scale printed top-right ("макс.
 /// 2.8 МБ/с" — a word, so it is never mistaken for the upload figure), totals.
-/// The two captions carry line swatches and so double as the legend.
+/// The two captions carry line swatches (solid / dashed, painted in the
+/// chart's own pattern) and so double as the legend; both live values are
+/// set in the label colour — the swatch alone tells the series apart.
 /// [idle] (not connected) prints dashes and an empty plot with a "нет
 /// данных" caption instead of the peak.
 class _TrafficPanel extends StatelessWidget {
@@ -436,7 +456,6 @@ class _TrafficPanel extends StatelessWidget {
                       glyph: '↑',
                       bps: idle ? null : traffic.up,
                       label: l('home.up'),
-                      quiet: true,
                       swatch: SeriesSwatch(color: c.secondaryLabel, dashed: true),
                     ),
                   ),
@@ -496,13 +515,11 @@ class _Speed extends StatelessWidget {
     required this.glyph,
     required this.bps,
     required this.label,
-    this.quiet = false,
     this.swatch,
   });
   final String glyph;
   final int? bps;
   final String label;
-  final bool quiet;
   final Widget? swatch;
 
   @override
@@ -520,8 +537,7 @@ class _Speed extends StatelessWidget {
         TextSpan(children: [
           TextSpan(
               text: v,
-              style: t.monoLarge.copyWith(
-                  color: bps == null ? c.tertiaryLabel : (quiet ? c.secondaryLabel : c.label))),
+              style: t.monoLarge.copyWith(color: bps == null ? c.tertiaryLabel : c.label)),
           if (unit.isNotEmpty)
             TextSpan(text: ' $unit', style: t.mono.copyWith(color: c.tertiaryLabel)),
         ]),

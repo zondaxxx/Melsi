@@ -21,17 +21,18 @@ Path dashPath(Path path, List<double> pattern) {
   return out;
 }
 
-/// A 12px line sample: solid or dashed in the series' colour. Sits before a
-/// chart caption so the header doubles as the legend.
+/// An 18px line sample: solid, or dashed in the chart's own pattern (three
+/// dashes), in the series' colour. Sits before a chart caption so the
+/// header doubles as the legend.
 class SeriesSwatch extends StatelessWidget {
-  const SeriesSwatch({super.key, required this.color, this.dashed = false, this.width = 12});
+  const SeriesSwatch({super.key, required this.color, this.dashed = false, this.width = 18});
   final Color color;
   final bool dashed;
   final double width;
 
   @override
   Widget build(BuildContext context) => CustomPaint(
-        size: Size(width, 4),
+        size: Size(width, 6),
         painter: _SwatchPainter(color: color, dashed: dashed),
       );
 }
@@ -53,8 +54,8 @@ class _SwatchPainter extends CustomPainter {
       Paint()
         ..color = color
         ..style = PaintingStyle.stroke
-        ..strokeWidth = dashed ? 1.25 : 1.5
-        ..strokeCap = StrokeCap.round,
+        ..strokeWidth = dashed ? 1.5 : 2
+        ..strokeCap = StrokeCap.butt,
     );
   }
 

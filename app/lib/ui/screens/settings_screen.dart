@@ -60,7 +60,6 @@ class SettingsScreen extends StatelessWidget {
 
     return PageScaffold(
       title: l('tab.settings'),
-      maxContentWidth: 720,
       slivers: [
         // ------------------------------------------------ smart
         SliverToBoxAdapter(

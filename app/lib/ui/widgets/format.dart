@@ -21,17 +21,31 @@ List<String> _units(L10n? l) {
   return (v.toStringAsFixed(d), units[i]);
 }
 
-/// "40.4 ГБ" / "40.4 GB".
+/// Non-breaking space: a number never wraps away from its unit
+/// ("21\u00A0мс"), so a note like "джиттер 3 мс против 21 мс" breaks
+/// between phrases rather than leaving a lone "мс" on the next line.
+const String nbsp = '\u00A0';
+
+/// "40.4 ГБ" / "40.4 GB" (number and unit joined with [nbsp]).
 String formatBytes(num bytes, {L10n? l, int decimals = 1}) {
   final (v, u) = splitBytes(bytes, l: l, decimals: decimals);
-  return '$v $u';
+  return '$v$nbsp$u';
 }
 
-/// Bytes/s → "1.2 МБ/с" / "1.2 MB/s".
+/// Bytes/s → "1.2 МБ/с" / "1.2 MB/s" (number and unit joined with [nbsp]).
 String formatSpeed(num bps, {L10n? l}) {
   final (v, u) = splitSpeed(bps, l: l);
-  return '$v $u';
+  return '$v$nbsp$u';
 }
+
+/// Binds every "number unit" pair in free text ("3 мс", "21 ms", "0.4 %")
+/// with [nbsp] — for strings the engine composes, which the formatter
+/// never saw.
+String bindUnits(String text) =>
+    text.replaceAllMapped(
+        // No `\b`: it is ASCII-only and never fires after Cyrillic.
+        RegExp(r'(\d) (мс|ms|с|s|%|дн\.|d)(?=[\s,.;:!?)]|$)'),
+        (m) => '${m[1]}$nbsp${m[2]}');
 
 /// Splits a speed into value + unit for typographic layouts.
 (String, String) splitSpeed(num bps, {L10n? l}) {

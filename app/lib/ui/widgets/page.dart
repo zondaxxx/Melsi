@@ -34,10 +34,20 @@ class PageScaffold extends StatelessWidget {
     this.compactLeading,
   });
 
-  /// When set, the page uses a compact inline bar showing this widget (e.g.
-  /// a wordmark) instead of a large title. Pass [SizedBox.shrink] on wide
-  /// layouts where the sidebar already carries the brand.
+  /// When set, the page shows this widget (e.g. a wordmark) in place of a
+  /// large title: at rest it sits on the same top line as the other tabs'
+  /// titles, and slides up into the inline bar as content scrolls. Pass
+  /// [SizedBox.shrink] on wide layouts where the sidebar already carries the
+  /// brand; the header is then just the 48px bar and content starts on the
+  /// title line ([titleTop]).
   final Widget? compactLeading;
+
+  /// Where the large title's top edge lands on every page (below the status
+  /// bar): the line Home aligns its status headline to on wide layouts.
+  static const double titleTop = _LargeTitleHeader._bar;
+
+  /// Line height of the large title (28px at 1.15).
+  static const double titleLine = 32;
 
   final String title;
   final Widget? subtitle;
@@ -61,6 +71,8 @@ class PageScaffold extends StatelessWidget {
             delegate: compactLeading != null
                 ? _CompactHeader(
                     leading: compactLeading!,
+                    // A shrunk leading has nothing to align: no title band.
+                    large: compactLeading is SizedBox ? 0 : _CompactHeader.leadingBand,
                     actions: actions,
                     topPadding: top,
                     hPad: h,
@@ -192,49 +204,80 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
       old.subtitle != subtitle;
 }
 
-/// Compact inline bar (no large title). The chrome fades in once content
-/// actually scrolls underneath.
+/// Inline bar whose [leading] (the wordmark) rests on the title line like
+/// the other tabs' large titles, then slides up into the bar as content
+/// scrolls; the chrome fades in with it. With [large] 0 there is no title
+/// band and the header is just the bar.
 class _CompactHeader extends SliverPersistentHeaderDelegate {
   _CompactHeader({
     required this.leading,
+    required this.large,
     required this.actions,
     required this.topPadding,
     required this.hPad,
   });
 
   final Widget leading;
+  final double large;
   final List<Widget> actions;
   final double topPadding;
   final double hPad;
 
-  static const _bar = 48.0;
+  static const _bar = _LargeTitleHeader._bar;
+
+  /// One 24px line for the 19px wordmark plus the 12px the large title
+  /// keeps below itself.
+  static const double _leadingLine = 24;
+  static const double leadingBand = _leadingLine + Space.m;
 
   @override
   double get minExtent => topPadding + _bar;
   @override
-  double get maxExtent => topPadding + _bar;
+  double get maxExtent => topPadding + _bar + large;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    final p = (shrinkOffset / 16).clamp(0.0, 1.0);
+    // With no title band the header never shrinks, so the chrome keys off
+    // overlap instead (and fades in via AnimatedOpacity below).
+    final p = large == 0 ? (overlapsContent ? 1.0 : 0.0) : (shrinkOffset / large).clamp(0.0, 1.0);
+    // At rest the leading's top is the title line; collapsed, it is centred
+    // in the bar.
+    final restTop = topPadding + _bar;
+    final barTop = topPadding + (_bar - _leadingLine) / 2;
+    final leadingTop = large == 0 ? barTop : lerpDouble(restTop, barTop, p)!;
+    final actionsWidth = actions.isEmpty ? 0.0 : actions.length * (32 + Space.s);
     return Stack(fit: StackFit.expand, children: [
-      Chrome(opacity: p, child: const SizedBox.expand()),
+      if (large == 0)
+        AnimatedOpacity(
+          duration: const Duration(milliseconds: 150),
+          opacity: p,
+          child: const Chrome(child: SizedBox.expand()),
+        )
+      else
+        Chrome(opacity: p, child: const SizedBox.expand()),
       Positioned(
-        top: topPadding,
+        top: leadingTop,
         left: hPad,
-        right: hPad,
-        height: _bar,
-        child: Row(children: [
-          Expanded(child: Align(alignment: Alignment.centerLeft, child: leading)),
-          for (final a in actions) ...[const SizedBox(width: Space.s), a],
-        ]),
+        right: hPad + actionsWidth,
+        height: _leadingLine,
+        child: Align(alignment: Alignment.centerLeft, child: leading),
       ),
+      if (actions.isNotEmpty)
+        Positioned(
+          top: topPadding,
+          right: hPad,
+          height: _bar,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (final a in actions) ...[const SizedBox(width: Space.s), a],
+          ]),
+        ),
     ]);
   }
 
   @override
   bool shouldRebuild(_CompactHeader old) =>
       old.leading != leading ||
+      old.large != large ||
       old.actions != actions ||
       old.topPadding != topPadding ||
       old.hPad != hPad;

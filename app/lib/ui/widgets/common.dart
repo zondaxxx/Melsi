@@ -393,11 +393,13 @@ class MetricsRow extends StatelessWidget {
 }
 
 /// "48 мс" → number in [color], unit in [unitColor]; "—" alone in [unitColor].
+/// The formatter joins number and unit with a non-breaking space, so the
+/// split accepts either kind.
 Widget _metric(String value, TextStyle style, Color color, Color unitColor) {
   if (value == '—') {
     return Text(value, maxLines: 1, softWrap: false, style: style.copyWith(color: unitColor));
   }
-  final sp = value.lastIndexOf(' ');
+  final sp = value.lastIndexOf(RegExp(r'[ \u00A0]'));
   final split = sp > 0 && RegExp(r'^[\d.,:]+$').hasMatch(value.substring(0, sp));
   return Text.rich(
     split
@@ -544,7 +546,9 @@ class SecondaryButton extends StatelessWidget {
   }
 }
 
-/// Square icon button for toolbars. [filled] makes it the accent primary.
+/// Square icon button for toolbars: outlined surface, label-colour glyph.
+/// Always neutral — the accent belongs to the primary action of the page,
+/// never to a tool in its header.
 class ToolButton extends StatelessWidget {
   const ToolButton({
     super.key,
@@ -554,7 +558,6 @@ class ToolButton extends StatelessWidget {
     this.color,
     this.busy = false,
     this.size = 32,
-    this.filled = false,
   });
   final IconData icon;
   final VoidCallback? onTap;
@@ -562,7 +565,6 @@ class ToolButton extends StatelessWidget {
   final Color? color;
   final bool busy;
   final double size;
-  final bool filled;
 
   @override
   Widget build(BuildContext context) {
@@ -582,19 +584,13 @@ class ToolButton extends StatelessWidget {
             width: size,
             height: size,
             decoration: ShapeDecoration(
-              color: filled
-                  ? (pressed
-                      ? Color.alphaBlend(Colors.black.withValues(alpha: 0.12), c.accent)
-                      : hovered
-                          ? Color.alphaBlend(Colors.white.withValues(alpha: 0.08), c.accent)
-                          : c.accent)
-                  : interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
+              color: interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
               shape: Radii.shape(Radii.s + 1,
-                  side: filled ? BorderSide.none : BorderSide(color: c.separator, width: kHairline)),
+                  side: BorderSide(color: c.separator, width: kHairline)),
             ),
             child: busy
-                ? CupertinoActivityIndicator(radius: 7, color: filled ? c.onAccent : null)
-                : Icon(icon, size: size * 0.56, color: filled ? c.onAccent : (color ?? c.label)),
+                ? const CupertinoActivityIndicator(radius: 7)
+                : Icon(icon, size: size * 0.56, color: color ?? c.label),
           ),
         ),
       ),
