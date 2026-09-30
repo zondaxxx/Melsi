@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/models.dart';
 import '../../l10n/l10n.dart';
+import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../theme/glass.dart';
@@ -16,7 +17,6 @@ import '../widgets/common.dart';
 import '../widgets/page.dart';
 import '../widgets/segmented.dart';
 import 'logs_screen.dart';
-import 'reconnect_banner.dart';
 import 'servers_screen.dart' show promptText;
 
 class SettingsScreen extends StatelessWidget {
@@ -38,7 +38,7 @@ class SettingsScreen extends StatelessWidget {
     }
 
     Widget value(String v) => ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 180),
+          constraints: const BoxConstraints(maxWidth: 160),
           child: Text(v,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -47,8 +47,8 @@ class SettingsScreen extends StatelessWidget {
 
     return PageScaffold(
       title: l('tab.settings'),
+      maxContentWidth: 720,
       slivers: [
-        const SliverToBoxAdapter(child: ReconnectBanner()),
         // ------------------------------------------------ smart
         SliverToBoxAdapter(child: SectionHeader(l('settings.smart'), padding: const EdgeInsets.fromLTRB(4, 4, 4, 8))),
         SliverToBoxAdapter(
@@ -61,23 +61,19 @@ class SettingsScreen extends StatelessWidget {
               onChanged: app.setAutoSelect,
             ),
             for (final m in SmartMode.values)
-              RowTile(
-                leading: SizedBox(
-                  width: 30,
-                  child: Icon(_modeIcon(m), color: s.smartMode == m ? c.accent : c.secondaryLabel, size: 22),
-                ),
-                title: l('smart.${m.name}'),
-                subtitle: l('smart.${m.name}.desc'),
-                trailing: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 150),
-                  opacity: s.smartMode == m ? 1 : 0,
-                  child: Icon(Icons.check_rounded, color: c.accent),
-                ),
+              _ModeRow(
+                mode: m,
+                selected: s.smartMode == m,
                 onTap: () {
                   HapticFeedback.selectionClick();
                   app.setSmartMode(m);
                 },
               ),
+          ]),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
+        SliverToBoxAdapter(
+          child: GroupCard(children: [
             RowTile(
               leading: IconTile(Icons.travel_explore_rounded, color: c.info),
               title: l('settings.probeUrl'),
@@ -96,22 +92,17 @@ class SettingsScreen extends StatelessWidget {
                 if (n != null && n >= 10) app.updateSettings((x) => x.probeIntervalSec = n);
               }, number: true),
             ),
+            if (app.displayStatus == VpnStatus.connected && s.autoSelect)
+              RowTile(
+                leading: IconTile(Icons.refresh_rounded, color: c.success),
+                title: l('settings.probeNow'),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  app.probeNow();
+                },
+              ),
           ]),
         ),
-        if (app.connected && s.autoSelect)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(top: Space.s),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: app.probeNow,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: Text(l('settings.probeNow')),
-                ),
-              ),
-            ),
-          ),
         // ------------------------------------------------ DNS
         SliverToBoxAdapter(child: SectionHeader(l('settings.dns'))),
         SliverToBoxAdapter(
@@ -119,7 +110,7 @@ class SettingsScreen extends StatelessWidget {
             RowTile(
               leading: IconTile(Icons.dns_rounded, color: c.accent),
               title: l('settings.remoteDns'),
-              trailing: value(s.remoteDns),
+              trailing: value(_short(s.remoteDns)),
               chevron: true,
               onTap: () => editText(l('settings.remoteDns'), s.remoteDns,
                   (v) => app.updateSettings((x) => x.remoteDns = v)),
@@ -127,7 +118,7 @@ class SettingsScreen extends StatelessWidget {
             RowTile(
               leading: IconTile(Icons.dns_outlined, color: c.success),
               title: l('settings.directDns'),
-              trailing: value(s.directDns),
+              trailing: value(_short(s.directDns)),
               chevron: true,
               onTap: () => editText(l('settings.directDns'), s.directDns,
                   (v) => app.updateSettings((x) => x.directDns = v)),
@@ -271,7 +262,7 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (v) => app.updateSettings((x) => x.connectOnLaunch = v, affectsConfig: false),
             ),
             RowTile(
-              leading: IconTile(Icons.bug_report_rounded, color: c.secondaryLabel.withValues(alpha: 1)),
+              leading: const IconTile(Icons.bug_report_rounded, color: Color(0xFF8E8E93)),
               title: l('settings.logLevel'),
               trailing: PopupMenuButton<LogLevel>(
                 initialValue: s.logLevel,
@@ -329,12 +320,11 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  static IconData _modeIcon(SmartMode m) => switch (m) {
-        SmartMode.latency => Icons.flash_on_rounded,
-        SmartMode.balanced => Icons.balance_rounded,
-        SmartMode.stability => Icons.shield_moon_rounded,
-        SmartMode.game => Icons.sports_esports_rounded,
-      };
+  /// "https://1.1.1.1/dns-query" → "1.1.1.1" for the row's value.
+  static String _short(String v) {
+    final u = Uri.tryParse(v);
+    return u != null && u.host.isNotEmpty ? u.host : v;
+  }
 
   Future<void> _export(BuildContext context, AppState app) async {
     String json;
@@ -363,5 +353,55 @@ class SettingsScreen extends StatelessWidget {
       await Clipboard.setData(ClipboardData(text: json));
       app.notice('notice.exportCopied', kind: NoticeKind.success);
     }
+  }
+}
+
+/// One option of the smart-selection mode: a radio row with the same tile
+/// style as every other row. Only the selected option shows its
+/// description, so the list stays short.
+class _ModeRow extends StatelessWidget {
+  const _ModeRow({required this.mode, required this.selected, required this.onTap});
+  final SmartMode mode;
+  final bool selected;
+  final VoidCallback onTap;
+
+  static (IconData, Color) look(SmartMode m) => switch (m) {
+        SmartMode.latency => (Icons.flash_on_rounded, const Color(0xFFFF9F0A)),
+        SmartMode.balanced => (Icons.balance_rounded, const Color(0xFF5B50F0)),
+        SmartMode.stability => (Icons.shield_rounded, const Color(0xFF14A8C9)),
+        SmartMode.game => (Icons.sports_esports_rounded, const Color(0xFFE8457C)),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l;
+    final c = context.c;
+    final (icon, color) = look(mode);
+    return Semantics(
+      inMutuallyExclusiveGroup: true,
+      checked: selected,
+      child: RowTile(
+        leading: IconTile(icon, color: color),
+        title: l('smart.${mode.name}'),
+        subtitleWidget: AnimatedSize(
+          duration: Duration(milliseconds: context.reduceMotion ? 1 : 260),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topLeft,
+          child: selected
+              ? Text(l('smart.${mode.name}.desc'), style: context.t.footnote)
+              : const SizedBox(width: double.infinity),
+        ),
+        trailing: SizedBox(
+          width: 24,
+          child: SpringValue(
+            target: selected ? 1 : 0,
+            spring: Springs.momentum,
+            builder: (context, v, child) => Transform.scale(scale: v.clamp(0.0, 1.2), child: child),
+            child: Icon(Icons.check_rounded, color: c.accent),
+          ),
+        ),
+        onTap: onTap,
+      ),
+    );
   }
 }

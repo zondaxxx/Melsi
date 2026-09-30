@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/country.dart';
 import '../../core/models.dart';
+import '../../l10n/l10n.dart';
 import '../theme/glass.dart';
 import '../theme/pressable.dart';
 import '../theme/theme.dart';
@@ -30,6 +31,28 @@ class SectionHeader extends StatelessWidget {
             ?trailing,
           ],
         ),
+      );
+}
+
+/// Small label at the top of a card ("Сервер", "Трафик"): sentence case,
+/// secondary colour, semibold — the same everywhere.
+class CardLabel extends StatelessWidget {
+  const CardLabel(this.text, {super.key, this.trailing});
+  final String text;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        height: 22,
+        child: Row(children: [
+          Expanded(
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.t.footnote.copyWith(fontWeight: FontWeight.w600)),
+          ),
+          ?trailing,
+        ]),
       );
 }
 
@@ -101,6 +124,7 @@ class RowTile extends StatelessWidget {
     super.key,
     required this.title,
     this.subtitle,
+    this.subtitleWidget,
     this.leading,
     this.trailing,
     this.onTap,
@@ -111,6 +135,7 @@ class RowTile extends StatelessWidget {
 
   final String title;
   final String? subtitle;
+  final Widget? subtitleWidget;
   final Widget? leading;
   final Widget? trailing;
   final VoidCallback? onTap;
@@ -138,6 +163,10 @@ class RowTile extends StatelessWidget {
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
                   Text(subtitle!, style: t.footnote),
+                ],
+                if (subtitleWidget != null) ...[
+                  const SizedBox(height: 3),
+                  subtitleWidget!,
                 ],
               ],
             ),
@@ -242,75 +271,145 @@ class SwitchRow extends StatelessWidget {
       );
 }
 
-/// Pill badge with the protocol name.
+/// Quiet protocol tag. Deliberately neutral: the node name usually already
+/// says the protocol, so the badge is a scannable hint, not a headline.
+/// UDP-native protocols (good for games) get a faint warm tint.
 class ProtocolBadge extends StatelessWidget {
   const ProtocolBadge(this.protocol, {super.key});
   final ProxyProtocol protocol;
 
-  static Color colorFor(ProxyProtocol p, MelsiColors c) => switch (p) {
-        ProxyProtocol.vless || ProxyProtocol.vmess => c.accent,
-        ProxyProtocol.hysteria || ProxyProtocol.hysteria2 || ProxyProtocol.tuic =>
-          const Color(0xFFFF7A1A),
-        ProxyProtocol.trojan || ProxyProtocol.anytls || ProxyProtocol.naive =>
-          const Color(0xFF14A8C9),
-        ProxyProtocol.shadowsocks || ProxyProtocol.shadowsocksr ||
-        ProxyProtocol.shadowtls || ProxyProtocol.snell =>
-          const Color(0xFF2E9E6A),
-        ProxyProtocol.wireguard || ProxyProtocol.openvpn ||
-        ProxyProtocol.openconnect || ProxyProtocol.tailscale =>
-          const Color(0xFFD9468A),
-        _ => c.secondaryLabel,
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final color = colorFor(protocol, context.c);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: ShapeDecoration(
-        color: color.withValues(alpha: context.c.isDark ? 0.2 : 0.12),
-        shape: Radii.shape(Radii.xs),
-      ),
-      child: Text(protocol.label,
-          style: context.t.caption2.copyWith(color: color, letterSpacing: 0.2)),
-    );
-  }
-}
-
-/// Small pill: "42 ms". Colour-coded; shows a spinner while testing.
-class LatencyChip extends StatelessWidget {
-  const LatencyChip({super.key, this.ms, this.testing = false, this.failed = false, this.label});
-  final int? ms;
-  final bool testing;
-  final bool failed;
-  final String? label;
+  static Color colorFor(ProxyProtocol p, MelsiColors c) =>
+      p.udpNative ? const Color(0xFFE8773A) : c.secondaryLabel;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final color = colorFor(protocol, c);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: ShapeDecoration(
+        color: protocol.udpNative
+            ? color.withValues(alpha: c.isDark ? 0.16 : 0.10)
+            : c.fill,
+        shape: Radii.shape(Radii.xs - 1),
+      ),
+      child: Text(protocol.label,
+          style: context.t.caption2.copyWith(
+              color: protocol.udpNative ? color : c.secondaryLabel,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.15)),
+    );
+  }
+}
+
+/// Latency pill: "48 мс" on a soft tint of its quality colour. Unknown shows
+/// a quiet "—" which, when [onTest] is set, is tappable to measure just that
+/// node. Shows a spinner while testing.
+class LatencyChip extends StatelessWidget {
+  const LatencyChip({
+    super.key,
+    this.ms,
+    this.testing = false,
+    this.failed = false,
+    this.label,
+    this.onTest,
+  });
+  final int? ms;
+  final bool testing;
+  final bool failed;
+  final String? label;
+  final VoidCallback? onTest;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final l = context.l;
+    Widget child;
     if (testing) {
-      return const SizedBox(
-          width: 44, child: Center(child: SizedBox.square(dimension: 14, child: CupertinoActivityIndicator(radius: 7))));
+      child = const SizedBox(
+          key: ValueKey('t'),
+          width: 52,
+          height: 24,
+          child: Center(child: CupertinoActivityIndicator(radius: 7)));
+    } else if (ms == null && !failed) {
+      child = Container(
+        key: const ValueKey('u'),
+        width: onTest == null ? 52 : 28,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: onTest == null
+            ? null
+            : BoxDecoration(color: c.fill, shape: BoxShape.circle),
+        child: onTest == null
+            ? Text('—', style: context.t.footnote.copyWith(color: c.tertiaryLabel))
+            : Icon(Icons.speed_rounded, size: 15, color: c.secondaryLabel),
+      );
+      if (onTest != null) {
+        child = Tooltip(
+          key: const ValueKey('u'),
+          message: l('ping.test'),
+          child: PressableScale(scale: 0.9, haptic: true, onTap: onTest, child: child),
+        );
+      }
+    } else {
+      final color = failed ? c.danger : c.latency(ms);
+      child = Container(
+        key: ValueKey('$ms$failed'),
+        height: 24,
+        constraints: const BoxConstraints(minWidth: 52),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        alignment: Alignment.center,
+        decoration: ShapeDecoration(
+          color: color.withValues(alpha: c.isDark ? 0.18 : 0.12),
+          shape: Radii.shape(Radii.pill),
+        ),
+        child: Text(
+          failed ? (label ?? '×') : l('unit.ms', {'n': '$ms'}),
+          style: context.t.mono.copyWith(
+              fontSize: 12.5,
+              color: failed || c.isDark ? color : Color.lerp(color, Colors.black, 0.18)),
+        ),
+      );
+      if (onTest != null) {
+        child = PressableScale(key: child.key, scale: 0.92, onTap: onTest, child: child);
+      }
     }
-    if (ms == null && !failed) {
-      return Text('—', style: context.t.footnote.copyWith(color: c.tertiaryLabel));
-    }
-    final color = failed ? c.danger : c.latency(ms);
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 200),
-      child: Row(
-        key: ValueKey('$ms$failed'),
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 5),
-          Text(failed ? (label ?? '×') : '$ms ms',
-              style: context.t.mono.copyWith(fontSize: 13, color: color)),
-        ],
+      transitionBuilder: (w, a) => FadeTransition(
+          opacity: a, child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(a), child: w)),
+      child: child,
+    );
+  }
+}
+
+/// Evenly spaced live metrics, label over tabular value.
+class MetricsRow extends StatelessWidget {
+  const MetricsRow({super.key, required this.items});
+  final List<(String, String, Color?)> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: Space.s + 2),
+      decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(Radii.m)),
+      child: IntrinsicHeight(
+        child: Row(children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) VerticalDivider(width: 1, thickness: 0.5, color: c.separator, indent: 4, endIndent: 4),
+            Expanded(
+              child: Column(children: [
+                Text(items[i].$1, style: context.t.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(items[i].$2,
+                    maxLines: 1,
+                    style: context.t.mono.copyWith(fontSize: 16, color: items[i].$3 ?? c.label)),
+              ]),
+            ),
+          ],
+        ]),
       ),
     );
   }
@@ -346,7 +445,7 @@ class StatChip extends StatelessWidget {
 
 /// Emoji flags don't render on Windows (no flag glyphs) and are unreliable
 /// on Linux, so there we draw the ISO code instead.
-final bool _emojiFlags = !(Platform.isWindows || Platform.isLinux);
+final bool emojiFlagsSupported = !(Platform.isWindows || Platform.isLinux);
 
 /// Node name without a leading flag emoji (the [FlagBadge] shows it).
 String nodeTitle(ProxyNode n) {
@@ -367,7 +466,7 @@ class FlagBadge extends StatelessWidget {
     Widget inner;
     if (cc == null || cc.length != 2) {
       inner = Icon(Icons.public_rounded, size: size * 0.55, color: c.secondaryLabel);
-    } else if (_emojiFlags) {
+    } else if (emojiFlagsSupported) {
       inner = Text(flagEmoji(cc),
           style: TextStyle(fontSize: size * 0.56, height: 1.1), textAlign: TextAlign.center);
     } else {
@@ -493,13 +592,25 @@ class SecondaryButton extends StatelessWidget {
 
 /// Circular icon button (toolbar actions).
 class CircleIconButton extends StatelessWidget {
-  const CircleIconButton({super.key, required this.icon, this.onTap, this.tooltip, this.color, this.busy = false, this.size = 36});
+  const CircleIconButton({
+    super.key,
+    required this.icon,
+    this.onTap,
+    this.tooltip,
+    this.color,
+    this.busy = false,
+    this.size = 36,
+    this.filled = false,
+  });
   final IconData icon;
   final VoidCallback? onTap;
   final String? tooltip;
   final Color? color;
   final bool busy;
   final double size;
+
+  /// Primary action: accent gradient fill with a white glyph.
+  final bool filled;
 
   @override
   Widget build(BuildContext context) {
@@ -508,13 +619,24 @@ class CircleIconButton extends StatelessWidget {
       onTap: busy ? null : onTap,
       scale: 0.9,
       semanticLabel: tooltip,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(color: c.fill, shape: BoxShape.circle),
-        child: busy
-            ? const CupertinoActivityIndicator(radius: 8)
-            : Icon(icon, size: size * 0.53, color: color ?? c.accent),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 150),
+        opacity: onTap == null && !busy ? 0.4 : 1,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: filled ? null : c.fill,
+            gradient: filled ? c.accentGradient : null,
+            shape: BoxShape.circle,
+            boxShadow: filled
+                ? [BoxShadow(color: c.accent.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 3))]
+                : null,
+          ),
+          child: busy
+              ? CupertinoActivityIndicator(radius: 8, color: filled ? Colors.white : null)
+              : Icon(icon, size: size * 0.53, color: filled ? Colors.white : (color ?? c.accent)),
+        ),
       ),
     );
     if (tooltip != null) w = Tooltip(message: tooltip!, child: w);

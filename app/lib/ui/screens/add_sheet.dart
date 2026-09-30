@@ -14,6 +14,31 @@ import 'qr_scan_screen.dart';
 Future<void> showAddSheet(BuildContext context) =>
     showMelsiSheet(context, builder: (_) => const AddSheet());
 
+/// One-tap import of whatever is on the clipboard (link, subscription URL
+/// or a whole config).
+Future<void> importFromClipboard(BuildContext context) async {
+  final app = context.appRead;
+  final data = await Clipboard.getData(Clipboard.kTextPlain);
+  final text = data?.text ?? '';
+  if (text.trim().isEmpty) {
+    app.notice('notice.clipboardEmpty');
+    return;
+  }
+  final n = await app.importText(text);
+  if (n > 0) HapticFeedback.mediumImpact();
+}
+
+/// Scan a QR code with the camera and import it.
+Future<void> importFromQr(BuildContext context) async {
+  final app = context.appRead;
+  final v = await Navigator.of(context).push<String>(
+    MaterialPageRoute(fullscreenDialog: true, builder: (_) => const QrScanScreen()),
+  );
+  if (v == null) return;
+  final n = await app.importText(v);
+  if (n > 0) HapticFeedback.mediumImpact();
+}
+
 /// Add servers: paste a link / subscription URL, scan a QR (mobile), import
 /// from the clipboard or a file.
 class AddSheet extends StatefulWidget {

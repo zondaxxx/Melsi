@@ -49,6 +49,10 @@ class Notice {
 
 enum NodeSort { none, latency, name }
 
+/// Progress of applying config changes to a running tunnel.
+/// idle → pending (debouncing) → applying → done / failed → idle.
+enum ApplyPhase { idle, pending, applying, done, failed }
+
 /// Selector tags the config builder emits.
 const kProxySelector = 'proxy';
 const kGameSelector = 'game';
@@ -101,6 +105,15 @@ class AppState extends ChangeNotifier {
   final List<int?> gameLatencyHistory = [];
   final List<int?> proxyLatencyHistory = [];
   bool needsReconnect = false;
+
+  /// Config changes made while connected are applied automatically once the
+  /// user stops changing things for [applyDebounce].
+  ApplyPhase applyPhase = ApplyPhase.idle;
+  static const applyDebounce = Duration(milliseconds: 1200);
+  Timer? _applyTimer;
+  Timer? _applyResetTimer;
+  DateTime? _applySince;
+  bool _applyAborted = false;
   BuiltConfig? lastBuilt;
   String? coreVersion;
   final TrafficMonitor traffic = TrafficMonitor();
@@ -118,6 +131,16 @@ class AppState extends ChangeNotifier {
   bool get connected => vpnState.status == VpnStatus.connected;
   bool get busy =>
       vpnState.status == VpnStatus.connecting || vpnState.status == VpnStatus.stopping;
+
+  bool get applying => applyPhase == ApplyPhase.applying;
+
+  /// Status the UI shows. While settings are being applied the tunnel
+  /// restarts under the hood, but to the user it stays connected.
+  VpnStatus get displayStatus =>
+      applying && vpnState.status != VpnStatus.error ? VpnStatus.connected : vpnState.status;
+
+  /// Start of the current session (kept across seamless re-applies).
+  DateTime? get sessionSince => connectedAt ?? (applying ? _applySince : null);
 
   // ============================================================ lifecycle
 
@@ -181,6 +204,8 @@ class AppState extends ChangeNotifier {
     _vpnSub?.cancel();
     _poll?.cancel();
     _notifyTimer?.cancel();
+    _applyTimer?.cancel();
+    _applyResetTimer?.cancel();
     traffic.dispose();
     clash?.close();
     engine?.close();
@@ -564,7 +589,7 @@ class AppState extends ChangeNotifier {
           } catch (_) {}
         }
       } else {
-        needsReconnect = true;
+        _markConfigChanged();
       }
     } else {
       settings.autoSelect = false;
@@ -583,7 +608,7 @@ class AppState extends ChangeNotifier {
         engineGroups[kProxySelector] = await engine!.setAuto(kProxySelector, on);
         notifyListeners();
       } catch (_) {
-        needsReconnect = true;
+        _markConfigChanged();
         notifyListeners();
       }
     }
@@ -597,7 +622,7 @@ class AppState extends ChangeNotifier {
         engineGroups[kProxySelector] = await engine!.setMode(kProxySelector, mode.name);
         notifyListeners();
       } catch (_) {
-        needsReconnect = true;
+        _markConfigChanged();
         notifyListeners();
       }
     }
@@ -617,7 +642,7 @@ class AppState extends ChangeNotifier {
         }
         notifyListeners();
       } catch (_) {
-        needsReconnect = true;
+        _markConfigChanged();
         notifyListeners();
       }
     }
@@ -633,8 +658,8 @@ class AppState extends ChangeNotifier {
 
   // ============================================================ settings
 
-  /// Mutations that change the generated config. While connected they raise
-  /// the "Reconnect to apply" banner.
+  /// Mutations that change the generated config. While connected they are
+  /// applied automatically after a short debounce (see [applyNow]).
   void updateRouting(void Function(RoutingSettings r) f) {
     f(routing);
     _markConfigChanged();
@@ -654,12 +679,113 @@ class AppState extends ChangeNotifier {
   }
 
   void _markConfigChanged() {
-    if (connected || vpnState.status == VpnStatus.connecting) needsReconnect = true;
+    if (connected || vpnState.status == VpnStatus.connecting || applying) {
+      needsReconnect = true;
+      _scheduleApply();
+    }
   }
 
   void dismissReconnect() {
     needsReconnect = false;
+    _applyTimer?.cancel();
+    if (applyPhase == ApplyPhase.pending) applyPhase = ApplyPhase.idle;
     notifyListeners();
+  }
+
+  /// (Re)starts the debounce: every further change pushes the apply back, so
+  /// a burst of edits results in a single restart.
+  void _scheduleApply() {
+    _applyTimer?.cancel();
+    _applyResetTimer?.cancel();
+    if (!applying) applyPhase = ApplyPhase.pending;
+    _applyTimer = Timer(applyDebounce, () => unawaited(applyNow()));
+  }
+
+  /// Applies pending config changes to the running tunnel: a hot reload on
+  /// iOS, a quick stop + start elsewhere. The session timer is preserved.
+  Future<void> applyNow() async {
+    _applyTimer?.cancel();
+    if (!needsReconnect) {
+      if (applyPhase == ApplyPhase.pending) {
+        applyPhase = ApplyPhase.idle;
+        notifyListeners();
+      }
+      return;
+    }
+    if (applying || vpnState.status == VpnStatus.connecting) {
+      // Still settling from the previous start; try again shortly.
+      _applyTimer = Timer(applyDebounce, () => unawaited(applyNow()));
+      return;
+    }
+    if (!connected) {
+      needsReconnect = false;
+      applyPhase = ApplyPhase.idle;
+      notifyListeners();
+      return;
+    }
+    applyPhase = ApplyPhase.applying;
+    _applySince = connectedAt;
+    notifyListeners();
+    var ok = false;
+    try {
+      if (Platform.isIOS && _endpoints != null) {
+        needsReconnect = false;
+        final built = await _build(_endpoints!);
+        lastBuilt = built;
+        await vpn.start(built, name: selectedNode?.name ?? 'Melsi');
+        _startRuntime();
+      } else {
+        _applyAborted = false;
+        needsReconnect = false;
+        await disconnect();
+        await _waitForStatus(
+            (s) => s == VpnStatus.stopped || s == VpnStatus.error, const Duration(seconds: 8));
+        if (!_applyAborted) await connect();
+        await _waitForStatus(
+            (s) => s == VpnStatus.connected || s == VpnStatus.error || s == VpnStatus.stopped,
+            const Duration(seconds: 20));
+      }
+      ok = connected;
+    } catch (e) {
+      notice('notice.applyFailed', kind: NoticeKind.error, detail: _short(e));
+    }
+    if (ok && _applySince != null) connectedAt = _applySince;
+    _applySince = null;
+    applyPhase = ok
+        ? ApplyPhase.done
+        : _applyAborted
+            ? ApplyPhase.idle
+            : ApplyPhase.failed;
+    notifyListeners();
+    if (ok && needsReconnect) {
+      // More edits arrived while we were restarting.
+      _scheduleApply();
+      return;
+    }
+    _applyResetTimer?.cancel();
+    _applyResetTimer = Timer(Duration(milliseconds: ok ? 1600 : 3200), () {
+      if (applyPhase == ApplyPhase.done || applyPhase == ApplyPhase.failed) {
+        applyPhase = ApplyPhase.idle;
+        notifyListeners();
+      }
+    });
+  }
+
+  /// Waits until [vpnState] satisfies [done]. Listens to this notifier (not
+  /// the controller stream) so an event already queued can't be missed.
+  Future<void> _waitForStatus(bool Function(VpnStatus s) done, Duration timeout) async {
+    if (done(vpnState.status)) return;
+    final c = Completer<void>();
+    void check() {
+      if (done(vpnState.status) && !c.isCompleted) c.complete();
+    }
+
+    addListener(check);
+    try {
+      await c.future.timeout(timeout, onTimeout: () {});
+    } finally {
+      removeListener(check);
+    }
   }
 
   // ============================================================ ping
@@ -745,6 +871,13 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> toggle() async {
+    if (applying) {
+      // The user sees "connected" while we restart; a tap means "stop".
+      _applyAborted = true;
+      _applyTimer?.cancel();
+      await disconnect();
+      return;
+    }
     switch (vpnState.status) {
       case VpnStatus.stopped || VpnStatus.error:
         await connect();
@@ -797,16 +930,8 @@ class AppState extends ChangeNotifier {
     needsReconnect = false;
     if (connected || vpnState.status == VpnStatus.connecting) {
       await disconnect();
-      final done = Completer<void>();
-      late StreamSubscription<VpnState> sub;
-      sub = vpn.states.listen((s) {
-        if (s.status == VpnStatus.stopped || s.status == VpnStatus.error) {
-          if (!done.isCompleted) done.complete();
-        }
-      });
-      if (vpnState.status == VpnStatus.stopped) done.complete();
-      await done.future.timeout(const Duration(seconds: 8), onTimeout: () {});
-      await sub.cancel();
+      await _waitForStatus(
+          (s) => s == VpnStatus.stopped || s == VpnStatus.error, const Duration(seconds: 8));
     }
     await connect();
   }
@@ -825,7 +950,11 @@ class AppState extends ChangeNotifier {
       case VpnStatus.stopped:
       case VpnStatus.error:
         connectedAt = null;
-        needsReconnect = false;
+        if (!applying) {
+          needsReconnect = false;
+          _applyTimer?.cancel();
+          if (applyPhase == ApplyPhase.pending) applyPhase = ApplyPhase.idle;
+        }
         _stopRuntime();
         if (s.status == VpnStatus.error && prev != VpnStatus.error &&
             s.message != null && s.message != 'permission' && prev != VpnStatus.connecting) {

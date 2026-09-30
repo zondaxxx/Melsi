@@ -11,9 +11,10 @@ import '../theme/theme.dart';
 ///
 /// * Presses down instantly (spring scale) and fires a haptic on commit.
 /// * Colour/glow spring between states: idle (indigo outline) → connecting
-///   (indigo→violet fill, rotating arc) → connected (green fill, soft
-///   emitting rings). Error tints red.
-/// * Reduced motion: no rotation or rings; state changes cross-fade.
+///   (indigo→violet fill, a breathing indeterminate arc) → connected (green
+///   fill, the ring closes and one soft pulse + a medium haptic confirm it).
+///   Error tints red. No endless looping motion once connected.
+/// * Reduced motion: no rotation or pulse; state changes cross-fade.
 class ConnectButton extends StatefulWidget {
   const ConnectButton({super.key, required this.status, required this.onTap, this.size = 184});
 
@@ -31,7 +32,7 @@ class _ConnectButtonState extends State<ConnectButton> with TickerProviderStateM
   late final AnimationController _spin =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 1400));
   late final AnimationController _pulse =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 2600));
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1100), value: 1);
 
   static double _target(VpnStatus s) => switch (s) {
         VpnStatus.connected => 2,
@@ -52,9 +53,10 @@ class _ConnectButtonState extends State<ConnectButton> with TickerProviderStateM
       _level.springTo(_target(widget.status),
           spring: Springs.of(0.55, 1.0), reduceMotion: context.reduceMotion);
       if (widget.status == VpnStatus.connected) {
-        HapticFeedback.heavyImpact();
+        HapticFeedback.mediumImpact();
+        if (!context.reduceMotion) _pulse.forward(from: 0);
       } else if (widget.status == VpnStatus.error) {
-        HapticFeedback.vibrate();
+        HapticFeedback.heavyImpact();
       }
       _syncLoops();
     }
@@ -68,11 +70,9 @@ class _ConnectButtonState extends State<ConnectButton> with TickerProviderStateM
     } else {
       _spin.stop();
     }
-    if (widget.status == VpnStatus.connected && !reduce) {
-      if (!_pulse.isAnimating) _pulse.repeat();
-    } else {
+    if (widget.status != VpnStatus.connected) {
       _pulse.stop();
-      _pulse.value = 0;
+      _pulse.value = 1;
     }
   }
 
@@ -90,13 +90,13 @@ class _ConnectButtonState extends State<ConnectButton> with TickerProviderStateM
     final s = widget.size;
     final error = widget.status == VpnStatus.error;
     return SizedBox(
-      width: s + 80,
-      height: s + 80,
+      width: s + 64,
+      height: s + 64,
       child: PressableScale(
         scale: 0.94,
         behavior: HitTestBehavior.deferToChild,
         onTap: () {
-          HapticFeedback.mediumImpact();
+          HapticFeedback.lightImpact();
           widget.onTap();
         },
         child: AnimatedBuilder(
@@ -264,21 +264,17 @@ class _RingsPainter extends CustomPainter {
     final center = size.center(Offset.zero);
     final ringR = radius + 13;
 
-    // Emitting rings (connected): two staggered waves, low opacity.
-    if (pulseOn) {
-      for (final phase in [0.0, 0.5]) {
-        final t = (pulse + phase) % 1.0;
-        final eased = Curves.easeOut.transform(t);
-        final r = ringR + 2 + eased * 26;
-        canvas.drawCircle(
-          center,
-          r,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5
-            ..color = color.withValues(alpha: 0.35 * (1 - t) * connected),
-        );
-      }
+    // One soft pulse when the connection is established.
+    if (pulseOn && pulse < 1) {
+      final eased = Curves.easeOutCubic.transform(pulse);
+      canvas.drawCircle(
+        center,
+        ringR + 2 + eased * 18,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2 + 6 * (1 - eased)
+          ..color = color.withValues(alpha: 0.32 * (1 - pulse)),
+      );
     }
 
     // Track.
@@ -293,15 +289,17 @@ class _RingsPainter extends CustomPainter {
 
     final rect = Rect.fromCircle(center: center, radius: ringR);
     if (spinOn) {
-      // Rotating comet arc.
+      // Indeterminate arc: rotates while its length gently breathes.
+      final breathe = math.pow(math.sin(math.pi * spin), 2).toDouble();
+      final sweep = math.pi * (0.35 + 0.75 * breathe);
       canvas.save();
       canvas.translate(center.dx, center.dy);
-      canvas.rotate(spin * 2 * math.pi);
+      canvas.rotate(spin * 2 * math.pi + breathe * 0.8);
       canvas.translate(-center.dx, -center.dy);
       canvas.drawArc(
         rect,
         0,
-        math.pi * 1.1,
+        sweep,
         false,
         Paint()
           ..style = PaintingStyle.stroke
@@ -310,7 +308,7 @@ class _RingsPainter extends CustomPainter {
           ..shader = SweepGradient(
             colors: [color.withValues(alpha: 0), color, accent2],
             stops: const [0.0, 0.6, 1.0],
-            endAngle: math.pi * 1.1,
+            endAngle: sweep,
           ).createShader(rect),
       );
       canvas.restore();

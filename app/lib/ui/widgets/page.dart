@@ -30,7 +30,13 @@ class PageScaffold extends StatelessWidget {
     this.maxContentWidth = 760,
     this.controller,
     this.subtitle,
+    this.compactLeading,
   });
+
+  /// When set, the page uses a compact inline bar showing this widget (e.g.
+  /// a wordmark) instead of a large title. Pass [SizedBox.shrink] on wide
+  /// layouts where the sidebar already carries the brand.
+  final Widget? compactLeading;
 
   final String title;
   final Widget? subtitle;
@@ -51,13 +57,20 @@ class PageScaffold extends StatelessWidget {
         slivers: [
           SliverPersistentHeader(
             pinned: true,
-            delegate: _LargeTitleHeader(
-              title: title,
-              subtitle: subtitle,
-              actions: actions,
-              topPadding: top,
-              hPad: h,
-            ),
+            delegate: compactLeading != null
+                ? _CompactHeader(
+                    leading: compactLeading!,
+                    actions: actions,
+                    topPadding: top,
+                    hPad: h,
+                  )
+                : _LargeTitleHeader(
+                    title: title,
+                    subtitle: subtitle,
+                    actions: actions,
+                    topPadding: top,
+                    hPad: h,
+                  ),
           ),
           for (final s in slivers)
             SliverPadding(padding: EdgeInsets.symmetric(horizontal: h), sliver: s),
@@ -174,6 +187,65 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
       old.topPadding != topPadding ||
       old.hPad != hPad ||
       old.subtitle != subtitle;
+}
+
+/// Compact inline bar (no large title). The material fades in once content
+/// actually scrolls underneath.
+class _CompactHeader extends SliverPersistentHeaderDelegate {
+  _CompactHeader({
+    required this.leading,
+    required this.actions,
+    required this.topPadding,
+    required this.hPad,
+  });
+
+  final Widget leading;
+  final List<Widget> actions;
+  final double topPadding;
+  final double hPad;
+
+  static const _bar = 52.0;
+
+  @override
+  double get minExtent => topPadding + _bar;
+  @override
+  double get maxExtent => topPadding + _bar;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final c = context.c;
+    final p = (shrinkOffset / 16).clamp(0.0, 1.0);
+    return Stack(fit: StackFit.expand, children: [
+      if (p > 0)
+        Opacity(
+          opacity: p,
+          child: const Glass(radius: 0, edge: false, child: SizedBox.expand()),
+        ),
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: Container(height: 0.5, color: c.separator.withValues(alpha: p)),
+      ),
+      Positioned(
+        top: topPadding,
+        left: hPad,
+        right: hPad - 4,
+        height: _bar,
+        child: Row(children: [
+          Expanded(child: Align(alignment: Alignment.centerLeft, child: leading)),
+          for (final a in actions) ...[const SizedBox(width: Space.s), a],
+        ]),
+      ),
+    ]);
+  }
+
+  @override
+  bool shouldRebuild(_CompactHeader old) =>
+      old.leading != leading ||
+      old.actions != actions ||
+      old.topPadding != topPadding ||
+      old.hPad != hPad;
 }
 
 /// Opens [builder] as a bottom sheet on phones and a centred dialog on wide

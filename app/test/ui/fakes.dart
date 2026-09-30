@@ -8,6 +8,11 @@ import 'package:melsi/state/store.dart';
 
 /// In-process VPN that "connects" instantly.
 class FakeVpn extends VpnController {
+  FakeVpn({this.delay = const Duration(milliseconds: 10)});
+
+  /// How long start/stop take (raise it to observe transitional UI).
+  Duration delay;
+  int starts = 0;
   final _ctrl = StreamController<VpnState>.broadcast();
   VpnState state = VpnState.stopped;
   BuiltConfig? started;
@@ -26,15 +31,16 @@ class FakeVpn extends VpnController {
   @override
   Future<void> start(BuiltConfig cfg, {required String name}) async {
     started = cfg;
+    starts++;
     _emit(const VpnState(VpnStatus.connecting));
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+    await Future<void>.delayed(delay);
     _emit(const VpnState(VpnStatus.connected));
   }
 
   @override
   Future<void> stop() async {
     _emit(const VpnState(VpnStatus.stopping));
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+    await Future<void>.delayed(delay);
     _emit(VpnState.stopped);
   }
 

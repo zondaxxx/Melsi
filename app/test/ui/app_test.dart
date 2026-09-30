@@ -58,6 +58,7 @@ void main() {
     await tester.tap(find.text('Серверы'));
     await _settle(tester);
     expect(find.text('Пока нет серверов'), findsOneWidget);
+    expect(find.text('Добавить подписку'), findsOneWidget);
 
     await tester.tap(find.text('Игры'));
     await _settle(tester);
@@ -80,7 +81,7 @@ void main() {
     await tester.tap(find.text('Серверы'));
     await _settle(tester);
 
-    await tester.tap(find.text('Добавить сервер'));
+    await tester.tap(find.text('Добавить подписку'));
     await _settle(tester);
     await tester.enterText(find.byKey(const ValueKey('add-link-field')), kSampleVless);
     await tester.pump();
@@ -107,16 +108,71 @@ void main() {
     await _shutdown(tester, state);
   });
 
-  testWidgets('changing routing while connected asks to reconnect', (tester) async {
-    final state = await _boot(tester);
+  testWidgets('config changes while connected apply themselves after a debounce', (tester) async {
+    final vpn = FakeVpn();
+    final state = await _boot(tester, vpn: vpn);
     await state.importText(kSampleVless);
     state.connect();
     await tester.pump(const Duration(milliseconds: 100));
     expect(state.vpnState.status, VpnStatus.connected, reason: '${state.vpnState}');
+    expect(vpn.starts, 1);
+    final since = state.connectedAt;
+
     state.updateRouting((r) => r.blockAds = !r.blockAds);
-    await _settle(tester);
+    await tester.pump(const Duration(milliseconds: 800));
     expect(state.needsReconnect, isTrue);
-    expect(find.text('Переподключитесь, чтобы применить изменения'), findsOneWidget);
+    expect(state.applyPhase, ApplyPhase.pending);
+
+    // A further edit inside the window pushes the apply back.
+    state.updateRouting((r) => r.bypassLan = !r.bypassLan);
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(vpn.starts, 1, reason: 'still debouncing');
+
+    await tester.pump(const Duration(milliseconds: 500));
+    await _settle(tester);
+    expect(vpn.starts, 2, reason: 'one restart for both edits');
+    expect(state.connected, isTrue);
+    expect(state.needsReconnect, isFalse);
+    expect(state.connectedAt, since, reason: 'session timer survives the re-apply');
+    expect(state.applyPhase, ApplyPhase.done);
+    expect(find.text('Готово'), findsOneWidget);
+    expect(find.text('Переподключитесь, чтобы применить изменения'), findsNothing);
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(state.applyPhase, ApplyPhase.idle);
+    await _shutdown(tester, state);
+  });
+
+  testWidgets('disconnecting cancels a pending apply', (tester) async {
+    final vpn = FakeVpn();
+    final state = await _boot(tester, vpn: vpn);
+    await state.importText(kSampleVless);
+    state.connect();
+    await tester.pump(const Duration(milliseconds: 100));
+    state.updateSettings((s) => s.ipv6 = !s.ipv6);
+    await tester.pump(const Duration(milliseconds: 300));
+    state.disconnect();
+    await tester.pump(const Duration(seconds: 2));
+    expect(vpn.starts, 1);
+    expect(state.vpnState.status, VpnStatus.stopped);
+    expect(state.applyPhase, ApplyPhase.idle);
+    await _shutdown(tester, state);
+  });
+
+  testWidgets('home server card opens the quick switcher', (tester) async {
+    final state = await _boot(tester);
+    await state.importText(kSampleVless);
+    await state.importText(kSampleVless.replaceAll('nl1.example.com', 'de1.example.com').replaceAll('Netherlands', 'Germany'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(state.nodes, hasLength(2));
+    await tester.tap(find.text('Сервер'));
+    await _settle(tester);
+    expect(find.text('Выбор сервера'), findsOneWidget);
+    await tester.tap(find.textContaining('Germany').last);
+    await _settle(tester);
+    expect(state.selectedNode!.name, contains('Germany'));
+    expect(state.settings.autoSelect, isFalse);
+    expect(find.text('Выбор сервера'), findsNothing);
     await _shutdown(tester, state);
   });
 

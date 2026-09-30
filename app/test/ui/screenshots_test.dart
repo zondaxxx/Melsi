@@ -12,6 +12,7 @@ import 'package:melsi/core/models.dart';
 import 'package:melsi/main.dart';
 import 'package:melsi/services/engine_api.dart';
 import 'package:melsi/state/app_state.dart';
+import 'package:melsi/ui/screens/home_screen.dart';
 
 import 'fakes.dart';
 
@@ -89,6 +90,10 @@ Map<String, dynamic> _demo(String theme) {
 void main() {
   final key = GlobalKey();
 
+  setUpAll(() async {
+    if (_out != null) await _loadFonts();
+  });
+
   Future<void> shoot(WidgetTester tester, String name) async {
     final out = _out;
     if (out == null) return;
@@ -107,11 +112,39 @@ void main() {
     }
   }
 
+  /// The visible page's vertical scroll position.
+  ScrollPosition pagePosition(WidgetTester tester) {
+    final page = find.byType(CustomScrollView).hitTestable().first;
+    return tester
+        .state<ScrollableState>(find.descendant(of: page, matching: find.byType(Scrollable)).first)
+        .position;
+  }
+
+  Future<void> shootBottom(WidgetTester tester, String name) async {
+    final pos = pagePosition(tester);
+    pos.jumpTo(pos.maxScrollExtent);
+    await pumpFrames(tester, 4);
+    await shoot(tester, name);
+    pos.jumpTo(0);
+    await pumpFrames(tester, 2);
+  }
+
+  Future<void> closeSheet(WidgetTester tester) async {
+    await tester.state<NavigatorState>(find.byType(Navigator).first).maybePop();
+    await pumpFrames(tester, 6);
+  }
+
+  const sizes = {
+    'phone': Size(390, 844),
+    'small': Size(360, 740),
+    'desktop': Size(1280, 820),
+  };
+
   for (final theme in ['dark', 'light']) {
-    for (final size in [const Size(390, 844), const Size(1280, 820)]) {
-      final tag = '${size.width < 600 ? 'phone' : 'desktop'}_$theme';
+    for (final MapEntry(key: kind, value: size) in sizes.entries) {
+      final tag = '${kind}_$theme';
+      final phone = kind != 'desktop';
       testWidgets('screens $tag', (tester) async {
-        await _loadFonts();
         tester.view.physicalSize = size * 2;
         tester.view.devicePixelRatio = 2;
         addTearDown(tester.view.reset);
@@ -121,11 +154,15 @@ void main() {
         await tester.pumpWidget(RepaintBoundary(key: key, child: MelsiApp(state: state)));
         await pumpFrames(tester);
         await shoot(tester, '${tag}_home');
+        if (phone) await shootBottom(tester, '${tag}_home_bottom');
 
         // Connected, with live data.
         state.connect();
         await pumpFrames(tester, 3);
         state.latencies['n1'] = Latency(48, viaUrl: true, at: DateTime.now());
+        state.latencies['n2'] = Latency(37, viaUrl: true, at: DateTime.now());
+        state.latencies['n3'] = Latency(142, viaUrl: true, at: DateTime.now());
+        state.latencies['n4'] = Latency(null, viaUrl: true, at: DateTime.now());
         state.engineGroups['proxy'] = GroupStatus(
           selector: 'proxy',
           auto: true,
@@ -147,15 +184,34 @@ void main() {
         state.traffic.downTotal = 1843 * 1024 * 1024;
         state.traffic.connections = 27;
         state.connectedAt = DateTime.now().subtract(const Duration(minutes: 12, seconds: 34));
-        state.updateSettings((s) => s.killSwitch = true);
+        // Not a config change for the shots (would trigger an auto-apply).
+        state.updateSettings((s) => s.killSwitch = true, affectsConfig: false);
         await pumpFrames(tester);
         await shoot(tester, '${tag}_home_connected');
+        if (phone) await shootBottom(tester, '${tag}_home_connected_bottom');
+
+        // Quick server switcher.
+        await tester.tap(find.descendant(of: find.byType(HomeScreen), matching: find.text('Frankfurt · Reality')).first);
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${tag}_switcher');
+        await closeSheet(tester);
 
         for (final (tab, label) in [('servers', 'Серверы'), ('routing', 'Маршруты'), ('game', 'Игры'), ('settings', 'Настройки')]) {
           await tester.tap(find.text(label).last);
           await pumpFrames(tester);
           await shoot(tester, '${tag}_$tab');
+          if (phone) await shootBottom(tester, '${tag}_${tab}_bottom');
         }
+
+        // Change a setting while connected: it applies itself.
+        vpn.delay = const Duration(milliseconds: 700);
+        state.updateSettings((s) => s.ipv6 = !s.ipv6);
+        await pumpFrames(tester, 17);
+        await shoot(tester, '${tag}_apply_applying');
+        await pumpFrames(tester, 14);
+        await shoot(tester, '${tag}_apply_done');
+        await pumpFrames(tester, 20);
+        vpn.delay = const Duration(milliseconds: 10);
 
         state.disconnect();
         await pumpFrames(tester, 3);
@@ -163,6 +219,26 @@ void main() {
         await tester.pump(const Duration(seconds: 3));
       }, skip: _out == null);
     }
+
+    testWidgets('empty $theme', (tester) async {
+      tester.view.physicalSize = const Size(390, 844) * 2;
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final state = testState(data: {'settings': {'themeMode': theme, 'locale': 'ru'}});
+      await state.load();
+      await tester.pumpWidget(RepaintBoundary(key: key, child: MelsiApp(state: state)));
+      await pumpFrames(tester);
+      await shoot(tester, 'phone_${theme}_home_empty');
+      await tester.tap(find.text('Серверы').last);
+      await pumpFrames(tester);
+      await shoot(tester, 'phone_${theme}_servers_empty');
+      await tester.tap(find.text('Добавить подписку').first);
+      await pumpFrames(tester, 8);
+      await shoot(tester, 'phone_${theme}_add_sheet');
+      await closeSheet(tester);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3));
+    }, skip: _out == null);
   }
 
   // Keep the RoutingPreset import used even when skipped.

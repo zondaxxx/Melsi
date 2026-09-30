@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/game_presets.dart';
 import '../../core/models.dart';
 import '../../l10n/l10n.dart';
+import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../theme/glass.dart';
@@ -11,10 +11,10 @@ import '../theme/pressable.dart';
 import '../theme/theme.dart';
 import '../widgets/charts.dart';
 import '../widgets/common.dart';
+import '../widgets/format.dart';
 import '../widgets/page.dart';
 import '../widgets/segmented.dart';
 import 'app_picker.dart';
-import 'reconnect_banner.dart';
 
 const _gameA = Color(0xFFFF6A3D);
 const _gameB = Color(0xFFE8457C);
@@ -48,9 +48,8 @@ class _GameScreenState extends State<GameScreen> {
     return PageScaffold(
       title: l('tab.gameTitle'),
       slivers: [
-        const SliverToBoxAdapter(child: ReconnectBanner()),
         SliverToBoxAdapter(child: _Hero(enabled: g.enabled, onChanged: (v) => app.updateGame((x) => x.enabled = v))),
-        if (g.enabled && app.connected)
+        if (g.enabled && app.displayStatus == VpnStatus.connected)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.only(top: Space.m),
@@ -236,89 +235,133 @@ class _GameScreenState extends State<GameScreen> {
 
 // ------------------------------------------------------------------ hero
 
-class _Hero extends StatelessWidget {
+class _Hero extends StatefulWidget {
   const _Hero({required this.enabled, required this.onChanged});
   final bool enabled;
   final ValueChanged<bool> onChanged;
 
   @override
+  State<_Hero> createState() => _HeroState();
+}
+
+/// Compact hero: title + one line + the master switch, decoration kept in
+/// its own corner. The explanation lives behind "How it works".
+class _HeroState extends State<_Hero> {
+  bool _open = false;
+
+  @override
   Widget build(BuildContext context) {
     final l = context.l;
-    return PressableScale(
-      scale: 0.985,
-      onTap: () {
-        HapticFeedback.mediumImpact();
-        onChanged(!enabled);
-      },
-      child: SpringValue(
-        target: enabled ? 1 : 0,
-        builder: (context, v, _) {
-          final t = v.clamp(0.0, 1.0);
-          return Container(
-            decoration: ShapeDecoration(
-              shape: Radii.shape(Radii.xl),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color.lerp(const Color(0xFF2A2440), _gameA, t)!,
-                  Color.lerp(const Color(0xFF231F38), _gameB, t)!,
-                  Color.lerp(const Color(0xFF1B1830), _gameC, t)!,
-                ],
-              ),
-              shadows: [
-                BoxShadow(
-                  color: _gameB.withValues(alpha: 0.18 + 0.22 * t),
-                  blurRadius: 30,
-                  offset: const Offset(0, 12),
-                ),
+    final enabled = widget.enabled;
+    return SpringValue(
+      target: enabled ? 1 : 0,
+      builder: (context, v, _) {
+        final t = v.clamp(0.0, 1.0);
+        return Container(
+          decoration: ShapeDecoration(
+            shape: Radii.shape(Radii.xl),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color.lerp(const Color(0xFF3A3452), _gameA, t)!,
+                Color.lerp(const Color(0xFF302A48), _gameB, t)!,
+                Color.lerp(const Color(0xFF26223C), _gameC, t)!,
               ],
             ),
-            child: ClipRSuperellipse(
-              borderRadius: BorderRadius.circular(Radii.xl),
-              child: Stack(children: [
-                Positioned(
-                  right: -30,
-                  top: -26,
-                  child: Transform.rotate(
-                    angle: -0.25 + 0.1 * t,
-                    child: Icon(Icons.sports_esports_rounded,
-                        size: 170, color: Colors.white.withValues(alpha: 0.08 + 0.06 * t)),
-                  ),
+            shadows: context.c.isDark
+                ? null
+                : [
+                    BoxShadow(
+                      color: _gameB.withValues(alpha: 0.08 + 0.16 * t),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+          ),
+          child: ClipRSuperellipse(
+            borderRadius: BorderRadius.circular(Radii.xl),
+            child: Stack(children: [
+              // Decoration: bottom-right, well clear of the switch.
+              Positioned(
+                right: -18,
+                bottom: -26,
+                child: Transform.rotate(
+                  angle: -0.3 + 0.08 * t,
+                  child: Icon(Icons.sports_esports_rounded,
+                      size: 118, color: Colors.white.withValues(alpha: 0.07 + 0.05 * t)),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(Space.xl),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: ShapeDecoration(
-                          color: Colors.white.withValues(alpha: 0.18),
-                          shape: Radii.shape(Radii.pill),
-                        ),
-                        child: Text(enabled ? l('game.active') : l('game.inactive'),
-                            style: context.t.caption2.copyWith(color: Colors.white, letterSpacing: 0.6)),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.xl, Space.l + 2, Space.l, Space.s),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                      child: PressableScale(
+                        scale: 0.99,
+                        haptic: true,
+                        onTap: () => widget.onChanged(!enabled),
+                        semanticLabel: l('game.heroTitle'),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(l('game.heroTitle'),
+                              style: context.t.title2.copyWith(color: Colors.white)),
+                          const SizedBox(height: 3),
+                          Text(
+                            l('game.heroSub'),
+                            style: context.t.subhead
+                                .copyWith(color: Colors.white.withValues(alpha: 0.85)),
+                          ),
+                        ]),
                       ),
-                      const Spacer(),
-                      MSwitch(value: enabled, onChanged: onChanged, color: Colors.white.withValues(alpha: 0.35)),
-                    ]),
-                    const SizedBox(height: Space.l),
-                    Text(l('game.heroTitle'),
-                        style: context.t.title1.copyWith(color: Colors.white)),
-                    const SizedBox(height: Space.s),
-                    Text(l('game.heroText'),
-                        style: context.t.callout.copyWith(color: Colors.white.withValues(alpha: 0.82))),
-                    const SizedBox(height: Space.l),
-                    _Benefit(icon: Icons.graphic_eq_rounded, text: l('game.benefit1')),
-                    _Benefit(icon: Icons.download_done_rounded, text: l('game.benefit2')),
-                    _Benefit(icon: Icons.bolt_rounded, text: l('game.benefit3')),
+                    ),
+                    const SizedBox(width: Space.m),
+                    MSwitch(
+                      value: enabled,
+                      onChanged: widget.onChanged,
+                      color: Colors.white.withValues(alpha: 0.38),
+                    ),
                   ]),
-                ),
-              ]),
-            ),
-          );
-        },
-      ),
+                  const SizedBox(height: Space.s),
+                  PressableScale(
+                    scale: 0.98,
+                    onTap: () => setState(() => _open = !_open),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: Space.s),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(l('game.howItWorks'),
+                            style: context.t.footnote.copyWith(
+                                color: Colors.white, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 2),
+                        SpringValue(
+                          target: _open ? 0.5 : 0,
+                          builder: (context, v, child) =>
+                              Transform.rotate(angle: v * 3.1416, child: child),
+                          child: const Icon(Icons.expand_more_rounded, size: 18, color: Colors.white),
+                        ),
+                      ]),
+                    ),
+                  ),
+                  AnimatedSize(
+                    duration: Duration(milliseconds: context.reduceMotion ? 1 : 320),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: !_open
+                        ? const SizedBox(width: double.infinity)
+                        : Padding(
+                            padding: const EdgeInsets.only(bottom: Space.m, right: Space.xl),
+                            child: Column(children: [
+                              _Benefit(icon: Icons.graphic_eq_rounded, text: l('game.benefit1')),
+                              _Benefit(icon: Icons.download_done_rounded, text: l('game.benefit2')),
+                              _Benefit(icon: Icons.bolt_rounded, text: l('game.benefit3')),
+                            ]),
+                          ),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      },
     );
   }
 }
@@ -332,17 +375,17 @@ class _Benefit extends StatelessWidget {
         padding: const EdgeInsets.only(top: Space.s),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(
-            width: 26,
-            height: 26,
+            width: 24,
+            height: 24,
             decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), shape: BoxShape.circle),
-            child: Icon(icon, size: 15, color: Colors.white),
+            child: Icon(icon, size: 14, color: Colors.white),
           ),
           const SizedBox(width: Space.m - 2),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Text(text,
-                  style: context.t.subhead.copyWith(color: Colors.white, fontWeight: FontWeight.w500)),
+                  style: context.t.footnote.copyWith(color: Colors.white, fontWeight: FontWeight.w500)),
             ),
           ),
         ]),
@@ -368,8 +411,7 @@ class _GameRoutePanel extends StatelessWidget {
         Row(children: [
           const _LiveDot(),
           const SizedBox(width: Space.s),
-          Text(l('game.route'), style: context.t.headline),
-          const Spacer(),
+          Expanded(child: Text(l('game.route'), style: context.t.headline)),
           Pill(group?.auto == false ? l('game.pinned') : l('game.nodeAuto'),
               icon: group?.auto == false ? Icons.push_pin_rounded : Icons.auto_awesome_rounded,
               color: _gameC),
@@ -391,14 +433,15 @@ class _GameRoutePanel extends StatelessWidget {
             Text(lat == null ? '—' : '$lat',
                 style: context.t.title1.copyWith(
                     color: c.latency(lat), fontFeatures: const [FontFeature.tabularFigures()])),
-            Padding(
-              padding: const EdgeInsets.only(left: 3, top: 8),
-              child: Text('ms', style: context.t.caption),
-            ),
+            if (lat != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 3, top: 8),
+                child: Text(l('unit.ms', {'n': ''}).trim(), style: context.t.caption),
+              ),
           ]),
           const SizedBox(height: Space.m),
           SizedBox(
-            height: 70,
+            height: 56,
             child: CustomPaint(
               size: Size.infinite,
               painter: LatencyChartPainter(
@@ -410,21 +453,28 @@ class _GameRoutePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: Space.m),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            StatChip(icon: Icons.waves_rounded, label: l('stat.jitter'),
-                value: stat?.jitterMs == null ? '—' : '${stat!.jitterMs} ms'),
-            StatChip(
-              icon: Icons.grain_rounded,
-              label: l('stat.loss'),
-              value: stat?.loss == null ? '—' : '${(stat!.loss! * 100).toStringAsFixed(1)}%',
-              color: (stat?.loss ?? 0) > 0.02 ? c.warning : null,
+          MetricsRow(items: [
+            (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
+            (
+              l('stat.loss'),
+              stat?.loss == null ? '—' : formatLoss(stat!.loss!),
+              (stat?.loss ?? 0) > 0.02 ? c.warning : null,
             ),
-            if (stat?.score != null)
-              StatChip(icon: Icons.insights_rounded, label: l('stat.score'), value: stat!.score!.toStringAsFixed(1)),
+            (l('stat.score'), stat?.score == null ? '—' : stat!.score!.toStringAsFixed(1), null),
           ]),
           if (group.lastSwitch?.reason != null) ...[
             const SizedBox(height: Space.m),
-            Text('${l('home.switched')}: ${group.lastSwitch!.reason}', style: context.t.footnote),
+            Text(
+              group.lastSwitch!.at == null
+                  ? l('home.switchedReason', {'reason': group.lastSwitch!.reason!})
+                  : l('home.switchedAgo', {
+                      'ago': formatAgo(l, DateTime.now().difference(group.lastSwitch!.at!)),
+                      'reason': group.lastSwitch!.reason!,
+                    }),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: context.t.footnote,
+            ),
           ],
         ],
       ]),

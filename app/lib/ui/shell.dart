@@ -15,6 +15,7 @@ import 'screens/settings_screen.dart';
 import 'theme/glass.dart';
 import 'theme/pressable.dart';
 import 'theme/theme.dart';
+import 'widgets/apply_toast.dart';
 import 'widgets/common.dart';
 import 'widgets/page.dart';
 
@@ -28,6 +29,9 @@ class ShellNav extends InheritedWidget {
 
   static ShellNav of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<ShellNav>()!;
+
+  static ShellNav? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<ShellNav>();
 
   @override
   bool updateShouldNotify(ShellNav old) => old.current != current;
@@ -100,8 +104,10 @@ class _ShellState extends State<Shell> {
     if (n.kind == NoticeKind.error) HapticFeedback.heavyImpact();
   }
 
+  static const double _barHeight = 60;
+
   static double _tabBarHeight(BuildContext context) =>
-      64 + MediaQuery.paddingOf(context).bottom + Space.s;
+      _barHeight + MediaQuery.paddingOf(context).bottom + Space.s;
 
   void _go(AppTab t) {
     if (t == _tab) return;
@@ -148,7 +154,18 @@ class _ShellState extends State<Shell> {
                           child: ShellInsets(
                             bottom: 0,
                             child: MediaQuery.removePadding(
-                                context: context, removeLeft: true, child: stack),
+                              context: context,
+                              removeLeft: true,
+                              child: Stack(children: [
+                                Positioned.fill(child: stack),
+                                const Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: Space.xxl,
+                                  child: Center(child: ApplyToast()),
+                                ),
+                              ]),
+                            ),
                           ),
                         ),
                       ],
@@ -158,6 +175,12 @@ class _ShellState extends State<Shell> {
                       child: Stack(
                         children: [
                           Positioned.fill(child: stack),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: bottomBar + Space.s,
+                            child: const Center(child: ApplyToast()),
+                          ),
                           Positioned(
                             left: 0,
                             right: 0,
@@ -191,7 +214,8 @@ List<_TabItem> _items(L10n l) => [
       _TabItem(AppTab.settings, Icons.tune_rounded, Icons.tune_rounded, l('tab.settings')),
     ];
 
-/// Floating translucent capsule tab bar with a spring-sliding selection.
+/// Floating translucent capsule tab bar (iOS 26 style): equal-width items,
+/// a soft capsule springs behind the selected item, compact labels.
 class _TabBar extends StatelessWidget {
   const _TabBar({required this.current, required this.onSelect});
   final AppTab current;
@@ -202,49 +226,55 @@ class _TabBar extends StatelessWidget {
     final c = context.c;
     final items = _items(context.l);
     final bottom = MediaQuery.paddingOf(context).bottom;
+    final narrow = MediaQuery.sizeOf(context).width < 380;
     return Padding(
-      padding: EdgeInsets.fromLTRB(Space.m, 0, Space.m, bottom + Space.s),
+      padding: EdgeInsets.fromLTRB(narrow ? Space.s + 2 : Space.m, 0,
+          narrow ? Space.s + 2 : Space.m, bottom + Space.s),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
+          constraints: const BoxConstraints(maxWidth: 480),
           child: Glass(
-            radius: 32,
+            radius: _ShellState._barHeight / 2,
             shadow: true,
             child: SizedBox(
-              height: 64,
+              height: _ShellState._barHeight,
               child: LayoutBuilder(builder: (context, box) {
-                final w = (box.maxWidth - 12) / items.length;
+                const pad = 4.0;
+                final w = (box.maxWidth - pad * 2) / items.length;
                 return Stack(
                   children: [
                     SpringValue(
                       target: current.index.toDouble(),
                       spring: Springs.momentum,
                       builder: (context, v, _) => Positioned(
-                        left: 6 + v * w,
-                        top: 6,
-                        bottom: 6,
-                        width: w,
+                        left: pad + v * w + 1,
+                        top: pad,
+                        bottom: pad,
+                        width: w - 2,
                         child: DecoratedBox(
                           decoration: ShapeDecoration(
                             color: c.isDark
-                                ? Colors.white.withValues(alpha: 0.10)
+                                ? Colors.white.withValues(alpha: 0.11)
                                 : c.accent.withValues(alpha: 0.10),
-                            shape: Radii.shape(26),
+                            shape: Radii.shape(Radii.pill),
                           ),
                         ),
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: pad),
                       child: Row(
                         children: [
                           for (final it in items)
                             Expanded(
-                              child: PressableScale(
-                                scale: 0.9,
-                                semanticLabel: it.label,
-                                onTap: () => onSelect(it.tab),
-                                child: _TabButton(item: it, selected: it.tab == current),
+                              child: Semantics(
+                                selected: it.tab == current,
+                                child: PressableScale(
+                                  scale: 0.88,
+                                  semanticLabel: it.label,
+                                  onTap: () => onSelect(it.tab),
+                                  child: _TabButton(item: it, selected: it.tab == current),
+                                ),
                               ),
                             ),
                         ],
@@ -269,7 +299,7 @@ class _TabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final color = selected ? c.accent : c.secondaryLabel;
+    final color = selected ? c.accent : c.label.withValues(alpha: c.isDark ? 0.62 : 0.55);
     return SizedBox.expand(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -279,14 +309,22 @@ class _TabButton extends StatelessWidget {
             child: Icon(selected ? item.iconActive : item.icon,
                 key: ValueKey(selected), color: color, size: 24),
           ),
-          const SizedBox(height: 2),
-          Text(item.label,
-              maxLines: 1,
-              overflow: TextOverflow.fade,
-              softWrap: false,
-              style: context.t.caption2.copyWith(
-                  color: color, fontSize: 10.5, letterSpacing: 0.1,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600)),
+          const SizedBox(height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(item.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: context.t.caption2.copyWith(
+                      color: color,
+                      fontSize: 11,
+                      height: 1.15,
+                      letterSpacing: 0,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+            ),
+          ),
         ],
       ),
     );
@@ -403,7 +441,7 @@ class _SidebarStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final l = context.l;
-    final s = state.vpnState.status;
+    final s = state.displayStatus;
     final color = switch (s) {
       VpnStatus.connected => c.success,
       VpnStatus.connecting || VpnStatus.stopping => c.warning,
@@ -488,7 +526,7 @@ class _AmbientBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final status = context.app.vpnState.status;
+    final status = context.app.displayStatus;
     final tint = switch (status) {
       VpnStatus.connected => c.success,
       VpnStatus.error => c.danger,

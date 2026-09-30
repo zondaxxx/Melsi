@@ -11,7 +11,6 @@ import '../widgets/common.dart';
 import '../widgets/page.dart';
 import '../widgets/segmented.dart';
 import 'app_picker.dart';
-import 'reconnect_banner.dart';
 
 class RoutingScreen extends StatelessWidget {
   const RoutingScreen({super.key});
@@ -32,13 +31,12 @@ class RoutingScreen extends StatelessWidget {
     return PageScaffold(
       title: l('tab.routing'),
       slivers: [
-        const SliverToBoxAdapter(child: ReconnectBanner()),
         SliverToBoxAdapter(child: SectionHeader(l('routing.preset'), padding: const EdgeInsets.fromLTRB(4, 4, 4, 8))),
         SliverToBoxAdapter(
           child: LayoutBuilder(builder: (context, box) {
             final cols = box.maxWidth >= 620 ? 2 : 1;
             final w = (box.maxWidth - Space.m * (cols - 1)) / cols;
-            return Wrap(spacing: Space.m, runSpacing: Space.m, children: [
+            return Wrap(spacing: Space.m, runSpacing: Space.s, children: [
               for (final p in RoutingPreset.values)
                 SizedBox(
                   width: w,
@@ -120,39 +118,45 @@ class _PresetCard extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.all(Space.l),
+        padding: const EdgeInsets.fromLTRB(Space.m + 2, Space.m, Space.m + 2, Space.m + 2),
         decoration: ShapeDecoration(
           color: selected
-              ? Color.alphaBlend(c.accent.withValues(alpha: c.isDark ? 0.16 : 0.07), c.surface)
+              ? Color.alphaBlend(c.accent.withValues(alpha: c.isDark ? 0.18 : 0.08), c.surface)
               : c.surface,
           shape: Radii.shape(Radii.l,
-              side: BorderSide(color: selected ? c.accent : Colors.transparent, width: 1.5)),
+              side: BorderSide(
+                  color: selected ? c.accent.withValues(alpha: c.isDark ? 0.9 : 0.75) : Colors.transparent,
+                  width: 1.5)),
         ),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 36,
+            height: 36,
             decoration: ShapeDecoration(
               shape: Radii.shape(12),
               gradient: selected ? c.accentGradient : null,
               color: selected ? null : c.fill,
             ),
             child: Icon(RoutingScreen.presetIcon(preset),
-                color: selected ? Colors.white : c.secondaryLabel, size: 21),
+                color: selected ? Colors.white : c.secondaryLabel, size: 19),
           ),
           const SizedBox(width: Space.m),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l('preset.${preset.name}'), style: context.t.headline),
-              const SizedBox(height: 3),
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Text(l('preset.${preset.name}'),
+                    style: context.t.headline.copyWith(color: selected ? c.accent : c.label)),
+              ),
+              const SizedBox(height: 2),
               Text(l('preset.${preset.name}.desc'), style: context.t.footnote),
             ]),
           ),
           const SizedBox(width: Space.s),
-          AnimatedScale(
-            scale: selected ? 1 : 0,
-            duration: const Duration(milliseconds: 240),
-            curve: Curves.easeOutBack,
+          SpringValue(
+            target: selected ? 1 : 0,
+            spring: Springs.momentum,
+            builder: (context, v, child) => Transform.scale(scale: v.clamp(0.0, 1.2), child: child),
             child: Icon(Icons.check_circle_rounded, color: c.accent, size: 22),
           ),
         ]),
