@@ -89,7 +89,9 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
   /// Hairline dividers and panel borders.
   final Color separator;
 
-  /// The one accent: primary action, selection, links.
+  /// The one accent: primary action, selection, links. One pigment in both
+  /// themes — burnt orange — lifted only as far as white text on it needs
+  /// (light `#C2410C`, dark `#D4562A`); any lighter and it drifts to coral.
   final Color accent;
   final Color onAccent;
 
@@ -99,6 +101,10 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
   final Color danger;
 
   bool get isDark => brightness == Brightness.dark;
+
+  /// Off-state switch track: the strong fill, a step stronger in dark where
+  /// 13% on a card all but disappears.
+  Color get offTrack => isDark ? label.withValues(alpha: 0.22) : fillStrong;
 
   /// Latency colour: green < 100ms, amber < 250ms, red otherwise.
   Color latency(int? ms) {
@@ -119,7 +125,7 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
     secondaryLabel: Color(0x9E1B1A17),
     tertiaryLabel: Color(0x661B1A17),
     separator: Color(0x1F1B1A17),
-    accent: Color(0xFFC24E1C),
+    accent: Color(0xFFC2410C),
     onAccent: Color(0xFFFFFFFF),
     success: Color(0xFF1E8A4E),
     warning: Color(0xFF9A6B00),
@@ -137,8 +143,8 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
     secondaryLabel: Color(0xA3ECE8E1),
     tertiaryLabel: Color(0x66ECE8E1),
     separator: Color(0x1FECE8E1),
-    accent: Color(0xFFE8763A),
-    onAccent: Color(0xFF1B120C),
+    accent: Color(0xFFD4562A),
+    onAccent: Color(0xFFFFFFFF),
     success: Color(0xFF4CC272),
     warning: Color(0xFFE0B23E),
     danger: Color(0xFFEE6A5C),

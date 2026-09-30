@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -52,11 +53,15 @@ class _AddSheetState extends State<AddSheet> {
   final _ctrl = TextEditingController();
   final _name = TextEditingController();
   bool _busy = false;
+  bool _formats = false;
+  late final _formatsTap = TapGestureRecognizer()
+    ..onTap = () => setState(() => _formats = true);
 
   @override
   void dispose() {
     _ctrl.dispose();
     _name.dispose();
+    _formatsTap.dispose();
     super.dispose();
   }
 
@@ -115,70 +120,102 @@ class _AddSheetState extends State<AddSheet> {
   Widget build(BuildContext context) {
     final l = context.l;
     final mobile = Platform.isAndroid || Platform.isIOS;
+    // The header sits at the sheet edge (its own 16px gutter); only the
+    // body is padded, so title and cards share one left edge.
     return SafeArea(
       top: false,
       child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-            Space.l, 0, Space.l, Space.l + MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.only(bottom: Space.l + MediaQuery.viewInsetsOf(context).bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SheetHeader(title: l('add.title')),
-            Row(children: [
-              Expanded(
-                child: _Source(
-                  icon: Icons.content_paste_rounded,
-                  label: l('add.clipboard'),
-                  onTap: _busy ? null : _paste,
-                ),
-              ),
-              if (mobile) ...[
-                const SizedBox(width: Space.s),
-                Expanded(
-                  child: _Source(
-                    icon: Icons.qr_code_scanner_rounded,
-                    label: l('add.scan'),
-                    onTap: _busy ? null : _scan,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.l),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [
+                    Expanded(
+                      child: _Source(
+                        icon: Icons.content_paste_rounded,
+                        label: l('add.clipboard'),
+                        onTap: _busy ? null : _paste,
+                      ),
+                    ),
+                    if (mobile) ...[
+                      const SizedBox(width: Space.s),
+                      Expanded(
+                        child: _Source(
+                          icon: Icons.qr_code_scanner_rounded,
+                          label: l('add.scan'),
+                          onTap: _busy ? null : _scan,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: Space.s),
+                    Expanded(
+                      child: _Source(
+                        icon: Icons.folder_open_outlined,
+                        label: l('add.file'),
+                        onTap: _busy ? null : _file,
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: Space.xxl),
+                  // Same 4px inset as every section label on the pages.
+                  Padding(
+                    padding: const EdgeInsets.only(left: Space.xs),
+                    child: Overline(l('add.manual')),
                   ),
-                ),
-              ],
-              const SizedBox(width: Space.s),
-              Expanded(
-                child: _Source(
-                  icon: Icons.folder_open_outlined,
-                  label: l('add.file'),
-                  onTap: _busy ? null : _file,
-                ),
+                  const SizedBox(height: Space.s + 2),
+                  TextField(
+                    key: const ValueKey('add-link-field'),
+                    controller: _ctrl,
+                    minLines: 3,
+                    maxLines: 6,
+                    style: context.t.mono,
+                    decoration: InputDecoration(hintText: l('add.hint')),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: Space.s),
+                  TextField(
+                    controller: _name,
+                    style: context.t.callout,
+                    decoration: InputDecoration(hintText: l('add.nameHint')),
+                  ),
+                  const SizedBox(height: Space.s + 2),
+                  // One-line helper; the full format list unfolds on demand so
+                  // it never competes with the input.
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: Space.xs),
+                    child: _formats
+                        ? Text(l('add.formatsList'), style: context.t.footnote)
+                        : Text.rich(
+                            TextSpan(children: [
+                              TextSpan(text: '${l('add.supported')} · '),
+                              TextSpan(
+                                // Kept on one line as a single link.
+                                text: l('add.formats').replaceAll(' ', '\u00A0'),
+                                recognizer: _formatsTap,
+                                style: TextStyle(color: context.c.label),
+                              ),
+                            ]),
+                            style: context.t.footnote,
+                          ),
+                  ),
+                  const SizedBox(height: Space.l),
+                  PrimaryButton(
+                    key: const ValueKey('add-submit'),
+                    label: l('add.submit'),
+                    expand: true,
+                    busy: _busy,
+                    onTap: _ctrl.text.trim().isEmpty ? null : () => _import(_ctrl.text),
+                  ),
+                ],
               ),
-            ]),
-            const SizedBox(height: Space.xxl),
-            Overline(l('add.manual')),
-            const SizedBox(height: Space.s + 2),
-            TextField(
-              key: const ValueKey('add-link-field'),
-              controller: _ctrl,
-              minLines: 3,
-              maxLines: 6,
-              style: context.t.mono,
-              decoration: InputDecoration(hintText: l('add.hint')),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: Space.s),
-            TextField(
-              controller: _name,
-              style: context.t.callout,
-              decoration: InputDecoration(hintText: l('add.nameHint')),
-            ),
-            const SizedBox(height: Space.s + 2),
-            Text(l('add.supported'), style: context.t.caption),
-            const SizedBox(height: Space.l),
-            PrimaryButton(
-              key: const ValueKey('add-submit'),
-              label: l('add.submit'),
-              expand: true,
-              busy: _busy,
-              onTap: _ctrl.text.trim().isEmpty ? null : () => _import(_ctrl.text),
             ),
           ],
         ),

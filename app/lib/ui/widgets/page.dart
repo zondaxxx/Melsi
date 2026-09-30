@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
@@ -106,10 +107,18 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
   @override
   double get maxExtent => topPadding + _bar + _large;
 
+  /// Height of the tool buttons that sit on the title row.
+  static const _actionSize = 36.0;
+
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     final p = (shrinkOffset / _large).clamp(0.0, 1.0);
     final inlineOpacity = ((p - 0.55) / 0.45).clamp(0.0, 1.0);
+    final titleTop = topPadding + _bar - shrinkOffset.clamp(0, _large) * 0.35;
+    // Title line is ~32px; the actions are vertically centred on it, then
+    // glide up into the inline bar as the title collapses.
+    final actionsTop = lerpDouble(titleTop - 2, topPadding + (_bar - _actionSize) / 2, p)!;
+    final actionsWidth = actions.isEmpty ? 0.0 : actions.length * (_actionSize + Space.s);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -119,28 +128,24 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
         Positioned(
           top: topPadding,
           left: hPad,
-          right: hPad,
+          right: hPad + actionsWidth,
           height: _bar,
-          child: Row(
-            children: [
-              Expanded(
-                child: Opacity(
-                  opacity: inlineOpacity,
-                  child: Text(title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.t.headline),
-                ),
-              ),
-              for (final a in actions) ...[const SizedBox(width: Space.s), a],
-            ],
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Opacity(
+              opacity: inlineOpacity,
+              child: Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.t.headline),
+            ),
           ),
         ),
         // Large title, slides up under the bar and fades.
         Positioned(
           left: hPad,
-          right: hPad,
-          top: topPadding + _bar - shrinkOffset.clamp(0, _large) * 0.35,
+          right: hPad + actionsWidth,
+          top: titleTop,
           child: IgnorePointer(
             child: Opacity(
               opacity: (1 - p * 1.6).clamp(0.0, 1.0),
@@ -161,6 +166,19 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
             ),
           ),
         ),
+        // Tool buttons: on the title row at rest, in the bar when collapsed.
+        if (actions.isNotEmpty)
+          Positioned(
+            right: hPad,
+            top: actionsTop,
+            height: _actionSize,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final a in actions) ...[const SizedBox(width: Space.s), a],
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -272,16 +290,24 @@ Future<T?> showMelsiSheet<T>(BuildContext context,
   );
 }
 
-/// Standard sheet header: title + optional close / done.
+/// Standard sheet header: title + optional close / done. It always sits at
+/// the sheet's edge — never inside a padded body — so the title lands flush
+/// on the same 16px gutter as the cards below and the 32px close button's
+/// glyph ends on the cards' right edge.
 class SheetHeader extends StatelessWidget {
   const SheetHeader({super.key, required this.title, this.trailing, this.leading});
   final String title;
   final Widget? trailing;
   final Widget? leading;
 
+  /// Trailing controls are 32px squares around a 20px glyph: pull the row
+  /// in by the 6px of dead space so the glyph aligns with the content edge.
+  static const double _trailingBleed = (SheetClose.size - 20) / 2;
+
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m),
+        padding: const EdgeInsets.fromLTRB(
+            Space.l, Space.m, Space.l - _trailingBleed, Space.m),
         child: Row(
           children: [
             ?leading,
@@ -295,11 +321,12 @@ class SheetHeader extends StatelessWidget {
 /// Quiet close control for sheets.
 class SheetClose extends StatelessWidget {
   const SheetClose({super.key});
+  static const double size = 32;
   @override
   Widget build(BuildContext context) => IconButton(
         onPressed: () => Navigator.of(context).maybePop(),
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        constraints: const BoxConstraints.tightFor(width: size, height: size),
         icon: Icon(Icons.close_rounded, size: 20, color: context.c.secondaryLabel),
       );
 }

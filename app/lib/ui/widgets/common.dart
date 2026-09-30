@@ -137,6 +137,8 @@ class RowTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: t.body.copyWith(color: destructive ? c.danger : c.label)),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
@@ -203,7 +205,8 @@ class _HighlightState extends State<_Highlight> {
 }
 
 /// Switch (with a light haptic on flip). "On" is the accent: it is an
-/// interactive state, not a health signal.
+/// interactive state, not a health signal. The off track is a touch
+/// stronger than the neutral fill in dark so it stays visible on a card.
 class MSwitch extends StatelessWidget {
   const MSwitch({super.key, required this.value, required this.onChanged, this.color});
   final bool value;
@@ -213,8 +216,9 @@ class MSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) => CupertinoSwitch(
         value: value,
+        thumbColor: Colors.white,
         activeTrackColor: color ?? context.c.accent,
-        inactiveTrackColor: context.c.fillStrong,
+        inactiveTrackColor: context.c.offTrack,
         onChanged: onChanged == null
             ? null
             : (v) {
@@ -303,9 +307,9 @@ class LatencyChip extends StatelessWidget {
         height: 22,
         child: Align(
           alignment: Alignment.centerRight,
-          child: onTest == null
-              ? Text('—', style: context.t.mono.copyWith(color: c.tertiaryLabel))
-              : Icon(Icons.speed_rounded, size: 16, color: c.tertiaryLabel),
+          // Unmeasured is a dash in muted mono, tappable when [onTest] is
+          // set — the same idiom as every other unknown value.
+          child: Text('—', style: context.t.mono.copyWith(color: c.tertiaryLabel)),
         ),
       );
       if (onTest != null) {
@@ -316,6 +320,7 @@ class LatencyChip extends StatelessWidget {
         );
       }
     } else {
+      // Numbers are mono; a *word* ("Нет ответа") is set in the UI sans.
       final color = failed ? c.danger : c.latency(ms);
       child = SizedBox(
         key: ValueKey('$ms$failed'),
@@ -325,7 +330,9 @@ class LatencyChip extends StatelessWidget {
           child: Text(
             failed ? (label ?? '×') : l('unit.ms', {'n': '$ms'}),
             maxLines: 1,
-            style: context.t.mono.copyWith(fontSize: size, color: color),
+            style: failed
+                ? context.t.caption.copyWith(fontSize: size, color: color, fontWeight: FontWeight.w500)
+                : context.t.mono.copyWith(fontSize: size, color: color),
           ),
         ),
       );
@@ -342,7 +349,11 @@ class LatencyChip extends StatelessWidget {
 }
 
 /// Metrics in columns: overline label over a tabular mono value, separated
-/// by hairlines. No fill — the type does the work.
+/// by hairlines. No fill — the type does the work. A label that does not
+/// fit its column (360px phones) scales down a step rather than truncating.
+/// One rule for units everywhere: the number carries the colour, a trailing
+/// unit ("мс", "ГБ") is set in the same mono a step quieter; a lone dash
+/// means "no data" and is tertiary.
 class MetricsRow extends StatelessWidget {
   const MetricsRow({super.key, required this.items, this.large = false});
   final List<(String, String, Color?)> items;
@@ -362,20 +373,43 @@ class MetricsRow extends StatelessWidget {
           ],
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Overline(items[i].$1),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Overline(items[i].$1),
+                ),
+              ),
               const SizedBox(height: 4),
-              Text(items[i].$2,
-                  maxLines: 1,
-                  overflow: TextOverflow.fade,
-                  softWrap: false,
-                  style: (large ? t.monoLarge : t.mono.copyWith(fontSize: 15))
-                      .copyWith(color: items[i].$3 ?? c.label)),
+              _metric(items[i].$2, (large ? t.monoLarge : t.mono.copyWith(fontSize: 15)),
+                  items[i].$3 ?? c.label, c.tertiaryLabel),
             ]),
           ),
         ],
       ]),
     );
   }
+}
+
+/// "48 мс" → number in [color], unit in [unitColor]; "—" alone in [unitColor].
+Widget _metric(String value, TextStyle style, Color color, Color unitColor) {
+  if (value == '—') {
+    return Text(value, maxLines: 1, softWrap: false, style: style.copyWith(color: unitColor));
+  }
+  final sp = value.lastIndexOf(' ');
+  final split = sp > 0 && RegExp(r'^[\d.,:]+$').hasMatch(value.substring(0, sp));
+  return Text.rich(
+    split
+        ? TextSpan(children: [
+            TextSpan(text: value.substring(0, sp), style: style.copyWith(color: color)),
+            TextSpan(text: value.substring(sp), style: style.copyWith(color: unitColor)),
+          ])
+        : TextSpan(text: value, style: style.copyWith(color: color)),
+    maxLines: 1,
+    overflow: TextOverflow.fade,
+    softWrap: false,
+  );
 }
 
 /// Emoji flags don't render on Windows (no flag glyphs) and are unreliable
@@ -415,7 +449,9 @@ class CountryCode extends StatelessWidget {
   }
 }
 
-/// Primary call-to-action: solid accent, no shadow.
+/// Primary call-to-action: solid accent, no shadow. Disabled it drops to the
+/// neutral strong fill with tertiary text, so the accent never appears
+/// washed out as a third colour.
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
     super.key,
@@ -435,33 +471,33 @@ class PrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final enabled = onTap != null && !busy;
+    final live = enabled || busy;
+    final fg = live ? c.onAccent : c.tertiaryLabel;
     return PressableScale(
       onTap: enabled ? onTap : null,
       haptic: true,
       scale: 0.98,
-      child: AnimatedOpacity(
+      child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        opacity: enabled || busy ? 1 : 0.45,
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: Space.xl),
-          decoration: ShapeDecoration(color: c.accent, shape: Radii.shape(Radii.m - 2)),
-          child: Row(
-            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (busy)
-                CupertinoActivityIndicator(color: c.onAccent, radius: 8)
-              else if (icon != null)
-                Icon(icon, color: c.onAccent, size: 18),
-              if (busy || icon != null) const SizedBox(width: Space.s),
-              Flexible(
-                child: Text(label,
-                    overflow: TextOverflow.ellipsis,
-                    style: context.t.subhead.copyWith(color: c.onAccent, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+        decoration: ShapeDecoration(
+            color: live ? c.accent : c.fillStrong, shape: Radii.shape(Radii.m - 2)),
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (busy)
+              CupertinoActivityIndicator(color: c.onAccent, radius: 8)
+            else if (icon != null)
+              Icon(icon, color: fg, size: 18),
+            if (busy || icon != null) const SizedBox(width: Space.s),
+            Flexible(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.t.subhead.copyWith(color: fg, fontWeight: FontWeight.w600)),
+            ),
+          ],
         ),
       ),
     );
@@ -531,6 +567,7 @@ class ToolButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final enabled = onTap != null && !busy;
     Widget w = PressableScale(
       onTap: busy ? null : onTap,
       scale: 0.92,
@@ -538,17 +575,27 @@ class ToolButton extends StatelessWidget {
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 150),
         opacity: onTap == null && !busy ? 0.4 : 1,
-        child: Container(
-          width: size,
-          height: size,
-          decoration: ShapeDecoration(
-            color: filled ? c.accent : c.surface,
-            shape: Radii.shape(Radii.s + 1,
-                side: filled ? BorderSide.none : BorderSide(color: c.separator, width: kHairline)),
+        child: Hoverable(
+          enabled: enabled,
+          builder: (context, hovered, pressed) => AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width: size,
+            height: size,
+            decoration: ShapeDecoration(
+              color: filled
+                  ? (pressed
+                      ? Color.alphaBlend(Colors.black.withValues(alpha: 0.12), c.accent)
+                      : hovered
+                          ? Color.alphaBlend(Colors.white.withValues(alpha: 0.08), c.accent)
+                          : c.accent)
+                  : interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
+              shape: Radii.shape(Radii.s + 1,
+                  side: filled ? BorderSide.none : BorderSide(color: c.separator, width: kHairline)),
+            ),
+            child: busy
+                ? CupertinoActivityIndicator(radius: 7, color: filled ? c.onAccent : null)
+                : Icon(icon, size: size * 0.56, color: filled ? c.onAccent : (color ?? c.label)),
           ),
-          child: busy
-              ? CupertinoActivityIndicator(radius: 7, color: filled ? c.onAccent : null)
-              : Icon(icon, size: size * 0.56, color: filled ? c.onAccent : (color ?? c.label)),
         ),
       ),
     );
@@ -624,7 +671,14 @@ class PressableScaleCard extends StatelessWidget {
         child: AnimatedOpacity(
           duration: const Duration(milliseconds: 150),
           opacity: onTap == null ? 0.5 : 1,
-          child: Panel(padding: padding, child: child),
+          child: Hoverable(
+            enabled: onTap != null,
+            builder: (context, hovered, pressed) => Panel(
+              padding: padding,
+              color: interactiveSurface(context.c, context.c.surface, hovered: hovered, pressed: pressed),
+              child: child,
+            ),
+          ),
         ),
       );
 }

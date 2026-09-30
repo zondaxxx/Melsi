@@ -84,9 +84,14 @@ class _Notice extends StatelessWidget {
       decoration: ShapeDecoration(
         color: c.surfaceRaised,
         shape: Radii.shape(Radii.m, side: BorderSide(color: c.separator, width: kHairline)),
-        shadows: c.isDark
-            ? null
-            : [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 12, offset: const Offset(0, 4))],
+        // A soft drop shadow in both themes: the notice floats over page
+        // content and must separate from a card edge it happens to cross.
+        shadows: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: c.isDark ? 0.45 : 0.08),
+              blurRadius: 14,
+              offset: const Offset(0, 4)),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.m, Space.s + 1, Space.l, Space.s + 1),

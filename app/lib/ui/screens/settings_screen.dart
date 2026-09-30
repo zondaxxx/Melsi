@@ -11,7 +11,6 @@ import '../../l10n/l10n.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
-import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/page.dart';
@@ -49,19 +48,15 @@ class SettingsScreen extends StatelessWidget {
                   : t.callout.copyWith(color: c.secondaryLabel)),
         );
 
-    /// A labelled segmented control inside a panel.
-    Widget choice(String label, Widget control, String? desc) => Panel(
-          padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.l),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Overline(label),
-            const SizedBox(height: Space.s + 2),
-            control,
-            if (desc != null) ...[
-              const SizedBox(height: Space.s + 2),
-              Text(desc, style: t.footnote),
-            ],
-          ]),
-        );
+    /// A segmented control as its own small section: label, control,
+    /// helper — bare on the page like the routing preset on Home. Controls
+    /// are never nested inside a card.
+    Widget choice(String label, Widget control, String? desc) =>
+        Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SectionHeader(label),
+          control,
+          if (desc != null) SectionFooter(desc),
+        ]);
 
     return PageScaffold(
       title: l('tab.settings'),
@@ -90,7 +85,7 @@ class SettingsScreen extends StatelessWidget {
               ),
           ]),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
+        SliverToBoxAdapter(child: SectionHeader(l('settings.probe'))),
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
@@ -112,7 +107,7 @@ class SettingsScreen extends StatelessWidget {
             if (app.displayStatus == VpnStatus.connected && s.autoSelect)
               RowTile(
                 title: l('settings.probeNow'),
-                trailing: Icon(Icons.refresh_rounded, size: 18, color: c.accent),
+                trailing: Icon(Icons.refresh_rounded, size: 18, color: c.secondaryLabel),
                 onTap: () {
                   HapticFeedback.lightImpact();
                   app.probeNow();
@@ -142,7 +137,6 @@ class SettingsScreen extends StatelessWidget {
         ),
         SliverToBoxAdapter(child: SectionFooter(l('settings.dnsHint'))),
         // ------------------------------------------------ network
-        SliverToBoxAdapter(child: SectionHeader(l('settings.network'))),
         if (app.isDesktopPlatform) ...[
           SliverToBoxAdapter(
             child: choice(
@@ -158,7 +152,6 @@ class SettingsScreen extends StatelessWidget {
               l('capture.${s.captureMode.name}.desc'),
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
         ],
         SliverToBoxAdapter(
           child: choice(
@@ -175,7 +168,7 @@ class SettingsScreen extends StatelessWidget {
             l('stack.${s.tunStack.name}.desc'),
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
+        SliverToBoxAdapter(child: SectionHeader(l('settings.network'))),
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
@@ -222,39 +215,38 @@ class SettingsScreen extends StatelessWidget {
           ]),
         ),
         // ------------------------------------------------ app
-        SliverToBoxAdapter(child: SectionHeader(l('settings.app'))),
         SliverToBoxAdapter(
-          child: Panel(
-            padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.l),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Overline(l('settings.theme')),
-              const SizedBox(height: Space.s + 2),
-              Segmented<String>(
-                value: s.themeMode,
-                onChanged: (v) => app.updateSettings((x) => x.themeMode = v, affectsConfig: false),
-                segments: [
-                  Segment('system', l('theme.system')),
-                  Segment('light', l('theme.light')),
-                  Segment('dark', l('theme.dark')),
-                ],
-              ),
-              const SizedBox(height: Space.l),
-              Overline(l('settings.language')),
-              const SizedBox(height: Space.s + 2),
-              Segmented<String>(
-                value: s.locale ?? 'system',
-                onChanged: (v) => app.updateSettings((x) => x.locale = v == 'system' ? null : v,
-                    affectsConfig: false),
-                segments: [
-                  Segment('system', l('theme.system')),
-                  const Segment('ru', 'Русский'),
-                  const Segment('en', 'English'),
-                ],
-              ),
-            ]),
+          child: choice(
+            l('settings.theme'),
+            Segmented<String>(
+              value: s.themeMode,
+              onChanged: (v) => app.updateSettings((x) => x.themeMode = v, affectsConfig: false),
+              segments: [
+                Segment('system', l('theme.system')),
+                Segment('light', l('theme.light')),
+                Segment('dark', l('theme.dark')),
+              ],
+            ),
+            null,
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
+        SliverToBoxAdapter(
+          child: choice(
+            l('settings.language'),
+            Segmented<String>(
+              value: s.locale ?? 'system',
+              onChanged: (v) => app.updateSettings((x) => x.locale = v == 'system' ? null : v,
+                  affectsConfig: false),
+              segments: [
+                Segment('system', l('theme.system')),
+                const Segment('ru', 'Русский'),
+                const Segment('en', 'English'),
+              ],
+            ),
+            null,
+          ),
+        ),
+        SliverToBoxAdapter(child: SectionHeader(l('settings.app'))),
         SliverToBoxAdapter(
           child: GroupCard(children: [
             SwitchRow(
@@ -271,10 +263,11 @@ class SettingsScreen extends StatelessWidget {
                 itemBuilder: (_) => [
                   for (final v in LogLevel.values) PopupMenuItem(value: v, child: Text(v.name)),
                 ],
+                // Same chevron as every other row-opening picker.
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   value(s.logLevel.name, mono: true),
-                  const SizedBox(width: 2),
-                  Icon(Icons.unfold_more_rounded, size: 16, color: c.tertiaryLabel),
+                  const SizedBox(width: Space.s),
+                  Icon(Icons.chevron_right_rounded, size: 18, color: c.tertiaryLabel),
                 ]),
               ),
             ),
@@ -308,9 +301,12 @@ class SettingsScreen extends StatelessWidget {
             ),
             RowTile(
               title: l('settings.core'),
-              trailing: value(
-                  app.coreVersion ?? (app.isDesktopPlatform ? l('settings.coreMissing') : 'sing-box 1.14'),
-                  mono: true),
+              // A missing core is a fault, not a value: the same small red
+              // status text the latency column uses for "Нет ответа".
+              trailing: app.coreVersion == null && app.isDesktopPlatform
+                  ? Text(l('settings.coreMissing'),
+                      style: t.caption.copyWith(fontSize: 13, color: c.danger))
+                  : value(app.coreVersion ?? 'sing-box 1.14', mono: true),
             ),
           ]),
         ),
@@ -355,8 +351,9 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-/// One option of the smart-selection mode: a radio row. Only the selected
-/// option shows its description, so the list stays short.
+/// One option of the smart-selection mode: a radio row with its one-line
+/// description, so every row has the same height and the list keeps its
+/// rhythm.
 class _ModeRow extends StatelessWidget {
   const _ModeRow({required this.mode, required this.selected, required this.onTap});
   final SmartMode mode;
@@ -374,14 +371,7 @@ class _ModeRow extends StatelessWidget {
         dense: true,
         leading: const SizedBox(width: Space.s),
         title: l('smart.${mode.name}'),
-        subtitleWidget: AnimatedSize(
-          duration: Duration(milliseconds: context.reduceMotion ? 1 : 240),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topLeft,
-          child: selected
-              ? Text(l('smart.${mode.name}.desc'), style: context.t.footnote)
-              : const SizedBox(width: double.infinity),
-        ),
+        subtitle: l('smart.${mode.name}.desc'),
         trailing: SizedBox(
           width: 22,
           child: SpringValue(

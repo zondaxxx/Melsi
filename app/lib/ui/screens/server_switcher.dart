@@ -45,11 +45,20 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
     final app = context.app;
     final l = context.l;
     final c = context.c;
+    // Sorted by latency, with the active server pinned first so the list
+    // never opens with "my server" in second place.
     final nodes = app.filteredNodes(query: _search.text, sort: NodeSort.latency);
     final auto = app.settings.autoSelect;
     final current = app.activeNode;
+    if (app.connected && current != null) {
+      final i = nodes.indexWhere((n) => n.id == current.id);
+      if (i > 0) nodes.insert(0, nodes.removeAt(i));
+    }
+    // In the desktop dialog the sheet sizes to its content instead of
+    // filling the dialog's maximum height.
+    final wide = context.isWide;
 
-    return Column(children: [
+    return Column(mainAxisSize: MainAxisSize.min, children: [
       SheetHeader(
         title: l('switcher.title'),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -78,8 +87,10 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
             ),
           ),
         ),
-      Expanded(
+      Flexible(
+        fit: wide ? FlexFit.loose : FlexFit.tight,
         child: ListView(
+          shrinkWrap: wide,
           padding: EdgeInsets.fromLTRB(
               Space.l, Space.xs, Space.l, Space.xl + MediaQuery.paddingOf(context).bottom),
           children: [
@@ -111,13 +122,15 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
               ]),
             if (widget.onManage != null) ...[
               const SizedBox(height: Space.m),
+              // A tertiary action: ink, not the accent.
               Center(
                 child: TextButton(
+                  style: TextButton.styleFrom(foregroundColor: c.secondaryLabel),
                   onPressed: () {
                     Navigator.of(context).maybePop();
                     widget.onManage!();
                   },
-                  child: Text(l('switcher.manage')),
+                  child: Text(l('switcher.manage'), style: context.t.subhead),
                 ),
               ),
             ],
@@ -146,18 +159,21 @@ class _Row extends StatelessWidget {
       dense: true,
       leading: CountryCode(node.countryCode),
       title: nodeTitle(node),
+      // Same "● Активен" idiom as the Servers list; it takes the
+      // subscription's slot so the row stays one line at 360px.
       subtitleWidget: Row(children: [
         ProtocolBadge(node.protocol),
-        if (sub != null) ...[
+        if (active) ...[
+          const SizedBox(width: Space.s + 2),
+          StatusDot(c.success, size: 6),
+          const SizedBox(width: 5),
+          Text(context.l('servers.active'), style: t.caption.copyWith(color: c.success)),
+        ] else if (sub != null) ...[
           Text(' · ', style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
           Flexible(
             child: Text(sub.name,
                 maxLines: 1, overflow: TextOverflow.ellipsis, style: t.caption),
           ),
-        ],
-        if (active) ...[
-          const SizedBox(width: Space.s),
-          StatusDot(c.success, size: 6),
         ],
       ]),
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [

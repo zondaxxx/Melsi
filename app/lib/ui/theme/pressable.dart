@@ -109,3 +109,48 @@ class _PressableScaleState extends State<PressableScale>
     );
   }
 }
+
+/// Pointer hover / pressed tracking for desktop affordances. [builder]
+/// receives `hovered` (mouse only — touch never hovers) and `pressed`
+/// (pointer down, any device). Wrap the *painted* surface in this so the
+/// fill can change; combine with [PressableScale] for the press-scale.
+class Hoverable extends StatefulWidget {
+  const Hoverable({super.key, required this.builder, this.enabled = true, this.cursor});
+  final Widget Function(BuildContext context, bool hovered, bool pressed) builder;
+  final bool enabled;
+  final MouseCursor? cursor;
+
+  @override
+  State<Hoverable> createState() => _HoverableState();
+}
+
+class _HoverableState extends State<Hoverable> {
+  bool _hover = false;
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        cursor: widget.enabled ? (widget.cursor ?? SystemMouseCursors.click) : MouseCursor.defer,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() {
+              _hover = false;
+              _down = false;
+            }),
+        child: Listener(
+          behavior: HitTestBehavior.deferToChild,
+          onPointerDown: (_) => setState(() => _down = true),
+          onPointerUp: (_) => setState(() => _down = false),
+          onPointerCancel: (_) => setState(() => _down = false),
+          child: widget.builder(
+              context, widget.enabled && _hover, widget.enabled && _down),
+        ),
+      );
+}
+
+/// Surface colour for an interactive element: [base] at rest, the fill
+/// tokens blended in on hover and press.
+Color interactiveSurface(MelsiColors c, Color base, {required bool hovered, required bool pressed}) {
+  if (pressed) return Color.alphaBlend(c.fillStrong, base);
+  if (hovered) return Color.alphaBlend(c.fill, base);
+  return base;
+}

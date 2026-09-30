@@ -169,10 +169,12 @@ class _ShellState extends State<Shell> {
                     child: Stack(
                       children: [
                         Positioned.fill(child: stack),
+                        // Anchored to the tab bar with a clear gap so it
+                        // reads as floating chrome, not a row of the page.
                         Positioned(
                           left: 0,
                           right: 0,
-                          bottom: bottomBar + Space.m,
+                          bottom: bottomBar + Space.xl,
                           child: const Center(child: ApplyToast()),
                         ),
                         Positioned(
@@ -208,7 +210,8 @@ List<_TabItem> _items(L10n l) => [
     ];
 
 /// Flat tab bar: solid background, hairline on top, equal-width items. The
-/// selected item is the one drawn in the label colour; nothing else moves.
+/// selected item is the filled icon + label at 100%; the rest sit at 55%.
+/// Nothing else moves.
 class _TabBar extends StatelessWidget {
   const _TabBar({required this.current, required this.onSelect});
   final AppTab current;
@@ -254,7 +257,7 @@ class _TabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final color = selected ? c.label : c.tertiaryLabel;
+    final color = selected ? c.label : c.label.withValues(alpha: 0.55);
     return SizedBox.expand(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -340,38 +343,36 @@ class _SidebarItem extends StatefulWidget {
 }
 
 class _SidebarItemState extends State<_SidebarItem> {
-  bool _hover = false;
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final sel = widget.selected;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: PressableScale(
-        scale: 0.985,
-        onTap: widget.onTap,
-        semanticLabel: widget.item.label,
-        child: AnimatedContainer(
+    final muted = c.label.withValues(alpha: 0.55);
+    return PressableScale(
+      scale: 0.985,
+      onTap: widget.onTap,
+      semanticLabel: widget.item.label,
+      child: Hoverable(
+        builder: (context, hovered, pressed) => AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           height: 36,
           padding: const EdgeInsets.symmetric(horizontal: Space.m),
           decoration: ShapeDecoration(
-            color: sel
+            color: sel || pressed
                 ? c.fillStrong
-                : _hover
+                : hovered
                     ? c.fill
                     : Colors.transparent,
             shape: Radii.shape(Radii.s + 1),
           ),
           child: Row(children: [
             Icon(sel ? widget.item.iconActive : widget.item.icon,
-                size: 18, color: sel ? c.label : c.secondaryLabel),
+                size: 18, color: sel ? c.label : muted),
             const SizedBox(width: Space.m),
             Text(widget.item.label,
                 style: context.t.subhead.copyWith(
                     fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
-                    color: sel ? c.label : c.secondaryLabel)),
+                    color: sel ? c.label : muted)),
           ]),
         ),
       ),

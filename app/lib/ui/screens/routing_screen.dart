@@ -128,52 +128,51 @@ class _PerApp extends StatelessWidget {
       );
     }
     final r = app.routing;
-    return Panel(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Segmented<AppRoutingMode>(
-          value: r.appMode,
-          onChanged: (m) => app.updateRouting((x) => x.appMode = m),
-          segments: [
-            Segment(AppRoutingMode.off, l('appMode.off')),
-            Segment(AppRoutingMode.onlySelected, l('appMode.onlySelected')),
-            Segment(AppRoutingMode.bypassSelected, l('appMode.bypassSelected')),
-          ],
-        ),
-        const SizedBox(height: Space.m),
-        Text(l('appMode.${r.appMode.name}.desc'), style: context.t.footnote),
-        if (r.appMode != AppRoutingMode.off) ...[
-          const SizedBox(height: Space.m),
-          if (r.appRules.isNotEmpty)
-            Wrap(spacing: 6, runSpacing: 6, children: [
-              for (final a in r.appRules)
-                InputChip(
-                  label: Text(a.label ?? a.id),
-                  onDeleted: () => app.updateRouting(
-                      (x) => x.appRules = x.appRules.where((e) => e.id != a.id).toList()),
-                  deleteIconColor: c.secondaryLabel,
-                  backgroundColor: c.fill,
-                  side: BorderSide(color: c.separator, width: kHairline),
-                  shape: Radii.shape(Radii.s),
-                  labelStyle: context.t.subhead,
-                ),
-            ]),
-          const SizedBox(height: Space.m),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SecondaryButton(
-              icon: Icons.add_rounded,
-              label: r.appRules.isEmpty
-                  ? l('routing.pickApps')
-                  : l('routing.pickAppsN', {'n': '${r.appRules.length}'}),
-              onTap: () async {
-                final v = await pickApps(context, selected: r.appRules, title: l('routing.apps'));
-                if (v != null) app.updateRouting((x) => x.appRules = v);
-              },
-            ),
-          ),
+    // Segmented control + helper sit bare on the page, exactly as the
+    // routing preset does on Home: a control is never nested in a card.
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Segmented<AppRoutingMode>(
+        value: r.appMode,
+        onChanged: (m) => app.updateRouting((x) => x.appMode = m),
+        segments: [
+          Segment(AppRoutingMode.off, l('appMode.off')),
+          Segment(AppRoutingMode.onlySelected, l('appMode.onlySelected')),
+          Segment(AppRoutingMode.bypassSelected, l('appMode.bypassSelected')),
         ],
-      ]),
-    );
+      ),
+      SectionFooter(l('appMode.${r.appMode.name}.desc')),
+      if (r.appMode != AppRoutingMode.off) ...[
+        const SizedBox(height: Space.m),
+        if (r.appRules.isNotEmpty)
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final a in r.appRules)
+              InputChip(
+                label: Text(a.label ?? a.id),
+                onDeleted: () => app.updateRouting(
+                    (x) => x.appRules = x.appRules.where((e) => e.id != a.id).toList()),
+                deleteIconColor: c.secondaryLabel,
+                backgroundColor: c.fill,
+                side: BorderSide(color: c.separator, width: kHairline),
+                shape: Radii.shape(Radii.s),
+                labelStyle: context.t.subhead,
+              ),
+          ]),
+        const SizedBox(height: Space.m),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SecondaryButton(
+            icon: Icons.add_rounded,
+            label: r.appRules.isEmpty
+                ? l('routing.pickApps')
+                : l('routing.pickAppsN', {'n': '${r.appRules.length}'}),
+            onTap: () async {
+              final v = await pickApps(context, selected: r.appRules, title: l('routing.apps'));
+              if (v != null) app.updateRouting((x) => x.appRules = v);
+            },
+          ),
+        ),
+      ],
+    ]);
   }
 }
 
@@ -236,28 +235,30 @@ class _DomainEditorState extends State<_DomainEditor> {
     final l = context.l;
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.l + MediaQuery.viewInsetsOf(context).bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          SheetHeader(title: widget.title),
-          TextField(
-            controller: _ctrl,
-            minLines: 8,
-            maxLines: 14,
-            autofocus: true,
-            style: context.t.mono,
-            decoration: const InputDecoration(hintText: 'example.com\nyoutube.com'),
-          ),
-          const SizedBox(height: Space.s),
-          Text(l('routing.domainsHint'), style: context.t.caption),
-          const SizedBox(height: Space.l),
-          PrimaryButton(
-            label: l('common.save'),
-            expand: true,
-            onTap: () => Navigator.of(context).pop(_parse()),
-          ),
-        ]),
-      ),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SheetHeader(title: widget.title),
+        Padding(
+          padding: EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.l + MediaQuery.viewInsetsOf(context).bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              TextField(
+                controller: _ctrl,
+                minLines: 8,
+                maxLines: 14,
+                autofocus: true,
+                style: context.t.mono,
+                decoration: const InputDecoration(hintText: 'example.com\nyoutube.com'),
+              ),
+              const SizedBox(height: Space.s),
+              Text(l('routing.domainsHint'), style: context.t.caption),
+              const SizedBox(height: Space.l),
+              PrimaryButton(
+                label: l('common.save'),
+                expand: true,
+                onTap: () => Navigator.of(context).pop(_parse()),
+              ),
+          ]),
+        ),
+      ]),
     );
   }
 }

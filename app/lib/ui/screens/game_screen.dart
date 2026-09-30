@@ -44,7 +44,10 @@ class _GameScreenState extends State<GameScreen> {
     return PageScaffold(
       title: l('tab.gameTitle'),
       slivers: [
-        // The master control: a status title, one factual line, the switch.
+        // The master control. The page title already names the feature, so
+        // the row carries only its state ("Включён" / "Выключен") with the
+        // switch, and what the mode does lives inside the card as the
+        // sublabel rather than floating between two cards.
         SliverToBoxAdapter(
           child: GroupCard(children: [
             SwitchRow(
@@ -59,53 +62,60 @@ class _GameScreenState extends State<GameScreen> {
           SliverToBoxAdapter(child: SectionHeader(l('game.route'))),
           SliverToBoxAdapter(child: _GameRoutePanel(app: app)),
         ],
+        // The count is set in the same small-caps style as the label so the
+        // pair reads as one row on one baseline.
         SliverToBoxAdapter(
           child: SectionHeader(
             l('game.games'),
-            trailing: Text(
-                l('game.selectedN', {'n': '${g.gameIds.length + g.customApps.length}'}),
-                style: context.t.caption),
+            trailing: Overline(
+              l('game.selectedN', {'n': '${g.gameIds.length + g.customApps.length}'}),
+              color: c.tertiaryLabel,
+            ),
           ),
         ),
+        // Capped so three segments never stretch across a 1200px column.
         SliverToBoxAdapter(
-          child: Segmented<_GameFilter>(
-            value: _filter,
-            onChanged: (f) => setState(() => _filter = f),
-            segments: [
-              Segment(_GameFilter.all, l('game.all')),
-              Segment(_GameFilter.pc, l('game.pc'), icon: Icons.desktop_windows_outlined),
-              Segment(_GameFilter.mobile, l('game.mobile'), icon: Icons.smartphone_rounded),
-            ],
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Segmented<_GameFilter>(
+                value: _filter,
+                onChanged: (f) => setState(() => _filter = f),
+                segments: [
+                  Segment(_GameFilter.all, l('game.all')),
+                  Segment(_GameFilter.pc, l('game.pc'), icon: Icons.desktop_windows_outlined),
+                  Segment(_GameFilter.mobile, l('game.mobile'), icon: Icons.smartphone_rounded),
+                ],
+              ),
+            ),
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
-        SliverLayoutBuilder(builder: (context, constraints) {
-          final w = constraints.crossAxisExtent;
-          final cols = w >= 700 ? 4 : w >= 480 ? 3 : 2;
-          return SliverGrid.builder(
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: cols,
-              mainAxisSpacing: Space.s,
-              crossAxisSpacing: Space.s,
-              mainAxisExtent: 92,
-            ),
-            itemCount: presets.length,
-            itemBuilder: (context, i) {
-              final p = presets[i];
-              final sel = g.gameIds.contains(p.id);
-              return _GameTile(
-                preset: p,
-                selected: sel,
-                onTap: () => app.updateGame((x) {
-                  final ids = {...x.gameIds};
-                  sel ? ids.remove(p.id) : ids.add(p.id);
-                  x.gameIds = ids;
-                  if (!sel && !x.enabled) x.enabled = true;
-                }),
-              );
-            },
-          );
-        }),
+        // Dense wrapped chips. Platform glyphs appear only in the mixed
+        // "Все" list, where they carry information; under a platform filter
+        // they would repeat the filter on every chip.
+        SliverToBoxAdapter(
+          child: Wrap(
+            spacing: Space.s,
+            runSpacing: Space.s,
+            children: [
+              for (final p in presets)
+                _GameChip(
+                  preset: p,
+                  platforms: _filter == _GameFilter.all,
+                  selected: g.gameIds.contains(p.id),
+                  onTap: () => app.updateGame((x) {
+                    final ids = {...x.gameIds};
+                    final sel = ids.contains(p.id);
+                    sel ? ids.remove(p.id) : ids.add(p.id);
+                    x.gameIds = ids;
+                    if (!sel && !x.enabled) x.enabled = true;
+                  }),
+                ),
+            ],
+          ),
+        ),
         SliverToBoxAdapter(child: SectionHeader(l('game.custom'))),
         SliverToBoxAdapter(
           child: Panel(
@@ -237,6 +247,11 @@ class _GameScreenState extends State<GameScreen> {
 
 // ------------------------------------------------------------------ live panel
 
+/// The live game route: the server (code, name, protocol · mode · live
+/// "Активен" — the same inline idiom as the server lists),
+/// the latency sparkline with its scale printed as a word, then the same
+/// ПИНГ / ДЖИТТЕР / ПОТЕРИ row the Home server card uses. The ping is a
+/// metric like the others, not a display-size hero.
 class _GameRoutePanel extends StatelessWidget {
   const _GameRoutePanel({required this.app});
   final AppState app;
@@ -266,8 +281,6 @@ class _GameRoutePanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.m),
             child: Row(children: [
-              const _LiveDot(),
-              const SizedBox(width: Space.m),
               CountryCode(node?.countryCode),
               const SizedBox(width: Space.m),
               Expanded(
@@ -282,49 +295,50 @@ class _GameRoutePanel extends StatelessWidget {
                     ],
                     Text((group.auto == false ? l('game.pinned') : l('game.nodeAuto')).toUpperCase(),
                         style: t.monoSmall),
+                    const SizedBox(width: Space.s + 2),
+                    const _LiveDot(),
+                    const SizedBox(width: 5),
+                    Text(l('servers.active'), style: t.caption.copyWith(color: c.success)),
                   ]),
-                ]),
-              ),
-              const SizedBox(width: Space.m),
-              Text.rich(
-                TextSpan(children: [
-                  TextSpan(
-                      text: lat == null ? '—' : '$lat',
-                      style: t.monoLarge.copyWith(color: c.latency(lat))),
-                  if (lat != null)
-                    TextSpan(
-                        text: ' ${l('unit.ms', {'n': ''}).trim()}',
-                        style: t.mono.copyWith(color: c.tertiaryLabel)),
                 ]),
               ),
             ]),
           ),
+          // Scale caption on its own line, then the sparkline (no grid).
           Padding(
             padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.m),
-            child: SizedBox(
-              height: 52,
-              child: CustomPaint(
-                size: Size.infinite,
-                painter: LatencyChartPainter(
-                  samples: app.gameLatencyHistory,
-                  color: c.label,
-                  failColor: c.danger,
-                  gridColor: c.separator,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              if (LatencyChartPainter.peak(app.gameLatencyHistory) case final int peak)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(l('chart.peak', {'v': formatMs(peak, l)}),
+                      style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
+                ),
+              const SizedBox(height: Space.xs),
+              SizedBox(
+                height: 48,
+                child: CustomPaint(
+                  size: Size.infinite,
+                  painter: LatencyChartPainter(
+                    samples: app.gameLatencyHistory,
+                    color: c.label,
+                    failColor: c.danger,
+                  ),
                 ),
               ),
-            ),
+            ]),
           ),
           const Hairline(),
           Padding(
             padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m + 2),
             child: MetricsRow(items: [
+              (l('stat.latency'), formatMs(lat, l), lat == null ? null : c.latency(lat)),
               (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
               (
                 l('stat.loss'),
                 stat?.loss == null ? '—' : formatLoss(stat!.loss!),
                 (stat?.loss ?? 0) > 0.02 ? c.warning : null,
               ),
-              (l('stat.score'), stat?.score == null ? '—' : stat!.score!.toStringAsFixed(1), null),
             ]),
           ),
           if (group.lastSwitch?.reason != null) ...[
@@ -398,80 +412,76 @@ class _LiveDotState extends State<_LiveDot> with SingleTickerProviderStateMixin 
   }
 }
 
-// ------------------------------------------------------------------ tiles
+// ------------------------------------------------------------------ chips
 
-class _GameTile extends StatelessWidget {
-  const _GameTile({required this.preset, required this.selected, required this.onTap});
+/// A game as a compact chip: name, then (optionally) small platform glyphs.
+/// Selected is a 1px accent stroke at 40% plus an accent check; unselected a
+/// hairline. Hover / press fill on desktop, press-scale everywhere.
+class _GameChip extends StatelessWidget {
+  const _GameChip({
+    required this.preset,
+    required this.selected,
+    required this.onTap,
+    this.platforms = true,
+  });
   final GamePreset preset;
   final bool selected;
   final VoidCallback onTap;
-
-  static String initials(String name) {
-    final words = name
-        .replaceAll(RegExp(r'[^A-Za-zА-Яа-я0-9 ]'), ' ')
-        .split(' ')
-        .where((w) => w.isNotEmpty)
-        .toList();
-    if (words.isEmpty) return '?';
-    if (words.length == 1) {
-      return words.first.substring(0, words.first.length.clamp(0, 2)).toUpperCase();
-    }
-    return (words[0][0] + words[1][0]).toUpperCase();
-  }
+  final bool platforms;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
-    final pc = preset.desktopProcesses.isNotEmpty;
-    final mobile = preset.androidPackages.isNotEmpty;
-    return PressableScale(
-      haptic: true,
-      onTap: onTap,
-      scale: 0.98,
-      semanticLabel: preset.name,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.fromLTRB(Space.m, Space.m, Space.m, Space.m),
-        decoration: ShapeDecoration(
-          color: c.surface,
-          shape: Radii.shape(Radii.m,
-              side: BorderSide(color: selected ? c.accent : c.separator, width: selected ? 1.5 : kHairline)),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(
-              height: 20,
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              alignment: Alignment.center,
-              decoration: ShapeDecoration(
-                color: c.fill,
-                shape: Radii.shape(Radii.xs, side: BorderSide(color: c.separator, width: kHairline)),
+    final pc = platforms && preset.desktopProcesses.isNotEmpty;
+    final mobile = platforms && preset.androidPackages.isNotEmpty;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: preset.name,
+      child: PressableScale(
+        haptic: true,
+        onTap: onTap,
+        scale: 0.97,
+        child: Hoverable(
+          builder: (context, hovered, pressed) => AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            height: 34,
+            padding: const EdgeInsets.fromLTRB(Space.m, 0, Space.m - 2, 0),
+            decoration: ShapeDecoration(
+              color: interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
+              shape: Radii.shape(Radii.s + 2,
+                  side: BorderSide(
+                      color: selected ? c.accent.withValues(alpha: 0.4) : c.separator,
+                      width: kHairline)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              // Flexible so a long name ellipsises instead of overflowing
+              // the row on narrow phones.
+              Flexible(
+                child: Text(preset.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.subhead.copyWith(
+                        fontSize: 13, fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
               ),
-              child: Text(initials(preset.name),
-                  style: t.monoSmall.copyWith(color: c.label, letterSpacing: 0.6)),
-            ),
-            const Spacer(),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
-              child: selected
-                  ? Icon(Icons.check_rounded, key: const ValueKey(1), color: c.accent, size: 18)
-                  : const SizedBox(key: ValueKey(0), height: 18),
-            ),
-          ]),
-          const Spacer(),
-          Text(preset.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: t.subhead.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 3),
-          Row(children: [
-            if (pc) Icon(Icons.desktop_windows_outlined, size: 12, color: c.tertiaryLabel),
-            if (pc && mobile) const SizedBox(width: 5),
-            if (mobile) Icon(Icons.smartphone_rounded, size: 12, color: c.tertiaryLabel),
-          ]),
-        ]),
+              if (pc || mobile) const SizedBox(width: Space.s),
+              if (pc) Icon(Icons.desktop_windows_outlined, size: 12, color: c.tertiaryLabel),
+              if (pc && mobile) const SizedBox(width: 3),
+              if (mobile) Icon(Icons.smartphone_rounded, size: 12, color: c.tertiaryLabel),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                child: selected
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: Space.s),
+                        child: Icon(Icons.check_rounded, color: c.accent, size: 15),
+                      )
+                    : const SizedBox(width: 2),
+              ),
+            ]),
+          ),
+        ),
       ),
     );
   }

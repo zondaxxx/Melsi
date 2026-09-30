@@ -55,10 +55,11 @@ ThemeData buildTheme(Brightness brightness) {
       brightness: brightness,
       primaryColor: c.accent,
     ),
+    // The knob is white in both themes; "on" is the accent.
     switchTheme: SwitchThemeData(
       thumbColor: const WidgetStatePropertyAll(Colors.white),
       trackColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? c.accent : c.fillStrong),
+          (s) => s.contains(WidgetState.selected) ? c.accent : c.offTrack),
       trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
     ),
     textSelectionTheme: TextSelectionThemeData(

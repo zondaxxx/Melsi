@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/services.dart';
 
 import '../../l10n/l10n.dart';
@@ -11,17 +12,36 @@ import '../theme/theme.dart';
 ///
 /// * Idle: solid accent, "Подключиться".
 /// * Connecting / stopping: neutral, a small spinner, the action is "Отмена".
-/// * Connected: neutral with a hairline, "Отключить".
+/// * Connected: neutral with a visible 1px stroke (~30% label in dark),
+///   "Отключить".
 /// * Error: neutral with a red hairline, "Подключиться" (retry).
+/// * No server ([hasServer] false): neutral, "Добавить сервер" — the accent
+///   is never spent on an action that cannot do anything; [onTap] then
+///   opens the add flow (the caller decides).
+///
+/// Never taller than 52px; the caller constrains the width (full column on
+/// phones, the live column on desktop).
 ///
 /// Presses down instantly (spring scale) and fires a haptic on commit; colour
 /// springs between states. A medium haptic confirms the connection, a heavy
 /// one an error. Reduced motion: state changes cross-fade.
 class ConnectButton extends StatefulWidget {
-  const ConnectButton({super.key, required this.status, required this.onTap, this.height = 52});
+  const ConnectButton({
+    super.key,
+    required this.status,
+    required this.onTap,
+    this.hasServer = true,
+    this.noServerLabel,
+    this.height = 52,
+  });
 
   final VpnStatus status;
   final VoidCallback onTap;
+
+  /// Whether there is anything to connect to. When false the button turns
+  /// neutral and shows [noServerLabel] (falls back to "Добавить сервер").
+  final bool hasServer;
+  final String? noServerLabel;
   final double height;
 
   @override
@@ -30,20 +50,22 @@ class ConnectButton extends StatefulWidget {
 
 class _ConnectButtonState extends State<ConnectButton> with SingleTickerProviderStateMixin {
   /// 0 = accent (idle), 1 = neutral (busy / connected).
-  late final AnimationController _level =
-      AnimationController.unbounded(vsync: this, value: _target(widget.status));
+  late final AnimationController _level = AnimationController.unbounded(
+      vsync: this, value: _target(widget.status, widget.hasServer));
 
-  static double _target(VpnStatus s) => switch (s) {
-        VpnStatus.stopped || VpnStatus.error => 0,
+  static double _target(VpnStatus s, bool hasServer) => switch (s) {
+        VpnStatus.stopped || VpnStatus.error => hasServer ? 0 : 1,
         _ => 1,
       };
 
   @override
   void didUpdateWidget(ConnectButton old) {
     super.didUpdateWidget(old);
-    if (old.status != widget.status) {
-      _level.springTo(_target(widget.status),
+    if (old.status != widget.status || old.hasServer != widget.hasServer) {
+      _level.springTo(_target(widget.status, widget.hasServer),
           spring: Springs.of(0.4, 1.0), reduceMotion: context.reduceMotion);
+    }
+    if (old.status != widget.status) {
       if (widget.status == VpnStatus.connected) {
         HapticFeedback.mediumImpact();
       } else if (widget.status == VpnStatus.error) {
@@ -64,12 +86,17 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
     final l = context.l;
     final s = widget.status;
     final busy = s == VpnStatus.connecting || s == VpnStatus.stopping;
+    final idle = s == VpnStatus.stopped || s == VpnStatus.error;
     final label = switch (s) {
       VpnStatus.connected => l('home.disconnect'),
       VpnStatus.connecting => l('common.cancel'),
       VpnStatus.stopping => l('status.stopping'),
+      _ when !widget.hasServer => widget.noServerLabel ?? l('servers.add'),
       _ => l('home.connect'),
     };
+    // Without a server the idle button is a quiet secondary control that
+    // leads to the add flow, not a primary action that fails silently.
+    final quiet = idle && !widget.hasServer;
     final enabled = s != VpnStatus.stopping;
 
     return PressableScale(
@@ -87,12 +114,16 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
           animation: _level,
           builder: (context, _) {
             final v = _level.value.clamp(0.0, 1.0);
-            final bg = Color.lerp(c.accent, c.surface, v)!;
+            // Neutral state: a raised surface with a stroke strong enough to
+            // read as a button on the dark background.
+            final neutralBg = c.isDark ? c.surfaceRaised : c.surface;
+            final neutralEdge = c.isDark ? c.label.withValues(alpha: 0.3) : c.separator;
+            final bg = Color.lerp(c.accent, neutralBg, v)!;
             final fg = Color.lerp(c.onAccent, c.label, v)!;
             final edge = Color.lerp(
-                c.accent, s == VpnStatus.error ? c.danger : c.separator, v)!;
+                c.accent, s == VpnStatus.error && !quiet ? c.danger : neutralEdge, v)!;
             return Container(
-              height: widget.height,
+              height: widget.height.clamp(0, 52),
               alignment: Alignment.center,
               decoration: ShapeDecoration(
                 color: bg,
@@ -108,6 +139,10 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
                     if (busy) ...[
                       CupertinoActivityIndicator(radius: 7, color: fg),
                       const SizedBox(width: Space.s + 2),
+                    ],
+                    if (quiet) ...[
+                      Icon(Icons.add_rounded, size: 18, color: fg),
+                      const SizedBox(width: Space.xs + 2),
                     ],
                     Text(label,
                         style: context.t.headline.copyWith(
