@@ -5,6 +5,13 @@ import 'strings.dart';
 
 const StringTable kMotionStrings = StringTable(
   prefixes: ['motion.'],
-  ru: <String, String>{},
-  en: <String, String>{},
+  ru: <String, String>{
+    // Session summary under the status headline after a disconnect.
+    'motion.summary': 'Сессия {t} · ↓ {down} · ↑ {up}',
+    'motion.summary.short': 'Сессия {t}',
+  },
+  en: <String, String>{
+    'motion.summary': 'Session {t} · ↓ {down} · ↑ {up}',
+    'motion.summary.short': 'Session {t}',
+  },
 );
