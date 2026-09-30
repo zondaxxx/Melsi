@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "app.melsi" "\0"
-            VALUE "FileDescription", "melsi" "\0"
+            VALUE "CompanyName", "Melsi" "\0"
+            VALUE "FileDescription", "Melsi VPN" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "melsi" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 app.melsi. All rights reserved." "\0"
+            VALUE "InternalName", "Melsi" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Melsi. All rights reserved." "\0"
             VALUE "OriginalFilename", "melsi.exe" "\0"
-            VALUE "ProductName", "melsi" "\0"
+            VALUE "ProductName", "Melsi" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

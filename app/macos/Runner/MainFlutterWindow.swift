@@ -4,9 +4,33 @@ import FlutterMacOS
 class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
-    let windowFrame = self.frame
     self.contentViewController = flutterViewController
-    self.setFrame(windowFrame, display: true)
+
+    // Modern look: transparent title bar, content under it (Flutter draws
+    // its own header; traffic lights stay visible, the ~28pt top strip stays
+    // draggable and should be left free of interactive widgets).
+    self.title = "Melsi"
+    self.titleVisibility = .hidden
+    self.titlebarAppearsTransparent = true
+    self.styleMask.insert(.fullSizeContentView)
+    self.minSize = NSSize(width: 880, height: 600)
+
+    let size = NSSize(width: 1100, height: 720)
+    if let screen = self.screen ?? NSScreen.main {
+      let visible = screen.visibleFrame
+      let width = min(size.width, visible.width)
+      let height = min(size.height, visible.height)
+      let origin = NSPoint(
+        x: visible.origin.x + (visible.width - width) / 2,
+        y: visible.origin.y + (visible.height - height) / 2
+      )
+      self.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+    } else {
+      self.setContentSize(size)
+      self.center()
+    }
+    // Remember the user's size/position between launches.
+    self.setFrameAutosaveName("MelsiMainWindow")
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

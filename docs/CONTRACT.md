@@ -39,6 +39,8 @@ If you change a seam, change this file in the same commit.
 ## 1. Dart core API (`app/lib/core/`)
 
 `models.dart` — data model (already written, extend compatibly).
+`ProxyNode.chain` holds helper outbounds (e.g. the shadowtls wrapper for
+SS+ShadowTLS); `ConfigBuilder` retags them.
 
 ```dart
 // link_parser.dart
@@ -109,7 +111,10 @@ class ConfigBuilder {
   A mixed inbound is always added on desktop (so other apps can use it).
 - Game Mode rules come first: game processes / packages / domains → `game`;
   download domains → `direct` (if `directDownloads`).
-- Rule-sets are remote binary `.srs`, `download_detour: "direct"`:
+- Rule-sets are remote binary `.srs`, downloaded direct via a top-level
+  `http_clients: [{tag: "direct-http", domain_resolver: "dns-direct"}]`,
+  `route.default_http_client` and `rule_set[].http_client` (`download_detour`
+  is deprecated in 1.14):
   - `geosite-category-ads-all`, `geosite-private`, `geosite-category-ru`, `geosite-steam` …
     `https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-<name>.srs`
   - `geoip-ru`: `https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs`
@@ -229,3 +234,10 @@ func StopEngine()
 func EngineStatus() string   // same JSON as GET /status
 func Version() string        // melsi version
 ```
+
+### iOS app group files (`group.app.melsi`)
+
+The app writes `config.json` and `engine.json`. The extension writes
+`version.json` (core versions) and `last_error.txt` (reason for the last
+unexpected stop). The app sends the provider message `"reload"` to hot-reload
+a connected tunnel; `"version"` and `"engineStatus"` are also answered.

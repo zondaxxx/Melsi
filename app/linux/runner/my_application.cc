@@ -22,6 +22,16 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  // Single instance: a second launch (e.g. a melsi:// deep link) activates the
+  // primary instance; just present the existing window. The command line is
+  // forwarded to Dart by the gtk / app_links plugins.
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows) {
+    gtk_window_present(GTK_WINDOW(windows->data));
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -45,14 +55,33 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "melsi");
+    gtk_header_bar_set_title(header_bar, "Melsi");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "melsi");
+    gtk_window_set_title(window, "Melsi");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  gtk_window_set_default_size(window, 1100, 720);
+  GdkGeometry geometry;
+  geometry.min_width = 880;
+  geometry.min_height = 600;
+  gtk_window_set_geometry_hints(window, nullptr, &geometry, GDK_HINT_MIN_SIZE);
+  gtk_window_set_icon_name(window, APPLICATION_ID);
+  {
+    // Portable bundles: use <bundle>/data/app.melsi.png when the icon is not
+    // installed in the icon theme.
+    g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
+    if (exe != nullptr) {
+      g_autofree gchar* dir = g_path_get_dirname(exe);
+      g_autofree gchar* icon =
+          g_build_filename(dir, "data", APPLICATION_ID ".png", nullptr);
+      if (g_file_test(icon, G_FILE_TEST_EXISTS)) {
+        gtk_window_set_icon_from_file(window, icon, nullptr);
+      }
+    }
+  }
+  gtk_window_set_position(window, GTK_WIN_POS_CENTER);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -96,7 +125,10 @@ static gboolean my_application_local_command_line(GApplication* application,
   g_application_activate(application);
   *exit_status = 0;
 
-  return TRUE;
+  // FALSE: let GApplication forward the command line to the primary instance
+  // (G_APPLICATION_HANDLES_COMMAND_LINE) so the gtk plugin / app_links can
+  // deliver deep links (melsi://, sing-box://, clash://, hiddify://).
+  return FALSE;
 }
 
 // Implements GApplication::startup.
@@ -144,5 +176,7 @@ MyApplication* my_application_new() {
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     G_APPLICATION_HANDLES_COMMAND_LINE |
+                                         G_APPLICATION_HANDLES_OPEN,
+                                     nullptr));
 }

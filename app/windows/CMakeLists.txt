@@ -106,3 +106,27 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Melsi: ship the melsi-core daemon (docs/CONTRACT.md section 4) next to
+# melsi.exe as melsi-core.exe. Built by scripts/build-core.sh into core/dist/.
+# Missing binary => warning only.
+if(FLUTTER_TARGET_PLATFORM STREQUAL "windows-arm64")
+  set(MELSI_CORE_ARCH "arm64")
+else()
+  set(MELSI_CORE_ARCH "amd64")
+endif()
+set(MELSI_CORE_BINARY
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../core/dist/melsi-core-windows-${MELSI_CORE_ARCH}.exe")
+if(NOT EXISTS "${MELSI_CORE_BINARY}")
+  # Fall back to the amd64 build (runs under emulation on Windows on ARM).
+  set(MELSI_CORE_BINARY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../core/dist/melsi-core-windows-amd64.exe")
+endif()
+if(EXISTS "${MELSI_CORE_BINARY}")
+  install(PROGRAMS "${MELSI_CORE_BINARY}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    RENAME "melsi-core.exe"
+    COMPONENT Runtime)
+else()
+  message(WARNING "melsi-core not found at ${MELSI_CORE_BINARY} (run scripts/build-core.sh)")
+endif()

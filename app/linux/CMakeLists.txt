@@ -7,7 +7,7 @@ project(runner LANGUAGES CXX)
 set(BINARY_NAME "melsi")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "app.melsi.melsi")
+set(APPLICATION_ID "app.melsi")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -125,4 +125,31 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
+endif()
+
+# Melsi: window icon for portable bundles (see runner/my_application.cc).
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/app.melsi.png"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+
+# Melsi: ship the melsi-core daemon (docs/CONTRACT.md section 4) next to the `melsi`
+# executable as `bundle/melsi-core`. Built by scripts/build-core.sh into
+# core/dist/. Missing binary => warning only.
+if(FLUTTER_TARGET_PLATFORM STREQUAL "linux-arm64")
+  set(MELSI_CORE_ARCH "arm64")
+elseif(FLUTTER_TARGET_PLATFORM STREQUAL "linux-x64")
+  set(MELSI_CORE_ARCH "amd64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+  set(MELSI_CORE_ARCH "arm64")
+else()
+  set(MELSI_CORE_ARCH "amd64")
+endif()
+set(MELSI_CORE_BINARY
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../core/dist/melsi-core-linux-${MELSI_CORE_ARCH}")
+if(EXISTS "${MELSI_CORE_BINARY}")
+  install(PROGRAMS "${MELSI_CORE_BINARY}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    RENAME "melsi-core"
+    COMPONENT Runtime)
+else()
+  message(WARNING "melsi-core not found at ${MELSI_CORE_BINARY} (run scripts/build-core.sh)")
 endif()

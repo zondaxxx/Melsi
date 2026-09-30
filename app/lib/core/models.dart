@@ -125,6 +125,7 @@ class ProxyNode {
     this.subscriptionId,
     this.rawLink,
     this.countryCode,
+    this.chain,
   });
 
   /// Stable id: hash of the canonical outbound JSON (see [computeId]).
@@ -138,6 +139,12 @@ class ProxyNode {
 
   /// ISO 3166-1 alpha-2, guessed from the name (flag emoji / keywords).
   String? countryCode;
+
+  /// Extra outbounds this node dials through (e.g. the `shadowtls` wrapper of
+  /// a Shadowsocks + ShadowTLS node). Each carries a placeholder `tag`; the
+  /// main [outbound]'s `detour` references it. `ConfigBuilder` renames the
+  /// tags. null for ordinary single-outbound nodes.
+  final List<Map<String, dynamic>>? chain;
 
   String get type => outbound['type'] as String? ?? 'unknown';
   ProxyProtocol get protocol => ProxyProtocol.fromSingBoxType(type);
@@ -178,6 +185,7 @@ class ProxyNode {
         if (subscriptionId != null) 'subscriptionId': subscriptionId,
         if (rawLink != null) 'rawLink': rawLink,
         if (countryCode != null) 'countryCode': countryCode,
+        if (chain != null) 'chain': chain,
       };
 
   factory ProxyNode.fromJson(Map<String, dynamic> j) => ProxyNode(
@@ -187,6 +195,9 @@ class ProxyNode {
         subscriptionId: j['subscriptionId'] as String?,
         rawLink: j['rawLink'] as String?,
         countryCode: j['countryCode'] as String?,
+        chain: (j['chain'] as List?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList(),
       );
 }
 

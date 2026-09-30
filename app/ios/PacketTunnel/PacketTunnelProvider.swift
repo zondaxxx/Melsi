@@ -1,0 +1,268 @@
+import Foundation
+import Libbox
+import NetworkExtension
+import os.log
+
+/// Melsi packet tunnel.
+///
+/// Lifecycle (docs/CONTRACT.md §5):
+///   LibboxSetup -> LibboxNewCommandServer -> start() -> startOrReloadService(config)
+///   -> MelsicoreStartEngine(engine)
+/// and on stop: MelsicoreStopEngine() -> closeService() -> close().
+///
+/// The app writes `config.json` / `engine.json` into the App Group container
+/// (`group.app.melsi`) before calling `startVPNTunnel(options:)`; the same
+/// payload may also be passed in the start options (`configContent`,
+/// `engineContent`). Options win, the files are the fallback (on-demand /
+/// system restarts start the tunnel without options).
+class PacketTunnelProvider: NEPacketTunnelProvider {
+    static let appGroup = "group.app.melsi"
+    static let log = OSLog(subsystem: "app.melsi.PacketTunnel", category: "tunnel")
+
+    private(set) var commandServer: LibboxCommandServer?
+    private lazy var platformInterface = MelsiPlatformInterface(self)
+    private var engineRunning = false
+
+    // MARK: - Paths
+
+    static var sharedDirectory: URL {
+        if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
+            return url
+        }
+        // No app group entitlement (e.g. re-signed build): fall back to the
+        // extension's own sandbox so the tunnel can at least run with options.
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Melsi", isDirectory: true)
+    }
+
+    static var workingDirectory: URL {
+        sharedDirectory.appendingPathComponent("Library/Caches/Working", isDirectory: true)
+    }
+
+    static var cacheDirectory: URL {
+        sharedDirectory.appendingPathComponent("Library/Caches", isDirectory: true)
+    }
+
+    // MARK: - Start / stop
+
+    override func startTunnel(options: [String: NSObject]?) async throws {
+        let fileManager = FileManager.default
+        let basePath = Self.sharedDirectory.path
+        let workingPath = Self.workingDirectory.path
+        let tempPath = Self.cacheDirectory.path
+        try? fileManager.createDirectory(atPath: basePath, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(atPath: workingPath, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(atPath: tempPath, withIntermediateDirectories: true)
+        clearLastError()
+
+        let setupOptions = LibboxSetupOptions()
+        setupOptions.basePath = basePath
+        setupOptions.workingPath = workingPath
+        setupOptions.tempPath = tempPath
+        setupOptions.logMaxLines = 3000
+        setupOptions.debug = false
+        setupOptions.crashReportSource = "NetworkExtension"
+        setupOptions.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        setupOptions.appMarketingVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        // iOS Network Extensions are killed above ~50 MB: let libbox apply its
+        // default NE memory limit + GC tuning (see libbox setup.go).
+        setupOptions.oomKillerEnabled = true
+
+        var setupError: NSError?
+        LibboxSetup(setupOptions, &setupError)
+        if let setupError {
+            throw fail("setup libbox: \(setupError.localizedDescription)")
+        }
+
+        var serverError: NSError?
+        commandServer = LibboxNewCommandServer(platformInterface, platformInterface, &serverError)
+        if let serverError {
+            throw fail("create command server: \(serverError.localizedDescription)")
+        }
+        guard let commandServer else {
+            throw fail("create command server: nil")
+        }
+        do {
+            try commandServer.start()
+        } catch {
+            throw fail("start command server: \(error.localizedDescription)")
+        }
+
+        let payload = try loadPayload(options)
+        try startService(payload)
+        writeVersionFile()
+        writeMessage("(packet-tunnel) started")
+    }
+
+    override func stopTunnel(with reason: NEProviderStopReason) async {
+        writeMessage("(packet-tunnel) stopping, reason: \(reason.rawValue)")
+        stopEngine()
+        stopService()
+        if let server = commandServer {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            server.close()
+            commandServer = nil
+        }
+    }
+
+    override func handleAppMessage(_ messageData: Data) async -> Data? {
+        let message = String(data: messageData, encoding: .utf8) ?? ""
+        switch message {
+        case "reload":
+            do {
+                let payload = try loadPayload(nil)
+                reasserting = true
+                defer { reasserting = false }
+                try startService(payload)
+                return nil
+            } catch {
+                return error.localizedDescription.data(using: .utf8)
+            }
+        case "version":
+            return versionJSON().data(using: .utf8)
+        case "engineStatus":
+            return MelsicoreEngineStatus().data(using: .utf8)
+        default:
+            return nil
+        }
+    }
+
+    override func sleep() async {
+        commandServer?.pause()
+    }
+
+    override func wake() {
+        commandServer?.wake()
+    }
+
+    // MARK: - Service
+
+    struct Payload {
+        var config: String
+        var engine: String
+    }
+
+    private func loadPayload(_ options: [String: NSObject]?) throws -> Payload {
+        var config = options?["configContent"] as? String
+        var engine = options?["engineContent"] as? String
+        if config == nil || config!.isEmpty {
+            config = try? String(contentsOf: Self.sharedDirectory.appendingPathComponent("config.json"), encoding: .utf8)
+        }
+        if engine == nil || engine!.isEmpty {
+            engine = try? String(contentsOf: Self.sharedDirectory.appendingPathComponent("engine.json"), encoding: .utf8)
+        }
+        guard let config, !config.isEmpty else {
+            throw fail("missing sing-box configuration")
+        }
+        return Payload(config: patchConfig(config), engine: engine ?? "")
+    }
+
+    /// The Dart side cannot know the App Group path of the extension, so force
+    /// `experimental.cache_file.path` into the shared working directory.
+    private func patchConfig(_ config: String) -> String {
+        guard let data = config.data(using: .utf8),
+              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var experimental = root["experimental"] as? [String: Any],
+              var cacheFile = experimental["cache_file"] as? [String: Any]
+        else {
+            return config
+        }
+        cacheFile["path"] = Self.workingDirectory.appendingPathComponent("cache.db").path
+        experimental["cache_file"] = cacheFile
+        root["experimental"] = experimental
+        guard let patched = try? JSONSerialization.data(withJSONObject: root),
+              let string = String(data: patched, encoding: .utf8)
+        else {
+            return config
+        }
+        return string
+    }
+
+    private func startService(_ payload: Payload) throws {
+        guard let commandServer else {
+            throw fail("command server not started")
+        }
+        stopEngine()
+        do {
+            try commandServer.startOrReloadService(payload.config, options: LibboxOverrideOptions())
+        } catch {
+            throw fail("start service: \(error.localizedDescription)")
+        }
+        if !payload.engine.isEmpty {
+            var engineError: NSError?
+            MelsicoreStartEngine(payload.engine, &engineError)
+            if let engineError {
+                // The tunnel itself works without the engine (manual selection),
+                // so report but do not tear the VPN down.
+                writeMessage("(packet-tunnel) start engine: \(engineError.localizedDescription)")
+                saveLastError("engine: \(engineError.localizedDescription)")
+            } else {
+                engineRunning = true
+            }
+        }
+    }
+
+    func stopEngine() {
+        if engineRunning {
+            MelsicoreStopEngine()
+            engineRunning = false
+        }
+    }
+
+    func stopService() {
+        do {
+            try commandServer?.closeService()
+        } catch {
+            writeMessage("(packet-tunnel) stop service: \(error.localizedDescription)")
+        }
+        platformInterface.reset()
+    }
+
+    /// Called by libbox (CommandServerHandler.ServiceReload) when a client asks
+    /// for a reload.
+    func reloadService() throws {
+        let payload = try loadPayload(nil)
+        reasserting = true
+        defer { reasserting = false }
+        try startService(payload)
+    }
+
+    // MARK: - Helpers
+
+    func writeMessage(_ message: String) {
+        os_log("%{public}@", log: Self.log, type: .default, message)
+        commandServer?.writeMessage(4, message: message) // 4 = info (sing log.Level)
+    }
+
+    private func fail(_ message: String) -> NSError {
+        let text = "(packet-tunnel) \(message)"
+        os_log("%{public}@", log: Self.log, type: .error, text)
+        saveLastError(message)
+        return NSError(domain: "app.melsi.PacketTunnel", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    private func saveLastError(_ message: String) {
+        try? message.write(to: Self.sharedDirectory.appendingPathComponent("last_error.txt"), atomically: true, encoding: .utf8)
+    }
+
+    private func clearLastError() {
+        try? FileManager.default.removeItem(at: Self.sharedDirectory.appendingPathComponent("last_error.txt"))
+    }
+
+    private func versionJSON() -> String {
+        let object: [String: String] = [
+            "sing_box": LibboxVersion(),
+            "melsi": MelsicoreVersion(),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            return "{}"
+        }
+        return string
+    }
+
+    private func writeVersionFile() {
+        try? versionJSON().write(to: Self.sharedDirectory.appendingPathComponent("version.json"), atomically: true, encoding: .utf8)
+    }
+}
