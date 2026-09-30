@@ -1,5 +1,11 @@
 // Melsi design tokens: colour, spacing, radii, typography.
 //
+// The visual system is an instrument, not a landing page: a warm-neutral
+// monochrome base, one accent (burnt orange) reserved for the primary action
+// and selection, and colour otherwise carrying meaning only — green for
+// "connected / good", amber and red for "degraded / bad", always as small
+// indicators and text. Hierarchy comes from type and hairlines.
+//
 // Everything visual in the app reads from here (via `context.c` / `context.t`)
 // so light/dark and high-contrast variants stay consistent.
 
@@ -23,19 +29,21 @@ abstract final class Space {
   static const double gutterWide = 32;
 }
 
-/// Continuous-corner radii (rendered as superellipses).
+/// Corner radii: moderate and consistent. Panels and buttons share [m];
+/// small controls (tags, code boxes) use [xs]/[s]; sheets use [l].
 abstract final class Radii {
-  static const double xs = 6;
-  static const double s = 10;
-  static const double m = 14;
-  static const double l = 20;
-  static const double xl = 26;
+  static const double xs = 4;
+  static const double s = 6;
+  static const double m = 10;
+  static const double l = 14;
   static const double pill = 999;
 
   static OutlinedBorder shape(double r, {BorderSide side = BorderSide.none}) =>
-      RoundedSuperellipseBorder(
-          borderRadius: BorderRadius.circular(r), side: side);
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(r), side: side);
 }
+
+/// Hairline thickness (rendered crisp on 2x and 3x screens).
+const double kHairline = 1;
 
 /// Colour tokens. Instances for light/dark live in [MelsiColors.light] and
 /// [MelsiColors.dark]; access with `context.c`.
@@ -44,7 +52,6 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
   const MelsiColors({
     required this.brightness,
     required this.background,
-    required this.backgroundTint,
     required this.surface,
     required this.surfaceRaised,
     required this.fill,
@@ -54,74 +61,46 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
     required this.tertiaryLabel,
     required this.separator,
     required this.accent,
-    required this.accent2,
     required this.onAccent,
     required this.success,
     required this.warning,
     required this.danger,
-    required this.info,
-    required this.glass,
-    required this.glassHeavy,
-    required this.glassEdge,
-    required this.shadow,
   });
 
   final Brightness brightness;
 
-  /// Grouped background (behind cards).
+  /// Page background (paper in light, warm near-black in dark).
   final Color background;
 
-  /// A faint coloured wash used by page backdrops.
-  final Color backgroundTint;
-
-  /// Cards / grouped rows.
+  /// Panels / grouped rows — the single "card" level.
   final Color surface;
 
-  /// Sheets, popovers, anything floating above cards.
+  /// Sheets, popovers, anything floating above panels.
   final Color surfaceRaised;
 
-  /// Neutral fills for chips, segmented tracks, inputs.
+  /// Neutral fills for chips, segmented tracks, inputs, hover.
   final Color fill;
   final Color fillStrong;
 
   final Color label;
   final Color secondaryLabel;
   final Color tertiaryLabel;
+
+  /// Hairline dividers and panel borders.
   final Color separator;
 
-  /// Indigo → violet brand gradient ends.
+  /// The one accent: primary action, selection, links.
   final Color accent;
-  final Color accent2;
   final Color onAccent;
 
+  /// Meaning colours — small indicators and text only.
   final Color success;
   final Color warning;
   final Color danger;
-  final Color info;
-
-  /// Translucent material fills (light = chrome, heavy = sidebars).
-  final Color glass;
-  final Color glassHeavy;
-
-  /// Hairline highlight along the edge of a material.
-  final Color glassEdge;
-  final Color shadow;
 
   bool get isDark => brightness == Brightness.dark;
 
-  LinearGradient get accentGradient => LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [accent, accent2],
-      );
-
-  LinearGradient get successGradient => LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [success, Color.lerp(success, const Color(0xFF00C7BE), 0.6)!],
-      );
-
-  /// Latency colour: green < 100ms, yellow < 250ms, red otherwise.
+  /// Latency colour: green < 100ms, amber < 250ms, red otherwise.
   Color latency(int? ms) {
     if (ms == null || ms <= 0) return tertiaryLabel;
     if (ms < 100) return success;
@@ -131,52 +110,38 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
 
   static const light = MelsiColors(
     brightness: Brightness.light,
-    background: Color(0xFFF2F2F7),
-    backgroundTint: Color(0xFFE9E7FB),
+    background: Color(0xFFF4F2EF),
     surface: Color(0xFFFFFFFF),
     surfaceRaised: Color(0xFFFFFFFF),
-    fill: Color(0x14767680),
-    fillStrong: Color(0x1F767680),
-    label: Color(0xFF0B0B12),
-    secondaryLabel: Color(0x993C3C43),
-    tertiaryLabel: Color(0x4D3C3C43),
-    separator: Color(0x2E3C3C43),
-    accent: Color(0xFF5B50F0),
-    accent2: Color(0xFFA24CF0),
+    fill: Color(0x0D1B1A17),
+    fillStrong: Color(0x1A1B1A17),
+    label: Color(0xFF1B1A17),
+    secondaryLabel: Color(0x9E1B1A17),
+    tertiaryLabel: Color(0x661B1A17),
+    separator: Color(0x1F1B1A17),
+    accent: Color(0xFFC24E1C),
     onAccent: Color(0xFFFFFFFF),
-    success: Color(0xFF28B84F),
-    warning: Color(0xFFF59E0B),
-    danger: Color(0xFFFF3B30),
-    info: Color(0xFF0A84FF),
-    glass: Color(0xB8F9F9FC),
-    glassHeavy: Color(0xD6F2F2F7),
-    glassEdge: Color(0x99FFFFFF),
-    shadow: Color(0x1A1B1B3A),
+    success: Color(0xFF1E8A4E),
+    warning: Color(0xFF9A6B00),
+    danger: Color(0xFFC0392B),
   );
 
   static const dark = MelsiColors(
     brightness: Brightness.dark,
-    background: Color(0xFF000000),
-    backgroundTint: Color(0xFF14112B),
-    surface: Color(0xFF1C1C1E),
-    surfaceRaised: Color(0xFF2C2C2E),
-    fill: Color(0x2E767680),
-    fillStrong: Color(0x3D767680),
-    label: Color(0xFFFFFFFF),
-    secondaryLabel: Color(0x99EBEBF5),
-    tertiaryLabel: Color(0x4DEBEBF5),
-    separator: Color(0x40545458),
-    accent: Color(0xFF7067FF),
-    accent2: Color(0xFFB45CFF),
-    onAccent: Color(0xFFFFFFFF),
-    success: Color(0xFF30D158),
-    warning: Color(0xFFFFB020),
-    danger: Color(0xFFFF453A),
-    info: Color(0xFF0A84FF),
-    glass: Color(0xB01C1C1E),
-    glassHeavy: Color(0xD6141416),
-    glassEdge: Color(0x24FFFFFF),
-    shadow: Color(0x66000000),
+    background: Color(0xFF141312),
+    surface: Color(0xFF1C1B19),
+    surfaceRaised: Color(0xFF242220),
+    fill: Color(0x12ECE8E1),
+    fillStrong: Color(0x22ECE8E1),
+    label: Color(0xFFECE8E1),
+    secondaryLabel: Color(0xA3ECE8E1),
+    tertiaryLabel: Color(0x66ECE8E1),
+    separator: Color(0x1FECE8E1),
+    accent: Color(0xFFE8763A),
+    onAccent: Color(0xFF1B120C),
+    success: Color(0xFF4CC272),
+    warning: Color(0xFFE0B23E),
+    danger: Color(0xFFEE6A5C),
   );
 
   @override
@@ -189,7 +154,6 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
     return MelsiColors(
       brightness: t < 0.5 ? brightness : other.brightness,
       background: l(background, other.background),
-      backgroundTint: l(backgroundTint, other.backgroundTint),
       surface: l(surface, other.surface),
       surfaceRaised: l(surfaceRaised, other.surfaceRaised),
       fill: l(fill, other.fill),
@@ -199,22 +163,29 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
       tertiaryLabel: l(tertiaryLabel, other.tertiaryLabel),
       separator: l(separator, other.separator),
       accent: l(accent, other.accent),
-      accent2: l(accent2, other.accent2),
       onAccent: l(onAccent, other.onAccent),
       success: l(success, other.success),
       warning: l(warning, other.warning),
       danger: l(danger, other.danger),
-      info: l(info, other.info),
-      glass: l(glass, other.glass),
-      glassHeavy: l(glassHeavy, other.glassHeavy),
-      glassEdge: l(glassEdge, other.glassEdge),
-      shadow: l(shadow, other.shadow),
     );
   }
 }
 
+/// Monospaced family for metrics (latency, speeds, timer, codes). The name
+/// resolves to the platform monospace where one is registered; the fallback
+/// list covers iOS/macOS/Windows/Linux system fonts.
+const String kMonoFamily = 'monospace';
+const List<String> kMonoFallback = [
+  'Menlo',
+  'SF Mono',
+  'Roboto Mono',
+  'Consolas',
+  'DejaVu Sans Mono',
+  'Liberation Mono',
+];
+
 /// Type ramp with size-specific tracking: negative for large sizes, ~0 for
-/// body, slightly positive for captions. Leading tightens as size grows.
+/// body, positive for the small uppercase labels. Numbers are always tabular.
 @immutable
 class MelsiType extends ThemeExtension<MelsiType> {
   const MelsiType._(this.color, this.secondary);
@@ -233,30 +204,44 @@ class MelsiType extends ThemeExtension<MelsiType> {
         letterSpacing: tracking,
         height: height,
         color: color,
+        fontFeatures: _tabular,
         leadingDistribution: TextLeadingDistribution.even,
       );
 
-  /// 56 — the connection timer.
-  TextStyle get display => _s(52, FontWeight.w600, -1.6, 1.0)
-      .copyWith(fontFeatures: _tabular);
-  TextStyle get largeTitle => _s(34, FontWeight.w700, -0.9, 1.12);
-  TextStyle get title1 => _s(28, FontWeight.w700, -0.6, 1.15);
-  TextStyle get title2 => _s(22, FontWeight.w700, -0.4, 1.2);
-  TextStyle get title3 => _s(20, FontWeight.w600, -0.3, 1.25);
-  TextStyle get headline => _s(17, FontWeight.w600, -0.25, 1.3);
-  TextStyle get body => _s(16, FontWeight.w400, -0.18, 1.38);
-  TextStyle get callout => _s(15, FontWeight.w400, -0.12, 1.36);
-  TextStyle get subhead => _s(14, FontWeight.w400, -0.06, 1.36);
+  TextStyle _m(double size, FontWeight w, double tracking, double height) =>
+      _s(size, w, tracking, height).copyWith(
+        fontFamily: kMonoFamily,
+        fontFamilyFallback: kMonoFallback,
+      );
+
+  /// Page titles.
+  TextStyle get title1 => _s(28, FontWeight.w600, -0.7, 1.15);
+  TextStyle get title2 => _s(22, FontWeight.w600, -0.45, 1.2);
+  TextStyle get title3 => _s(18, FontWeight.w600, -0.3, 1.25);
+
+  /// Row titles that need emphasis, panel titles.
+  TextStyle get headline => _s(16, FontWeight.w600, -0.2, 1.3);
+  TextStyle get body => _s(15, FontWeight.w400, -0.1, 1.4);
+  TextStyle get callout => _s(14, FontWeight.w400, -0.05, 1.36);
+  TextStyle get subhead => _s(14, FontWeight.w500, -0.05, 1.36);
   TextStyle get footnote =>
       _s(13, FontWeight.w400, 0, 1.38).copyWith(color: secondary);
   TextStyle get caption =>
-      _s(12, FontWeight.w500, 0.1, 1.33).copyWith(color: secondary);
-  TextStyle get caption2 =>
-      _s(11, FontWeight.w600, 0.35, 1.2).copyWith(color: secondary);
+      _s(12, FontWeight.w500, 0.05, 1.33).copyWith(color: secondary);
 
-  /// Numbers that tick (speeds, latency) — tabular so they don't jiggle.
-  TextStyle get mono => _s(15, FontWeight.w600, -0.2, 1.2)
-      .copyWith(fontFeatures: _tabular);
+  /// Small uppercase tracked label (section headers, metric labels). Apply
+  /// `.toUpperCase()` to the string; the style only sets the tracking.
+  TextStyle get overline =>
+      _s(11, FontWeight.w600, 0.8, 1.2).copyWith(color: secondary);
+
+  /// Metrics: monospaced, tabular. [mono] for inline values, [monoSmall]
+  /// for codes and protocol tags, [monoLarge] for the headline number of a
+  /// panel (latency, speed).
+  TextStyle get mono => _m(13, FontWeight.w500, 0, 1.3);
+  TextStyle get monoSmall =>
+      _m(11, FontWeight.w500, 0.4, 1.2).copyWith(color: secondary);
+  TextStyle get monoLarge => _m(22, FontWeight.w500, -0.6, 1.1);
+  TextStyle get monoDisplay => _m(34, FontWeight.w500, -1.2, 1.05);
 
   @override
   MelsiType copyWith() => this;
@@ -277,8 +262,7 @@ extension MelsiThemeX on BuildContext {
   /// Accessibility: user asked for reduced motion.
   bool get reduceMotion => MediaQuery.maybeDisableAnimationsOf(this) ?? false;
 
-  /// Accessibility: user asked for higher contrast (also used as our
-  /// "reduce transparency" signal — materials go solid).
+  /// Accessibility: user asked for higher contrast — hairlines get stronger.
   bool get highContrast => MediaQuery.maybeHighContrastOf(this) ?? false;
 
   bool get isWide => MediaQuery.sizeOf(this).width >= 900;

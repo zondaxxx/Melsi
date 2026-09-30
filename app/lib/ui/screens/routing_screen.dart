@@ -4,8 +4,7 @@ import '../../core/models.dart';
 import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
-import '../theme/glass.dart';
-import '../theme/pressable.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/page.dart';
@@ -14,13 +13,6 @@ import 'app_picker.dart';
 
 class RoutingScreen extends StatelessWidget {
   const RoutingScreen({super.key});
-
-  static IconData presetIcon(RoutingPreset p) => switch (p) {
-        RoutingPreset.global => Icons.public_rounded,
-        RoutingPreset.smartRu => Icons.auto_awesome_rounded,
-        RoutingPreset.blockedOnly => Icons.lock_open_rounded,
-        RoutingPreset.direct => Icons.near_me_rounded,
-      };
 
   @override
   Widget build(BuildContext context) {
@@ -31,23 +23,18 @@ class RoutingScreen extends StatelessWidget {
     return PageScaffold(
       title: l('tab.routing'),
       slivers: [
-        SliverToBoxAdapter(child: SectionHeader(l('routing.preset'), padding: const EdgeInsets.fromLTRB(4, 4, 4, 8))),
         SliverToBoxAdapter(
-          child: LayoutBuilder(builder: (context, box) {
-            final cols = box.maxWidth >= 620 ? 2 : 1;
-            final w = (box.maxWidth - Space.m * (cols - 1)) / cols;
-            return Wrap(spacing: Space.m, runSpacing: Space.s, children: [
-              for (final p in RoutingPreset.values)
-                SizedBox(
-                  width: w,
-                  child: _PresetCard(
-                    preset: p,
-                    selected: r.preset == p,
-                    onTap: () => app.updateRouting((x) => x.preset = p),
-                  ),
-                ),
-            ]);
-          }),
+            child: SectionHeader(l('routing.preset'),
+                padding: const EdgeInsets.fromLTRB(Space.xs, Space.xs, Space.xs, Space.s + 2))),
+        SliverToBoxAdapter(
+          child: GroupCard(children: [
+            for (final p in RoutingPreset.values)
+              _PresetRow(
+                preset: p,
+                selected: r.preset == p,
+                onTap: () => app.updateRouting((x) => x.preset = p),
+              ),
+          ]),
         ),
         SliverToBoxAdapter(child: SectionHeader(l('routing.apps'))),
         SliverToBoxAdapter(child: _PerApp(app: app)),
@@ -55,14 +42,12 @@ class RoutingScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             SwitchRow(
-              leading: IconTile(Icons.block_rounded, color: c.danger),
               title: l('routing.blockAds'),
               subtitle: l('routing.blockAdsHint'),
               value: r.blockAds,
               onChanged: (v) => app.updateRouting((x) => x.blockAds = v),
             ),
             SwitchRow(
-              leading: IconTile(Icons.router_rounded, color: c.info),
               title: l('routing.bypassLan'),
               subtitle: l('routing.bypassLanHint'),
               value: r.bypassLan,
@@ -74,25 +59,20 @@ class RoutingScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             _DomainRow(
-              icon: Icons.near_me_rounded,
-              color: c.success,
               title: l('routing.domainsDirect'),
               list: r.directDomains,
               onSave: (v) => app.updateRouting((x) => x.directDomains = v),
             ),
             _DomainRow(
-              icon: Icons.vpn_lock_rounded,
-              color: c.accent,
               title: l('routing.domainsProxy'),
               list: r.proxyDomains,
               onSave: (v) => app.updateRouting((x) => x.proxyDomains = v),
             ),
             _DomainRow(
-              icon: Icons.block_rounded,
-              color: c.danger,
               title: l('routing.domainsBlock'),
               list: r.blockDomains,
               onSave: (v) => app.updateRouting((x) => x.blockDomains = v),
+              color: c.danger,
             ),
           ]),
         ),
@@ -102,8 +82,9 @@ class RoutingScreen extends StatelessWidget {
   }
 }
 
-class _PresetCard extends StatelessWidget {
-  const _PresetCard({required this.preset, required this.selected, required this.onTap});
+/// Routing mode as a radio row: name, one-line description, check.
+class _PresetRow extends StatelessWidget {
+  const _PresetRow({required this.preset, required this.selected, required this.onTap});
   final RoutingPreset preset;
   final bool selected;
   final VoidCallback onTap;
@@ -112,54 +93,22 @@ class _PresetCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l;
     final c = context.c;
-    return PressableScale(
-      haptic: true,
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.fromLTRB(Space.m + 2, Space.m, Space.m + 2, Space.m + 2),
-        decoration: ShapeDecoration(
-          color: selected
-              ? Color.alphaBlend(c.accent.withValues(alpha: c.isDark ? 0.18 : 0.08), c.surface)
-              : c.surface,
-          shape: Radii.shape(Radii.l,
-              side: BorderSide(
-                  color: selected ? c.accent.withValues(alpha: c.isDark ? 0.9 : 0.75) : Colors.transparent,
-                  width: 1.5)),
-        ),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: ShapeDecoration(
-              shape: Radii.shape(12),
-              gradient: selected ? c.accentGradient : null,
-              color: selected ? null : c.fill,
-            ),
-            child: Icon(RoutingScreen.presetIcon(preset),
-                color: selected ? Colors.white : c.secondaryLabel, size: 19),
-          ),
-          const SizedBox(width: Space.m),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Text(l('preset.${preset.name}'),
-                    style: context.t.headline.copyWith(color: selected ? c.accent : c.label)),
-              ),
-              const SizedBox(height: 2),
-              Text(l('preset.${preset.name}.desc'), style: context.t.footnote),
-            ]),
-          ),
-          const SizedBox(width: Space.s),
-          SpringValue(
+    return Semantics(
+      inMutuallyExclusiveGroup: true,
+      checked: selected,
+      child: RowTile(
+        title: l('preset.${preset.name}'),
+        subtitle: l('preset.${preset.name}.desc'),
+        trailing: SizedBox(
+          width: 22,
+          child: SpringValue(
             target: selected ? 1 : 0,
             spring: Springs.momentum,
             builder: (context, v, child) => Transform.scale(scale: v.clamp(0.0, 1.2), child: child),
-            child: Icon(Icons.check_circle_rounded, color: c.accent, size: 22),
+            child: Icon(Icons.check_rounded, color: c.accent, size: 18),
           ),
-        ]),
+        ),
+        onTap: onTap,
       ),
     );
   }
@@ -174,16 +123,12 @@ class _PerApp extends StatelessWidget {
     final l = context.l;
     final c = context.c;
     if (app.isIOS) {
-      return Card2(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(Icons.info_rounded, color: c.info),
-          const SizedBox(width: Space.m),
-          Expanded(child: Text(l('routing.iosNoPerApp'), style: context.t.callout)),
-        ]),
+      return Panel(
+        child: Text(l('routing.iosNoPerApp'), style: context.t.footnote),
       );
     }
     final r = app.routing;
-    return Card2(
+    return Panel(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Segmented<AppRoutingMode>(
           value: r.appMode,
@@ -207,21 +152,24 @@ class _PerApp extends StatelessWidget {
                       (x) => x.appRules = x.appRules.where((e) => e.id != a.id).toList()),
                   deleteIconColor: c.secondaryLabel,
                   backgroundColor: c.fill,
-                  side: BorderSide.none,
-                  shape: Radii.shape(Radii.pill),
+                  side: BorderSide(color: c.separator, width: kHairline),
+                  shape: Radii.shape(Radii.s),
                   labelStyle: context.t.subhead,
                 ),
             ]),
           const SizedBox(height: Space.m),
-          SecondaryButton(
-            icon: Icons.apps_rounded,
-            label: r.appRules.isEmpty
-                ? l('routing.pickApps')
-                : l('routing.pickAppsN', {'n': '${r.appRules.length}'}),
-            onTap: () async {
-              final v = await pickApps(context, selected: r.appRules, title: l('routing.apps'));
-              if (v != null) app.updateRouting((x) => x.appRules = v);
-            },
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SecondaryButton(
+              icon: Icons.add_rounded,
+              label: r.appRules.isEmpty
+                  ? l('routing.pickApps')
+                  : l('routing.pickAppsN', {'n': '${r.appRules.length}'}),
+              onTap: () async {
+                final v = await pickApps(context, selected: r.appRules, title: l('routing.apps'));
+                if (v != null) app.updateRouting((x) => x.appRules = v);
+              },
+            ),
           ),
         ],
       ]),
@@ -231,25 +179,24 @@ class _PerApp extends StatelessWidget {
 
 class _DomainRow extends StatelessWidget {
   const _DomainRow({
-    required this.icon,
-    required this.color,
     required this.title,
     required this.list,
     required this.onSave,
+    this.color,
   });
-  final IconData icon;
-  final Color color;
   final String title;
   final List<String> list;
   final ValueChanged<List<String>> onSave;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final l = context.l;
+    final c = context.c;
     return RowTile(
-      leading: IconTile(icon, color: color),
       title: title,
-      trailing: Text(list.isEmpty ? l('common.none') : '${list.length}', style: context.t.callout.copyWith(color: context.c.secondaryLabel)),
+      trailing: Text(list.isEmpty ? l('common.none') : '${list.length}',
+          style: context.t.mono.copyWith(color: c.secondaryLabel)),
       chevron: true,
       onTap: () async {
         final v = await showMelsiSheet<List<String>>(context,
@@ -298,7 +245,7 @@ class _DomainEditorState extends State<_DomainEditor> {
             minLines: 8,
             maxLines: 14,
             autofocus: true,
-            style: context.t.callout.copyWith(fontFamily: 'monospace', fontSize: 13),
+            style: context.t.mono,
             decoration: const InputDecoration(hintText: 'example.com\nyoutube.com'),
           ),
           const SizedBox(height: Space.s),

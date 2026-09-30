@@ -71,7 +71,7 @@ void main() {
 
     await tester.tap(find.text('Настройки'));
     await _settle(tester);
-    expect(find.text('Умный выбор сервера'), findsOneWidget);
+    expect(find.text('УМНЫЙ ВЫБОР СЕРВЕРА'), findsOneWidget);
     await _shutdown(tester, state);
   });
 
@@ -165,7 +165,7 @@ void main() {
     await state.importText(kSampleVless.replaceAll('nl1.example.com', 'de1.example.com').replaceAll('Netherlands', 'Germany'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(state.nodes, hasLength(2));
-    await tester.tap(find.text('Сервер'));
+    await tester.tap(find.byKey(const ValueKey('home-node-panel')));
     await _settle(tester);
     expect(find.text('Выбор сервера'), findsOneWidget);
     await tester.tap(find.textContaining('Germany').last);

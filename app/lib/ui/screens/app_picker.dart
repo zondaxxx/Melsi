@@ -89,7 +89,7 @@ class _AppPickerState extends State<AppPicker> {
         title: widget.title,
         trailing: TextButton(
           onPressed: () => Navigator.of(context).pop(_sel.values.toList()),
-          child: Text(l('common.done'), style: context.t.headline.copyWith(color: c.accent)),
+          child: Text(l('common.done')),
         ),
       ),
       Padding(
@@ -100,11 +100,13 @@ class _AppPickerState extends State<AppPicker> {
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               hintText: l('apps.search'),
-              prefixIcon: Icon(Icons.search_rounded, size: 20, color: c.secondaryLabel),
+              prefixIcon: Icon(Icons.search_rounded, size: 18, color: c.tertiaryLabel),
+              prefixIconConstraints: const BoxConstraints(minWidth: 38),
             ),
           ),
           if (apps.isAndroid)
             SwitchRow(
+              dense: true,
               title: l('apps.system'),
               value: _showSystem,
               onChanged: (v) => setState(() => _showSystem = v),
@@ -120,7 +122,7 @@ class _AppPickerState extends State<AppPicker> {
                 ),
               ),
               const SizedBox(width: Space.s),
-              CircleIconButton(icon: Icons.add_rounded, onTap: _addManual, size: 40),
+              ToolButton(icon: Icons.add_rounded, onTap: _addManual, size: 40),
             ]),
             const SizedBox(height: Space.s),
             Align(
@@ -175,22 +177,27 @@ class _AppRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final placeholder = Container(
+      decoration: ShapeDecoration(
+          color: c.fill,
+          shape: Radii.shape(Radii.s, side: BorderSide(color: c.separator, width: kHairline))),
+      alignment: Alignment.center,
+      child: Text(label.isEmpty ? '?' : label.characters.first.toUpperCase(),
+          style: context.t.mono.copyWith(color: c.secondaryLabel)),
+    );
     return RowTile(
       dense: true,
       leading: SizedBox.square(
-        dimension: 34,
+        dimension: 30,
         child: icon == null
-            ? Container(
-                decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(9)),
-                alignment: Alignment.center,
-                child: Text(label.isEmpty ? '?' : label.characters.first.toUpperCase(),
-                    style: context.t.headline.copyWith(color: c.secondaryLabel)),
-              )
+            ? placeholder
             : FutureBuilder<Uint8List?>(
                 future: icon,
                 builder: (context, s) => s.data == null
-                    ? Container(decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(9)))
-                    : Image.memory(s.data!, gaplessPlayback: true),
+                    ? placeholder
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(Radii.s),
+                        child: Image.memory(s.data!, gaplessPlayback: true)),
               ),
       ),
       title: label,
@@ -198,14 +205,14 @@ class _AppRow extends StatelessWidget {
       onTap: onTap,
       trailing: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        width: 24,
-        height: 24,
+        width: 20,
+        height: 20,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: selected ? c.accent : Colors.transparent,
           border: Border.all(color: selected ? c.accent : c.tertiaryLabel, width: 1.5),
         ),
-        child: selected ? const Icon(Icons.check_rounded, size: 16, color: Colors.white) : null,
+        child: selected ? Icon(Icons.check_rounded, size: 14, color: c.onAccent) : null,
       ),
     );
   }

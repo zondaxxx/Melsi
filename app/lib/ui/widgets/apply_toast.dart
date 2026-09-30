@@ -5,11 +5,10 @@ import 'package:flutter/services.dart';
 import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
-import '../theme/glass.dart';
 import '../theme/theme.dart';
 
-/// Small floating capsule that reports settings being applied to the running
-/// tunnel: "Applying settings…" → "Done ✓". Springs up from the tab bar and
+/// Small floating notice that reports settings being applied to the running
+/// tunnel: "Applying settings…" → "Done". Springs up from the tab bar and
 /// back down along the same path; never blocks input.
 class ApplyToast extends StatefulWidget {
   const ApplyToast({super.key});
@@ -43,25 +42,24 @@ class _ApplyToastState extends State<ApplyToast> {
           final t = v.clamp(0.0, 1.0);
           if (t <= 0.001) return const SizedBox.shrink();
           return Opacity(
-            // Opaque early in the spring so it never reads as see-through.
             opacity: (t * 1.8).clamp(0.0, 1.0),
             child: Transform.translate(
-              offset: Offset(0, reduce ? 0 : (1 - v) * 18),
-              child: Transform.scale(scale: reduce ? 1 : 0.88 + 0.12 * v, child: child),
+              offset: Offset(0, reduce ? 0 : (1 - v) * 14),
+              child: child,
             ),
           );
         },
         child: Semantics(
           liveRegion: true,
-          child: _Pill(phase: _shown),
+          child: _Notice(phase: _shown),
         ),
       ),
     );
   }
 }
 
-class _Pill extends StatelessWidget {
-  const _Pill({required this.phase});
+class _Notice extends StatelessWidget {
+  const _Notice({required this.phase});
   final ApplyPhase phase;
 
   @override
@@ -70,23 +68,26 @@ class _Pill extends StatelessWidget {
     final l = context.l;
     final (Widget icon, String text) = switch (phase) {
       ApplyPhase.done => (
-          Icon(Icons.check_circle_rounded, size: 18, color: c.success),
+          Icon(Icons.check_rounded, size: 16, color: c.success),
           l('apply.done'),
         ),
       ApplyPhase.failed => (
-          Icon(Icons.error_rounded, size: 18, color: c.danger),
+          Icon(Icons.priority_high_rounded, size: 16, color: c.danger),
           l('apply.failed'),
         ),
       _ => (
-          const SizedBox.square(dimension: 18, child: CupertinoActivityIndicator(radius: 8)),
+          const SizedBox.square(dimension: 16, child: CupertinoActivityIndicator(radius: 7)),
           l('apply.applying'),
         ),
     };
-    return Glass(
-      radius: Radii.pill,
-      shadow: true,
-      // Nearly solid: it floats over text, so legibility beats translucency.
-      tint: c.surfaceRaised.withValues(alpha: c.isDark ? 0.94 : 0.96),
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: c.surfaceRaised,
+        shape: Radii.shape(Radii.m, side: BorderSide(color: c.separator, width: kHairline)),
+        shadows: c.isDark
+            ? null
+            : [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 12, offset: const Offset(0, 4))],
+      ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.m, Space.s + 1, Space.l, Space.s + 1),
         child: AnimatedSize(
@@ -100,8 +101,7 @@ class _Pill extends StatelessWidget {
               children: [
                 icon,
                 const SizedBox(width: Space.s),
-                Text(text,
-                    style: context.t.subhead.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.1)),
+                Text(text, style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
               ],
             ),
           ),

@@ -2,8 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// Two-series speed sparkline (download filled, upload line), smoothed with
-/// monotone cubic segments. Scales to the max of both series.
+/// Two-series speed sparkline: thin single-colour lines on a hairline grid.
+/// Download is the stronger line, upload the quieter one. Scales to the max
+/// of both series.
 class SpeedChartPainter extends CustomPainter {
   SpeedChartPainter({
     required this.down,
@@ -24,53 +25,32 @@ class SpeedChartPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final maxV = math.max(
         1024.0 * 8, math.max(down.fold<double>(0, math.max), up.fold<double>(0, math.max)));
-    final grid = Paint()
-      ..color = gridColor
-      ..strokeWidth = 0.5;
-    for (var i = 1; i < 4; i++) {
-      final y = size.height * i / 4;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
-    }
+    drawGrid(canvas, size, gridColor, 3);
 
-    void series(List<double> data, Color color, {required bool fill}) {
+    void series(List<double> data, Color color, double width) {
       if (data.length < 2 || data.every((v) => v <= 0)) return;
       final path = smoothPath(data, size, maxV * 1.15);
-      if (fill) {
-        final area = Path.from(path)
-          ..lineTo(size.width, size.height)
-          ..lineTo(0, size.height)
-          ..close();
-        canvas.drawPath(
-          area,
-          Paint()
-            ..shader = LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [color.withValues(alpha: 0.35), color.withValues(alpha: 0.0)],
-            ).createShader(Offset.zero & size),
-        );
-      }
       canvas.drawPath(
         path,
         Paint()
           ..color = color
           ..style = PaintingStyle.stroke
-          ..strokeWidth = fill ? 2.2 : 1.6
+          ..strokeWidth = width
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round,
       );
     }
 
-    series(down, downColor, fill: true);
-    series(up, upColor, fill: false);
+    series(up, upColor, 1.25);
+    series(down, downColor, 1.5);
   }
 
   @override
   bool shouldRepaint(SpeedChartPainter old) => true;
 }
 
-/// Latency line with a soft band; null samples break the line and show a
-/// small red tick at the bottom.
+/// Latency line; null samples break the line and show a small red tick at
+/// the bottom. The latest sample gets a dot.
 class LatencyChartPainter extends CustomPainter {
   LatencyChartPainter({
     required this.samples,
@@ -88,13 +68,7 @@ class LatencyChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final grid = Paint()
-      ..color = gridColor
-      ..strokeWidth = 0.5;
-    for (var i = 1; i < 3; i++) {
-      final y = size.height * i / 3;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
-    }
+    drawGrid(canvas, size, gridColor, 2);
     if (samples.isEmpty) return;
     final maxV = math.max(
         60, samples.whereType<int>().fold<int>(0, math.max)).toDouble() * 1.25;
@@ -103,7 +77,7 @@ class LatencyChartPainter extends CustomPainter {
     final line = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
+      ..strokeWidth = 1.5
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     Path? path;
@@ -112,10 +86,10 @@ class LatencyChartPainter extends CustomPainter {
       final x = (start + i) * dx;
       final v = samples[i];
       if (v == null) {
-        canvas.drawLine(Offset(x, size.height - 4), Offset(x, size.height),
+        canvas.drawLine(Offset(x, size.height - 5), Offset(x, size.height),
             Paint()
               ..color = failColor
-              ..strokeWidth = 2);
+              ..strokeWidth = 1.5);
         if (path != null) canvas.drawPath(path, line);
         path = null;
         continue;
@@ -131,13 +105,23 @@ class LatencyChartPainter extends CustomPainter {
     }
     if (path != null) canvas.drawPath(path, line);
     if (last != null && samples.last != null) {
-      canvas.drawCircle(last, 6, Paint()..color = color.withValues(alpha: 0.25));
-      canvas.drawCircle(last, 3, Paint()..color = color);
+      canvas.drawCircle(last, 2.5, Paint()..color = color);
     }
   }
 
   @override
   bool shouldRepaint(LatencyChartPainter old) => true;
+}
+
+/// Hairline grid: [rows] evenly spaced horizontal lines plus a baseline.
+void drawGrid(Canvas canvas, Size size, Color color, int rows) {
+  final grid = Paint()
+    ..color = color
+    ..strokeWidth = 1;
+  for (var i = 1; i <= rows; i++) {
+    final y = (size.height * i / rows).floorToDouble() - 0.5;
+    canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+  }
 }
 
 /// Smooth path through evenly spaced samples.

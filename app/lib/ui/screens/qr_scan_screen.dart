@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../l10n/l10n.dart';
-import '../theme/glass.dart';
 import '../theme/theme.dart';
 
 /// Full-screen camera QR scanner. Pops with the scanned text.
@@ -33,6 +32,18 @@ class _QrScanScreenState extends State<QrScanScreen> {
     Navigator.of(context).pop(v);
   }
 
+  /// Controls sit on a dark scrim so they stay legible over the camera.
+  Widget _scrim({required Widget child, double radius = 20, EdgeInsetsGeometry? padding}) =>
+      Container(
+        padding: padding,
+        decoration: ShapeDecoration(
+          color: Colors.black.withValues(alpha: 0.55),
+          shape: Radii.shape(radius,
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.15), width: kHairline)),
+        ),
+        child: child,
+      );
+
   @override
   Widget build(BuildContext context) {
     final l = context.l;
@@ -56,11 +67,11 @@ class _QrScanScreenState extends State<QrScanScreen> {
           // Viewfinder.
           Center(
             child: Container(
-              width: 250,
-              height: 250,
+              width: 240,
+              height: 240,
               decoration: ShapeDecoration(
-                shape: Radii.shape(Radii.xl,
-                    side: const BorderSide(color: Colors.white, width: 3)),
+                shape: Radii.shape(Radii.l,
+                    side: const BorderSide(color: Colors.white, width: 2)),
               ),
             ),
           ),
@@ -69,28 +80,26 @@ class _QrScanScreenState extends State<QrScanScreen> {
               padding: const EdgeInsets.all(Space.l),
               child: Column(children: [
                 Row(children: [
-                  Glass(
-                    radius: 22,
+                  _scrim(
                     child: IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ),
                   const Spacer(),
-                  Glass(
-                    radius: 22,
+                  _scrim(
                     child: IconButton(
-                      icon: const Icon(Icons.flashlight_on_rounded, color: Colors.white),
+                      icon: const Icon(Icons.flashlight_on_outlined, color: Colors.white, size: 20),
                       onPressed: _ctrl.toggleTorch,
                     ),
                   ),
                 ]),
                 const Spacer(),
-                Glass(
-                  radius: Radii.pill,
-                  padding: const EdgeInsets.symmetric(horizontal: Space.xl, vertical: Space.m),
+                _scrim(
+                  radius: Radii.m,
+                  padding: const EdgeInsets.symmetric(horizontal: Space.l, vertical: Space.m),
                   child: Text(l('qr.hint'),
-                      style: context.t.callout.copyWith(color: Colors.white, fontWeight: FontWeight.w500)),
+                      style: context.t.subhead.copyWith(color: Colors.white)),
                 ),
               ]),
             ),

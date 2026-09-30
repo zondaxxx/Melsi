@@ -2,10 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../theme/glass.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 
-/// Space the shell's floating chrome occupies at the bottom (tab bar).
+/// Space the shell's bottom chrome occupies (tab bar).
 class ShellInsets extends InheritedWidget {
   const ShellInsets({super.key, required this.bottom, required super.child});
   final double bottom;
@@ -18,8 +18,8 @@ class ShellInsets extends InheritedWidget {
   bool updateShouldNotify(ShellInsets old) => old.bottom != bottom;
 }
 
-/// Page with an Apple-style large title that collapses into a translucent
-/// inline header as content scrolls underneath it. Content is centred and
+/// Page with a title that collapses into a solid inline header (with a
+/// hairline) as content scrolls underneath it. Content is centred and
 /// width-capped on wide screens.
 class PageScaffold extends StatelessWidget {
   const PageScaffold({
@@ -98,8 +98,8 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
   final double topPadding;
   final double hPad;
 
-  static const _bar = 52.0;
-  double get _large => subtitle == null ? 50.0 : 72.0;
+  static const _bar = 48.0;
+  double get _large => subtitle == null ? 44.0 : 64.0;
 
   @override
   double get minExtent => topPadding + _bar;
@@ -108,33 +108,18 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    final c = context.c;
     final p = (shrinkOffset / _large).clamp(0.0, 1.0);
     final inlineOpacity = ((p - 0.55) / 0.45).clamp(0.0, 1.0);
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Material fades in only once content is actually underneath.
-        if (p > 0)
-          Opacity(
-            opacity: p,
-            child: const Glass(
-              radius: 0,
-              edge: false,
-              child: SizedBox.expand(),
-            ),
-          ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: Container(height: 0.5, color: c.separator.withValues(alpha: p)),
-        ),
+        // Solid chrome fades in only once content is actually underneath.
+        Chrome(opacity: p, child: const SizedBox.expand()),
         // Inline bar.
         Positioned(
           top: topPadding,
           left: hPad,
-          right: hPad - 4,
+          right: hPad,
           height: _bar,
           child: Row(
             children: [
@@ -166,9 +151,9 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
                   Text(title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: context.t.largeTitle),
+                      style: context.t.title1),
                   if (subtitle != null) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     DefaultTextStyle.merge(style: context.t.footnote, child: subtitle!),
                   ],
                 ],
@@ -189,7 +174,7 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
       old.subtitle != subtitle;
 }
 
-/// Compact inline bar (no large title). The material fades in once content
+/// Compact inline bar (no large title). The chrome fades in once content
 /// actually scrolls underneath.
 class _CompactHeader extends SliverPersistentHeaderDelegate {
   _CompactHeader({
@@ -204,7 +189,7 @@ class _CompactHeader extends SliverPersistentHeaderDelegate {
   final double topPadding;
   final double hPad;
 
-  static const _bar = 52.0;
+  static const _bar = 48.0;
 
   @override
   double get minExtent => topPadding + _bar;
@@ -213,24 +198,13 @@ class _CompactHeader extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    final c = context.c;
     final p = (shrinkOffset / 16).clamp(0.0, 1.0);
     return Stack(fit: StackFit.expand, children: [
-      if (p > 0)
-        Opacity(
-          opacity: p,
-          child: const Glass(radius: 0, edge: false, child: SizedBox.expand()),
-        ),
-      Positioned(
-        left: 0,
-        right: 0,
-        bottom: 0,
-        child: Container(height: 0.5, color: c.separator.withValues(alpha: p)),
-      ),
+      Chrome(opacity: p, child: const SizedBox.expand()),
       Positioned(
         top: topPadding,
         left: hPad,
-        right: hPad - 4,
+        right: hPad,
         height: _bar,
         child: Row(children: [
           Expanded(child: Align(alignment: Alignment.centerLeft, child: leading)),
@@ -255,13 +229,13 @@ Future<T?> showMelsiSheet<T>(BuildContext context,
   if (context.isWide) {
     return showDialog<T>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.35),
+      barrierColor: Colors.black.withValues(alpha: 0.4),
       builder: (ctx) => Dialog(
         insetPadding: const EdgeInsets.all(Space.x3),
         clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
           constraints: BoxConstraints(
-              maxWidth: 540, maxHeight: expand ? 720 : 640),
+              maxWidth: 520, maxHeight: expand ? 720 : 640),
           child: builder(ctx),
         ),
       ),
@@ -271,7 +245,7 @@ Future<T?> showMelsiSheet<T>(BuildContext context,
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    barrierColor: Colors.black.withValues(alpha: 0.35),
+    barrierColor: Colors.black.withValues(alpha: 0.4),
     sheetAnimationStyle: const AnimationStyle(
       duration: Duration(milliseconds: 380),
       curve: Curves.easeOutCubic,
@@ -280,12 +254,12 @@ Future<T?> showMelsiSheet<T>(BuildContext context,
     builder: (ctx) => Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Container(
-          width: 36,
-          height: 5,
+          width: 32,
+          height: 4,
           decoration: ShapeDecoration(
-              color: ctx.c.tertiaryLabel, shape: Radii.shape(3)),
+              color: ctx.c.fillStrong, shape: Radii.shape(2)),
         ),
         Flexible(
           child: expand
@@ -307,22 +281,25 @@ class SheetHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.s, Space.s),
+        padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m),
         child: Row(
           children: [
             ?leading,
             Expanded(child: Text(title, style: context.t.title3)),
-            trailing ??
-                IconButton(
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(color: context.c.fill, shape: BoxShape.circle),
-                    child: Icon(Icons.close_rounded, size: 18, color: context.c.secondaryLabel),
-                  ),
-                ),
+            trailing ?? const SheetClose(),
           ],
         ),
+      );
+}
+
+/// Quiet close control for sheets.
+class SheetClose extends StatelessWidget {
+  const SheetClose({super.key});
+  @override
+  Widget build(BuildContext context) => IconButton(
+        onPressed: () => Navigator.of(context).maybePop(),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        icon: Icon(Icons.close_rounded, size: 20, color: context.c.secondaryLabel),
       );
 }

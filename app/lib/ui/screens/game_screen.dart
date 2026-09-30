@@ -6,8 +6,8 @@ import '../../l10n/l10n.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
-import '../theme/glass.dart';
 import '../theme/pressable.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/charts.dart';
 import '../widgets/common.dart';
@@ -15,10 +15,6 @@ import '../widgets/format.dart';
 import '../widgets/page.dart';
 import '../widgets/segmented.dart';
 import 'app_picker.dart';
-
-const _gameA = Color(0xFFFF6A3D);
-const _gameB = Color(0xFFE8457C);
-const _gameC = Color(0xFF7B5CFF);
 
 enum _GameFilter { all, pc, mobile }
 
@@ -48,20 +44,27 @@ class _GameScreenState extends State<GameScreen> {
     return PageScaffold(
       title: l('tab.gameTitle'),
       slivers: [
-        SliverToBoxAdapter(child: _Hero(enabled: g.enabled, onChanged: (v) => app.updateGame((x) => x.enabled = v))),
-        if (g.enabled && app.displayStatus == VpnStatus.connected)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(top: Space.m),
-              child: _GameRoutePanel(app: app),
+        // The master control: a status title, one factual line, the switch.
+        SliverToBoxAdapter(
+          child: GroupCard(children: [
+            SwitchRow(
+              title: g.enabled ? l('game.active') : l('game.inactive'),
+              subtitle: l('game.heroSub'),
+              value: g.enabled,
+              onChanged: (v) => app.updateGame((x) => x.enabled = v),
             ),
-          ),
+          ]),
+        ),
+        if (g.enabled && app.displayStatus == VpnStatus.connected) ...[
+          SliverToBoxAdapter(child: SectionHeader(l('game.route'))),
+          SliverToBoxAdapter(child: _GameRoutePanel(app: app)),
+        ],
         SliverToBoxAdapter(
           child: SectionHeader(
             l('game.games'),
             trailing: Text(
                 l('game.selectedN', {'n': '${g.gameIds.length + g.customApps.length}'}),
-                style: context.t.footnote),
+                style: context.t.caption),
           ),
         ),
         SliverToBoxAdapter(
@@ -70,8 +73,8 @@ class _GameScreenState extends State<GameScreen> {
             onChanged: (f) => setState(() => _filter = f),
             segments: [
               Segment(_GameFilter.all, l('game.all')),
-              Segment(_GameFilter.pc, l('game.pc'), icon: Icons.desktop_windows_rounded),
-              Segment(_GameFilter.mobile, l('game.mobile'), icon: Icons.phone_iphone_rounded),
+              Segment(_GameFilter.pc, l('game.pc'), icon: Icons.desktop_windows_outlined),
+              Segment(_GameFilter.mobile, l('game.mobile'), icon: Icons.smartphone_rounded),
             ],
           ),
         ),
@@ -82,9 +85,9 @@ class _GameScreenState extends State<GameScreen> {
           return SliverGrid.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: cols,
-              mainAxisSpacing: Space.m,
-              crossAxisSpacing: Space.m,
-              mainAxisExtent: 116,
+              mainAxisSpacing: Space.s,
+              crossAxisSpacing: Space.s,
+              mainAxisExtent: 92,
             ),
             itemCount: presets.length,
             itemBuilder: (context, i) {
@@ -105,8 +108,8 @@ class _GameScreenState extends State<GameScreen> {
         }),
         SliverToBoxAdapter(child: SectionHeader(l('game.custom'))),
         SliverToBoxAdapter(
-          child: Card2(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child: Panel(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(app.isIOS ? l('game.customIos') : l('game.customHint'), style: context.t.footnote),
               if (g.customApps.isNotEmpty) ...[
                 const SizedBox(height: Space.m),
@@ -116,9 +119,10 @@ class _GameScreenState extends State<GameScreen> {
                       label: Text(a.label ?? a.id),
                       onDeleted: () => app.updateGame(
                           (x) => x.customApps = x.customApps.where((e) => e.id != a.id).toList()),
+                      deleteIconColor: c.secondaryLabel,
                       backgroundColor: c.fill,
-                      side: BorderSide.none,
-                      shape: Radii.shape(Radii.pill),
+                      side: BorderSide(color: c.separator, width: kHairline),
+                      shape: Radii.shape(Radii.s),
                       labelStyle: context.t.subhead,
                     ),
                 ]),
@@ -128,7 +132,6 @@ class _GameScreenState extends State<GameScreen> {
                 SecondaryButton(
                   icon: Icons.add_rounded,
                   label: l('game.addApps'),
-                  color: _gameB,
                   onTap: () async {
                     final v = await pickApps(context, selected: g.customApps, title: l('game.custom'));
                     if (v != null) app.updateGame((x) => x.customApps = v);
@@ -142,7 +145,6 @@ class _GameScreenState extends State<GameScreen> {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
-              leading: const IconTile(Icons.hub_rounded, color: _gameC),
               title: l('game.node'),
               subtitle: gameNode == null ? l('game.nodeAutoHint') : null,
               trailing: ConstrainedBox(
@@ -156,21 +158,18 @@ class _GameScreenState extends State<GameScreen> {
               onTap: () => _pickGameNode(context, app),
             ),
             SwitchRow(
-              leading: IconTile(Icons.download_rounded, color: c.success),
               title: l('game.directDownloads'),
               subtitle: l('game.directDownloadsHint'),
               value: g.directDownloads,
               onChanged: (v) => app.updateGame((x) => x.directDownloads = v),
             ),
             SwitchRow(
-              leading: const IconTile(Icons.bolt_rounded, color: _gameA),
               title: l('game.preferUdp'),
               subtitle: l('game.preferUdpHint'),
               value: g.preferUdpProtocols,
               onChanged: (v) => app.updateGame((x) => x.preferUdpProtocols = v),
             ),
             SwitchRow(
-              leading: const IconTile(Icons.speed_rounded, color: _gameB),
               title: l('game.lowLatency'),
               subtitle: l('game.lowLatencyHint'),
               value: g.lowLatencyStack,
@@ -192,7 +191,7 @@ class _GameScreenState extends State<GameScreen> {
     final result = await showMelsiSheet<String>(context, expand: true, builder: (ctx) {
       final c = ctx.c;
       Widget check(bool on) => SizedBox(
-          width: 24, child: on ? Icon(Icons.check_rounded, color: c.accent) : null);
+          width: 22, child: on ? Icon(Icons.check_rounded, size: 18, color: c.accent) : null);
       return Column(children: [
         SheetHeader(title: l('game.node')),
         Expanded(
@@ -201,24 +200,27 @@ class _GameScreenState extends State<GameScreen> {
             children: [
               GroupCard(children: [
                 RowTile(
-                  leading: const IconTile(Icons.auto_awesome_rounded, color: _gameC),
                   title: l('game.nodeAuto'),
                   subtitle: l('game.nodeAutoHint'),
                   trailing: check(app.game.gameNodeId == null),
                   onTap: () => Navigator.pop(ctx, ''),
                 ),
               ]),
-              const SizedBox(height: Space.l),
+              const SizedBox(height: Space.m),
               GroupCard(children: [
                 for (final n in nodes)
                   RowTile(
                     dense: true,
-                    leading: FlagBadge(n.countryCode, size: 30),
+                    leading: CountryCode(n.countryCode),
                     title: nodeTitle(n),
-                    subtitle: n.protocol.udpNative ? '${n.protocol.label} · UDP' : n.protocol.label,
+                    subtitleWidget: Text(
+                        n.protocol.udpNative
+                            ? '${n.protocol.label.toUpperCase()} · UDP'
+                            : n.protocol.label.toUpperCase(),
+                        style: ctx.t.monoSmall),
                     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                       LatencyChip(ms: app.latencyOf(n)),
-                      const SizedBox(width: Space.s),
+                      const SizedBox(width: Space.m),
                       check(app.game.gameNodeId == n.id),
                     ]),
                     onTap: () => Navigator.pop(ctx, n.id),
@@ -233,165 +235,6 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
-// ------------------------------------------------------------------ hero
-
-class _Hero extends StatefulWidget {
-  const _Hero({required this.enabled, required this.onChanged});
-  final bool enabled;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  State<_Hero> createState() => _HeroState();
-}
-
-/// Compact hero: title + one line + the master switch, decoration kept in
-/// its own corner. The explanation lives behind "How it works".
-class _HeroState extends State<_Hero> {
-  bool _open = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l;
-    final enabled = widget.enabled;
-    return SpringValue(
-      target: enabled ? 1 : 0,
-      builder: (context, v, _) {
-        final t = v.clamp(0.0, 1.0);
-        return Container(
-          decoration: ShapeDecoration(
-            shape: Radii.shape(Radii.xl),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color.lerp(const Color(0xFF3A3452), _gameA, t)!,
-                Color.lerp(const Color(0xFF302A48), _gameB, t)!,
-                Color.lerp(const Color(0xFF26223C), _gameC, t)!,
-              ],
-            ),
-            shadows: context.c.isDark
-                ? null
-                : [
-                    BoxShadow(
-                      color: _gameB.withValues(alpha: 0.08 + 0.16 * t),
-                      blurRadius: 24,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-          ),
-          child: ClipRSuperellipse(
-            borderRadius: BorderRadius.circular(Radii.xl),
-            child: Stack(children: [
-              // Decoration: bottom-right, well clear of the switch.
-              Positioned(
-                right: -18,
-                bottom: -26,
-                child: Transform.rotate(
-                  angle: -0.3 + 0.08 * t,
-                  child: Icon(Icons.sports_esports_rounded,
-                      size: 118, color: Colors.white.withValues(alpha: 0.07 + 0.05 * t)),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(Space.xl, Space.l + 2, Space.l, Space.s),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(
-                      child: PressableScale(
-                        scale: 0.99,
-                        haptic: true,
-                        onTap: () => widget.onChanged(!enabled),
-                        semanticLabel: l('game.heroTitle'),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(l('game.heroTitle'),
-                              style: context.t.title2.copyWith(color: Colors.white)),
-                          const SizedBox(height: 3),
-                          Text(
-                            l('game.heroSub'),
-                            style: context.t.subhead
-                                .copyWith(color: Colors.white.withValues(alpha: 0.85)),
-                          ),
-                        ]),
-                      ),
-                    ),
-                    const SizedBox(width: Space.m),
-                    MSwitch(
-                      value: enabled,
-                      onChanged: widget.onChanged,
-                      color: Colors.white.withValues(alpha: 0.38),
-                    ),
-                  ]),
-                  const SizedBox(height: Space.s),
-                  PressableScale(
-                    scale: 0.98,
-                    onTap: () => setState(() => _open = !_open),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: Space.s),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(l('game.howItWorks'),
-                            style: context.t.footnote.copyWith(
-                                color: Colors.white, fontWeight: FontWeight.w600)),
-                        const SizedBox(width: 2),
-                        SpringValue(
-                          target: _open ? 0.5 : 0,
-                          builder: (context, v, child) =>
-                              Transform.rotate(angle: v * 3.1416, child: child),
-                          child: const Icon(Icons.expand_more_rounded, size: 18, color: Colors.white),
-                        ),
-                      ]),
-                    ),
-                  ),
-                  AnimatedSize(
-                    duration: Duration(milliseconds: context.reduceMotion ? 1 : 320),
-                    curve: Curves.easeOutCubic,
-                    alignment: Alignment.topCenter,
-                    child: !_open
-                        ? const SizedBox(width: double.infinity)
-                        : Padding(
-                            padding: const EdgeInsets.only(bottom: Space.m, right: Space.xl),
-                            child: Column(children: [
-                              _Benefit(icon: Icons.graphic_eq_rounded, text: l('game.benefit1')),
-                              _Benefit(icon: Icons.download_done_rounded, text: l('game.benefit2')),
-                              _Benefit(icon: Icons.bolt_rounded, text: l('game.benefit3')),
-                            ]),
-                          ),
-                  ),
-                ]),
-              ),
-            ]),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _Benefit extends StatelessWidget {
-  const _Benefit({required this.icon, required this.text});
-  final IconData icon;
-  final String text;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: Space.s),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), shape: BoxShape.circle),
-            child: Icon(icon, size: 14, color: Colors.white),
-          ),
-          const SizedBox(width: Space.m - 2),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(text,
-                  style: context.t.footnote.copyWith(color: Colors.white, fontWeight: FontWeight.w500)),
-            ),
-          ),
-        ]),
-      );
-}
-
 // ------------------------------------------------------------------ live panel
 
 class _GameRoutePanel extends StatelessWidget {
@@ -402,78 +245,103 @@ class _GameRoutePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l;
     final c = context.c;
+    final t = context.t;
     final group = app.gameGroup;
     final node = app.nodeByTag(group?.current);
     final stat = group?.currentStat;
     final lat = stat?.latencyMs;
-    return Card2(
+    return Panel(
+      padding: EdgeInsets.zero,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const _LiveDot(),
-          const SizedBox(width: Space.s),
-          Expanded(child: Text(l('game.route'), style: context.t.headline)),
-          Pill(group?.auto == false ? l('game.pinned') : l('game.nodeAuto'),
-              icon: group?.auto == false ? Icons.push_pin_rounded : Icons.auto_awesome_rounded,
-              color: _gameC),
-        ]),
-        const SizedBox(height: Space.m),
         if (group == null)
-          Text(l('game.routeWaiting'), style: context.t.footnote)
+          Padding(
+            padding: const EdgeInsets.all(Space.l),
+            child: Row(children: [
+              const _LiveDot(),
+              const SizedBox(width: Space.s + 2),
+              Text(l('game.routeWaiting'), style: t.footnote),
+            ]),
+          )
         else ...[
-          Row(children: [
-            FlagBadge(node?.countryCode, size: 36),
-            const SizedBox(width: Space.m),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text((node == null ? null : nodeTitle(node)) ?? group.current ?? '—',
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: context.t.headline),
-                if (node != null) ...[const SizedBox(height: 3), ProtocolBadge(node.protocol)],
-              ]),
-            ),
-            Text(lat == null ? '—' : '$lat',
-                style: context.t.title1.copyWith(
-                    color: c.latency(lat), fontFeatures: const [FontFeature.tabularFigures()])),
-            if (lat != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 3, top: 8),
-                child: Text(l('unit.ms', {'n': ''}).trim(), style: context.t.caption),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.m),
+            child: Row(children: [
+              const _LiveDot(),
+              const SizedBox(width: Space.m),
+              CountryCode(node?.countryCode),
+              const SizedBox(width: Space.m),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text((node == null ? null : nodeTitle(node)) ?? group.current ?? '—',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: t.headline),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    if (node != null) ...[
+                      ProtocolBadge(node.protocol),
+                      Text(' · ', style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
+                    ],
+                    Text((group.auto == false ? l('game.pinned') : l('game.nodeAuto')).toUpperCase(),
+                        style: t.monoSmall),
+                  ]),
+                ]),
               ),
-          ]),
-          const SizedBox(height: Space.m),
-          SizedBox(
-            height: 56,
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: LatencyChartPainter(
-                samples: app.gameLatencyHistory,
-                color: _gameB,
-                failColor: c.danger,
-                gridColor: c.separator.withValues(alpha: 0.5),
+              const SizedBox(width: Space.m),
+              Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                      text: lat == null ? '—' : '$lat',
+                      style: t.monoLarge.copyWith(color: c.latency(lat))),
+                  if (lat != null)
+                    TextSpan(
+                        text: ' ${l('unit.ms', {'n': ''}).trim()}',
+                        style: t.mono.copyWith(color: c.tertiaryLabel)),
+                ]),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.m),
+            child: SizedBox(
+              height: 52,
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: LatencyChartPainter(
+                  samples: app.gameLatencyHistory,
+                  color: c.label,
+                  failColor: c.danger,
+                  gridColor: c.separator,
+                ),
               ),
             ),
           ),
-          const SizedBox(height: Space.m),
-          MetricsRow(items: [
-            (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
-            (
-              l('stat.loss'),
-              stat?.loss == null ? '—' : formatLoss(stat!.loss!),
-              (stat?.loss ?? 0) > 0.02 ? c.warning : null,
-            ),
-            (l('stat.score'), stat?.score == null ? '—' : stat!.score!.toStringAsFixed(1), null),
-          ]),
+          const Hairline(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m + 2),
+            child: MetricsRow(items: [
+              (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
+              (
+                l('stat.loss'),
+                stat?.loss == null ? '—' : formatLoss(stat!.loss!),
+                (stat?.loss ?? 0) > 0.02 ? c.warning : null,
+              ),
+              (l('stat.score'), stat?.score == null ? '—' : stat!.score!.toStringAsFixed(1), null),
+            ]),
+          ),
           if (group.lastSwitch?.reason != null) ...[
-            const SizedBox(height: Space.m),
-            Text(
-              group.lastSwitch!.at == null
-                  ? l('home.switchedReason', {'reason': group.lastSwitch!.reason!})
-                  : l('home.switchedAgo', {
-                      'ago': formatAgo(l, DateTime.now().difference(group.lastSwitch!.at!)),
-                      'reason': group.lastSwitch!.reason!,
-                    }),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: context.t.footnote,
+            const Hairline(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.l, Space.s + 2, Space.l, Space.m),
+              child: Text(
+                group.lastSwitch!.at == null
+                    ? l('home.switchedReason', {'reason': group.lastSwitch!.reason!})
+                    : l('home.switchedAgo', {
+                        'ago': formatAgo(l, DateTime.now().difference(group.lastSwitch!.at!)),
+                        'reason': group.lastSwitch!.reason!,
+                      }),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: t.footnote,
+              ),
             ),
           ],
         ],
@@ -482,6 +350,8 @@ class _GameRoutePanel extends StatelessWidget {
   }
 }
 
+/// Live indicator: a green dot with a slow, soft breathing ring while the
+/// game route is being measured (still with reduced motion).
 class _LiveDot extends StatefulWidget {
   const _LiveDot();
   @override
@@ -490,7 +360,7 @@ class _LiveDot extends StatefulWidget {
 
 class _LiveDotState extends State<_LiveDot> with SingleTickerProviderStateMixin {
   late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1600));
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
 
   @override
   void didChangeDependencies() {
@@ -514,14 +384,14 @@ class _LiveDotState extends State<_LiveDot> with SingleTickerProviderStateMixin 
     return AnimatedBuilder(
       animation: _c,
       builder: (context, _) => SizedBox.square(
-        dimension: 14,
+        dimension: 12,
         child: Stack(alignment: Alignment.center, children: [
           Container(
-            width: 6 + 8 * _c.value,
-            height: 6 + 8 * _c.value,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.4 * (1 - _c.value))),
+            width: 6 + 6 * _c.value,
+            height: 6 + 6 * _c.value,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color.withValues(alpha: 0.3 * (1 - _c.value))),
           ),
-          Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+          StatusDot(color, size: 6),
         ]),
       ),
     );
@@ -535,18 +405,6 @@ class _GameTile extends StatelessWidget {
   final GamePreset preset;
   final bool selected;
   final VoidCallback onTap;
-
-  /// Deterministic per-game gradient so each tile has its own identity.
-  static (Color, Color) colors(String id) {
-    var h = 0;
-    for (final u in id.codeUnits) {
-      h = (h * 31 + u) & 0x7fffffff;
-    }
-    final hue = (h % 360).toDouble();
-    final a = HSLColor.fromAHSL(1, hue, 0.72, 0.56).toColor();
-    final b = HSLColor.fromAHSL(1, (hue + 38) % 360, 0.78, 0.46).toColor();
-    return (a, b);
-  }
 
   static String initials(String name) {
     final words = name
@@ -564,56 +422,54 @@ class _GameTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final (a, b) = colors(preset.id);
+    final t = context.t;
     final pc = preset.desktopProcesses.isNotEmpty;
     final mobile = preset.androidPackages.isNotEmpty;
     return PressableScale(
       haptic: true,
       onTap: onTap,
+      scale: 0.98,
       semanticLabel: preset.name,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(Space.m),
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.fromLTRB(Space.m, Space.m, Space.m, Space.m),
         decoration: ShapeDecoration(
-          color: selected
-              ? Color.alphaBlend(a.withValues(alpha: c.isDark ? 0.2 : 0.1), c.surface)
-              : c.surface,
-          shape: Radii.shape(Radii.l,
-              side: BorderSide(color: selected ? a : Colors.transparent, width: 1.5)),
+          color: c.surface,
+          shape: Radii.shape(Radii.m,
+              side: BorderSide(color: selected ? c.accent : c.separator, width: selected ? 1.5 : kHairline)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
             Container(
-              width: 42,
-              height: 42,
+              height: 20,
+              padding: const EdgeInsets.symmetric(horizontal: 5),
               alignment: Alignment.center,
               decoration: ShapeDecoration(
-                shape: Radii.shape(12),
-                gradient: LinearGradient(
-                    begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [a, b]),
+                color: c.fill,
+                shape: Radii.shape(Radii.xs, side: BorderSide(color: c.separator, width: kHairline)),
               ),
               child: Text(initials(preset.name),
-                  style: context.t.headline.copyWith(color: Colors.white, letterSpacing: -0.5)),
+                  style: t.monoSmall.copyWith(color: c.label, letterSpacing: 0.6)),
             ),
             const Spacer(),
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
+              duration: const Duration(milliseconds: 180),
               transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
               child: selected
-                  ? Icon(Icons.check_circle_rounded, key: const ValueKey(1), color: a, size: 22)
-                  : Icon(Icons.circle_outlined, key: const ValueKey(0), color: c.tertiaryLabel, size: 22),
+                  ? Icon(Icons.check_rounded, key: const ValueKey(1), color: c.accent, size: 18)
+                  : const SizedBox(key: ValueKey(0), height: 18),
             ),
           ]),
           const Spacer(),
           Text(preset.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 2),
+              style: t.subhead.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 3),
           Row(children: [
-            if (pc) Icon(Icons.desktop_windows_rounded, size: 12, color: c.secondaryLabel),
-            if (pc && mobile) const SizedBox(width: 4),
-            if (mobile) Icon(Icons.phone_iphone_rounded, size: 12, color: c.secondaryLabel),
+            if (pc) Icon(Icons.desktop_windows_outlined, size: 12, color: c.tertiaryLabel),
+            if (pc && mobile) const SizedBox(width: 5),
+            if (mobile) Icon(Icons.smartphone_rounded, size: 12, color: c.tertiaryLabel),
           ]),
         ]),
       ),

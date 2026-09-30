@@ -6,12 +6,12 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/country.dart';
 import '../../core/models.dart';
 import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../theme/pressable.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/format.dart';
@@ -67,14 +67,14 @@ class _ServersScreenState extends State<ServersScreen> {
       actions: [
         if (!empty) ...[
           _SortButton(value: _sort, onChanged: (s) => setState(() => _sort = s)),
-          CircleIconButton(
+          ToolButton(
             icon: Icons.speed_rounded,
             tooltip: viaUrl ? l('servers.pingAllUrl') : l('servers.pingAllTcp'),
             busy: app.pingingAll,
             onTap: app.nodes.isEmpty ? null : app.pingAll,
           ),
         ],
-        CircleIconButton(
+        ToolButton(
           icon: Icons.add_rounded,
           tooltip: l('servers.add'),
           filled: true,
@@ -88,45 +88,45 @@ class _ServersScreenState extends State<ServersScreen> {
           SliverToBoxAdapter(child: _searchBar(app, l, c)),
           for (final (i, (sub, nodes)) in groups.indexed)
             if (!_filtering || nodes.isNotEmpty) ...[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(top: i == 0 ? Space.m : Space.l),
-                  child: _GroupHeader(
-                    sub: sub,
-                    count: sub == null ? nodes.length : app.nodesOf(sub.id).length,
-                    collapsed: _collapsed.contains(sub?.id ?? '_'),
-                    alone: _collapsed.contains(sub?.id ?? '_'),
-                    onToggle: () => setState(() {
-                      final k = sub?.id ?? '_';
-                      _collapsed.contains(k) ? _collapsed.remove(k) : _collapsed.add(k);
-                    }),
-                  ),
+              SliverToBoxAdapter(child: SizedBox(height: i == 0 ? Space.l : Space.m)),
+              DecoratedSliver(
+                decoration: ShapeDecoration(
+                  color: c.surface,
+                  shape: Radii.shape(Radii.m, side: BorderSide(color: c.separator, width: kHairline)),
                 ),
-              ),
-              if (!_collapsed.contains(sub?.id ?? '_'))
-                if (nodes.isEmpty)
+                sliver: SliverMainAxisGroup(slivers: [
                   SliverToBoxAdapter(
-                    child: Container(
-                      padding: const EdgeInsets.all(Space.l),
-                      decoration: ShapeDecoration(
-                        color: c.surface,
-                        shape: const RoundedSuperellipseBorder(
-                            borderRadius: BorderRadius.vertical(bottom: Radius.circular(Radii.l))),
-                      ),
-                      child: Text(
-                        app.updating.contains(sub?.id) ? l('servers.updating') : l('servers.groupEmpty'),
-                        style: context.t.footnote,
-                      ),
-                    ),
-                  )
-                else
-                  SliverList.builder(
-                    itemCount: nodes.length,
-                    itemBuilder: (context, i) => _NodeRow(
-                      node: nodes[i],
-                      last: i == nodes.length - 1,
+                    child: _GroupHeader(
+                      sub: sub,
+                      count: sub == null ? nodes.length : app.nodesOf(sub.id).length,
+                      collapsed: _collapsed.contains(sub?.id ?? '_'),
+                      onToggle: () => setState(() {
+                        final k = sub?.id ?? '_';
+                        _collapsed.contains(k) ? _collapsed.remove(k) : _collapsed.add(k);
+                      }),
                     ),
                   ),
+                  if (!_collapsed.contains(sub?.id ?? '_'))
+                    if (nodes.isEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.l),
+                          child: Text(
+                            app.updating.contains(sub?.id) ? l('servers.updating') : l('servers.groupEmpty'),
+                            style: context.t.footnote,
+                          ),
+                        ),
+                      )
+                    else
+                      SliverList.builder(
+                        itemCount: nodes.length,
+                        itemBuilder: (context, i) => _NodeRow(
+                          node: nodes[i],
+                          last: i == nodes.length - 1,
+                        ),
+                      ),
+                ]),
+              ),
             ],
         ],
       ],
@@ -155,20 +155,20 @@ class _ServersScreenState extends State<ServersScreen> {
           style: context.t.body,
           decoration: InputDecoration(
             hintText: l('servers.search'),
-            prefixIcon: Icon(Icons.search_rounded, color: c.secondaryLabel, size: 20),
-            prefixIconConstraints: const BoxConstraints(minWidth: 40),
+            prefixIcon: Icon(Icons.search_rounded, color: c.tertiaryLabel, size: 18),
+            prefixIconConstraints: const BoxConstraints(minWidth: 38),
             suffixIcon: _search.text.isEmpty
                 ? null
                 : IconButton(
                     tooltip: l('common.clear'),
-                    icon: Icon(Icons.cancel_rounded, size: 18, color: c.tertiaryLabel),
+                    icon: Icon(Icons.close_rounded, size: 16, color: c.tertiaryLabel),
                     onPressed: () => setState(_search.clear),
                   ),
           ),
         ),
         const SizedBox(height: Space.s),
         SizedBox(
-          height: 34,
+          height: 30,
           child: Row(children: [
             Expanded(
               child: _FadeEdges(
@@ -212,9 +212,9 @@ class _ServersScreenState extends State<ServersScreen> {
             ),
             if (canUpdate) ...[
               const SizedBox(width: Space.s),
-              CircleIconButton(
+              ToolButton(
                 icon: Icons.sync_rounded,
-                size: 34,
+                size: 30,
                 tooltip: l('servers.updateAll'),
                 busy: app.updating.isNotEmpty,
                 onTap: app.updateAllSubscriptions,
@@ -227,10 +227,10 @@ class _ServersScreenState extends State<ServersScreen> {
   }
 }
 
-/// "🇩🇪 DE" where flag emoji render, plain "DE" otherwise.
-String countryLabel(String cc) => emojiFlagsSupported ? '${flagEmoji(cc)}  $cc' : cc;
+/// Country as its ISO code (flags are carried by [CountryCode] boxes).
+String countryLabel(String cc) => cc.toUpperCase();
 
-/// Fades the ends of a horizontal scroller so clipped chips read as
+/// Fades the end of a horizontal scroller so clipped chips read as
 /// "there's more", not as a layout bug.
 class _FadeEdges extends StatelessWidget {
   const _FadeEdges({required this.child});
@@ -247,7 +247,7 @@ class _FadeEdges extends StatelessWidget {
       );
 }
 
-/// Friendly first-run state: one obvious primary action, two shortcuts.
+/// First-run state: one primary action, two shortcuts.
 class ServersEmptyState extends StatelessWidget {
   const ServersEmptyState({super.key});
 
@@ -257,45 +257,23 @@ class ServersEmptyState extends StatelessWidget {
     final c = context.c;
     final mobile = Platform.isAndroid || Platform.isIOS;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(Space.l, Space.x4, Space.l, Space.xl),
+      padding: const EdgeInsets.fromLTRB(Space.l, Space.x6, Space.l, Space.xl),
       child: Column(children: [
-        SizedBox(
-          width: 112,
-          height: 112,
-          child: Stack(alignment: Alignment.center, children: [
-            for (final (r, a) in [(112.0, 0.06), (84.0, 0.10)])
-              Container(
-                width: r,
-                height: r,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: c.accent.withValues(alpha: a)),
-              ),
-            Container(
-              width: 60,
-              height: 60,
-              decoration: ShapeDecoration(
-                shape: Radii.shape(18),
-                gradient: c.accentGradient,
-                shadows: [BoxShadow(color: c.accent.withValues(alpha: 0.35), blurRadius: 18, offset: const Offset(0, 6))],
-              ),
-              child: const Icon(Icons.public_rounded, color: Colors.white, size: 32),
-            ),
-          ]),
-        ),
-        const SizedBox(height: Space.xl),
+        Icon(Icons.dns_outlined, size: 28, color: c.tertiaryLabel),
+        const SizedBox(height: Space.l),
         Text(l('servers.emptyTitle'), style: context.t.title3, textAlign: TextAlign.center),
         const SizedBox(height: Space.s),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
+          constraints: const BoxConstraints(maxWidth: 340),
           child: Text(l('servers.emptyText'),
               style: context.t.callout.copyWith(color: c.secondaryLabel), textAlign: TextAlign.center),
         ),
         const SizedBox(height: Space.xxl),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
+          constraints: const BoxConstraints(maxWidth: 340),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             PrimaryButton(
               label: l('servers.addSub'),
-              icon: Icons.add_rounded,
               expand: true,
               onTap: () => showAddSheet(context),
             ),
@@ -304,7 +282,6 @@ class ServersEmptyState extends StatelessWidget {
               Expanded(
                 child: SecondaryButton(
                   label: l('add.paste'),
-                  icon: Icons.content_paste_rounded,
                   expand: true,
                   onTap: () => importFromClipboard(context),
                 ),
@@ -314,7 +291,6 @@ class ServersEmptyState extends StatelessWidget {
                 Expanded(
                   child: SecondaryButton(
                     label: l('add.scanShort'),
-                    icon: Icons.qr_code_scanner_rounded,
                     expand: true,
                     onTap: () => importFromQr(context),
                   ),
@@ -351,14 +327,14 @@ class _SortButton extends StatelessWidget {
             child: Row(children: [
               SizedBox(
                 width: 24,
-                child: s == value ? Icon(Icons.check_rounded, size: 18, color: context.c.accent) : null,
+                child: s == value ? Icon(Icons.check_rounded, size: 16, color: context.c.accent) : null,
               ),
               Text(l('sort.${s.name}')),
             ]),
           ),
       ],
       child: IgnorePointer(
-        child: CircleIconButton(
+        child: ToolButton(
           icon: value == NodeSort.none ? Icons.swap_vert_rounded : Icons.sort_rounded,
           onTap: _noop,
         ),
@@ -391,21 +367,22 @@ class _FilterChip<T> extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 420, minWidth: 160),
       itemBuilder: (_) => [
         for (var i = 0; i < options.length; i++)
-          PopupMenuItem(value: i, height: 40, child: Text(options[i].$2)),
+          PopupMenuItem(value: i, height: 38, child: Text(options[i].$2)),
       ],
       child: Container(
-        padding: const EdgeInsets.only(left: 12, right: 8),
+        padding: const EdgeInsets.only(left: 10, right: 6),
         alignment: Alignment.center,
         decoration: ShapeDecoration(
-          color: active ? c.accent.withValues(alpha: c.isDark ? 0.22 : 0.12) : c.fill,
-          shape: Radii.shape(Radii.pill),
+          color: c.surface,
+          shape: Radii.shape(Radii.s + 1,
+              side: BorderSide(color: active ? c.accent : c.separator, width: kHairline)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Text(label,
-              style: context.t.subhead.copyWith(
-                  fontWeight: FontWeight.w500, color: active ? c.accent : c.label)),
+              style: context.t.caption.copyWith(
+                  fontSize: 13, color: active ? c.accent : c.label)),
           const SizedBox(width: 2),
-          Icon(Icons.expand_more_rounded, size: 18, color: active ? c.accent : c.secondaryLabel),
+          Icon(Icons.expand_more_rounded, size: 16, color: active ? c.accent : c.tertiaryLabel),
         ]),
       ),
     );
@@ -425,13 +402,15 @@ class _ActionChip extends StatelessWidget {
       onTap: onTap,
       haptic: true,
       child: Container(
-        padding: const EdgeInsets.only(left: 10, right: 12),
+        padding: const EdgeInsets.only(left: 8, right: 10),
         alignment: Alignment.center,
-        decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(Radii.pill)),
+        decoration: ShapeDecoration(
+            color: c.fill,
+            shape: Radii.shape(Radii.s + 1, side: BorderSide(color: c.separator, width: kHairline))),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16, color: c.secondaryLabel),
+          Icon(icon, size: 14, color: c.secondaryLabel),
           const SizedBox(width: 4),
-          Text(label, style: context.t.subhead.copyWith(fontWeight: FontWeight.w500)),
+          Text(label, style: context.t.caption.copyWith(fontSize: 13, color: c.label)),
         ]),
       ),
     );
@@ -440,20 +419,18 @@ class _ActionChip extends StatelessWidget {
 
 // ------------------------------------------------------------------ group header
 
-/// Top of a subscription's card: name, count, usage bar, expiry. Node rows
-/// continue the same card underneath.
+/// Top of a subscription's panel: name, count, usage bar, expiry. Node rows
+/// continue the same panel underneath.
 class _GroupHeader extends StatelessWidget {
   const _GroupHeader({
     required this.sub,
     required this.count,
     required this.collapsed,
-    required this.alone,
     required this.onToggle,
   });
   final Subscription? sub;
   final int count;
   final bool collapsed;
-  final bool alone;
   final VoidCallback onToggle;
 
   @override
@@ -461,6 +438,7 @@ class _GroupHeader extends StatelessWidget {
     final app = context.app;
     final l = context.l;
     final c = context.c;
+    final t = context.t;
     final s = sub;
     final used = (s?.upload ?? 0) + (s?.download ?? 0);
     final total = s?.total ?? 0;
@@ -475,132 +453,107 @@ class _GroupHeader extends StatelessWidget {
         l('sub.until', {'d': '${two(expire.day)}.${two(expire.month)}.${expire.year}'}),
       if (s?.updatedAt != null) l('sub.updated', {'t': _time(s!.updatedAt!)}),
     ];
+    final hasMeta = s != null && (frac != null || meta.isNotEmpty || (daysLeft ?? 0) < 0);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      decoration: ShapeDecoration(
-        color: c.surface,
-        shape: RoundedSuperellipseBorder(
-          borderRadius: BorderRadius.vertical(
-            top: const Radius.circular(Radii.l),
-            bottom: alone ? const Radius.circular(Radii.l) : Radius.zero,
-          ),
-        ),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.m, Space.s, Space.xs, Space.s),
-          child: Row(children: [
-            Expanded(
-              child: PressableScale(
-                scale: 0.99,
-                onTap: onToggle,
-                semanticLabel: s?.name ?? l('servers.manual'),
-                child: Row(children: [
-                  SpringValue(
-                    target: collapsed ? -0.25 : 0,
-                    builder: (context, v, child) => Transform.rotate(angle: v * 6.2832, child: child),
-                    child: Icon(Icons.expand_more_rounded, color: c.secondaryLabel, size: 22),
-                  ),
-                  const SizedBox(width: Space.xs),
-                  Flexible(
-                    child: Text(
-                      s?.name ?? l('servers.manual'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.t.headline,
-                    ),
-                  ),
-                  const SizedBox(width: Space.s),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                    decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(Radii.pill)),
-                    child: Text('$count',
-                        style: context.t.caption.copyWith(
-                            fontFeatures: const [FontFeature.tabularFigures()])),
-                  ),
-                ]),
-              ),
-            ),
-            if (s != null && s.url != null)
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: updating
-                    ? const Center(
-                        child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)))
-                    : IconButton(
-                        tooltip: l('servers.update'),
-                        onPressed: () {
-                          HapticFeedback.lightImpact();
-                          app.updateSubscription(s.id);
-                        },
-                        icon: Icon(Icons.sync_rounded, size: 20, color: c.accent),
-                      ),
-              ),
-            if (s != null) _SubMenu(sub: s),
-          ]),
-        ),
-        if (s != null && (frac != null || meta.isNotEmpty || (daysLeft ?? 0) < 0)) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.m),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (frac != null) ...[
-                Row(children: [
-                  Expanded(
-                    child: Text(
-                      l('sub.usage', {'used': formatBytes(used, l: l), 'total': formatBytes(total, l: l)}),
-                      style: context.t.footnote.copyWith(
-                          color: c.label, fontFeatures: const [FontFeature.tabularFigures()]),
-                    ),
-                  ),
-                  if (daysLeft != null)
-                    Text(
-                      daysLeft < 0 ? l('sub.expired') : l('sub.daysLeft', {'n': '$daysLeft'}),
-                      style: context.t.footnote.copyWith(
-                          color: daysLeft < 3 ? c.danger : c.secondaryLabel,
-                          fontWeight: daysLeft < 3 ? FontWeight.w600 : null),
-                    ),
-                ]),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: SizedBox(
-                    height: 4,
-                    child: Stack(children: [
-                      Container(color: c.fill),
-                      FractionallySizedBox(
-                        widthFactor: frac,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: frac > 0.9
-                                ? LinearGradient(colors: [c.warning, c.danger])
-                                : c.accentGradient,
-                          ),
-                        ),
-                      ),
-                    ]),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Space.m, Space.s, Space.s, Space.s),
+        child: Row(children: [
+          Expanded(
+            child: PressableScale(
+              scale: 0.99,
+              onTap: onToggle,
+              semanticLabel: s?.name ?? l('servers.manual'),
+              child: Row(children: [
+                SpringValue(
+                  target: collapsed ? -0.25 : 0,
+                  builder: (context, v, child) => Transform.rotate(angle: v * 6.2832, child: child),
+                  child: Icon(Icons.expand_more_rounded, color: c.tertiaryLabel, size: 20),
+                ),
+                const SizedBox(width: Space.xs),
+                Flexible(
+                  child: Text(
+                    s?.name ?? l('servers.manual'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.headline,
                   ),
                 ),
-                const SizedBox(height: 6),
-              ] else if (daysLeft != null && daysLeft < 0) ...[
-                Text(l('sub.expired'), style: context.t.footnote.copyWith(color: c.danger)),
-                const SizedBox(height: 2),
-              ],
-              if (meta.isNotEmpty) Text(meta.join(' · '), style: context.t.caption),
-              if (s.announce != null && s.announce!.trim().isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(s.announce!,
-                    style: context.t.caption.copyWith(color: c.info),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis),
-              ],
-            ]),
+                const SizedBox(width: Space.s),
+                Text('$count', style: t.mono.copyWith(color: c.tertiaryLabel)),
+              ]),
+            ),
           ),
-        ],
-        if (!alone) Container(height: 0.5, color: c.separator),
-      ]),
-    );
+          if (s != null && s.url != null)
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: updating
+                  ? const Center(
+                      child: SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 1.5)))
+                  : IconButton(
+                      tooltip: l('servers.update'),
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        app.updateSubscription(s.id);
+                      },
+                      icon: Icon(Icons.sync_rounded, size: 18, color: c.secondaryLabel),
+                    ),
+            ),
+          if (s != null) _SubMenu(sub: s),
+        ]),
+      ),
+      if (hasMeta)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.m),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (frac != null) ...[
+              Row(children: [
+                Expanded(
+                  child: Text(
+                    l('sub.usage', {'used': formatBytes(used, l: l), 'total': formatBytes(total, l: l)}),
+                    style: t.mono.copyWith(color: c.secondaryLabel),
+                  ),
+                ),
+                if (daysLeft != null)
+                  Text(
+                    daysLeft < 0 ? l('sub.expired') : l('sub.daysLeft', {'n': '$daysLeft'}),
+                    style: t.footnote.copyWith(
+                        color: daysLeft < 3 ? c.danger : c.secondaryLabel,
+                        fontWeight: daysLeft < 3 ? FontWeight.w600 : null),
+                  ),
+              ]),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(1),
+                child: SizedBox(
+                  height: 3,
+                  child: Stack(children: [
+                    Container(color: c.fillStrong),
+                    FractionallySizedBox(
+                      widthFactor: frac,
+                      child: ColoredBox(color: frac > 0.9 ? c.warning : c.label),
+                    ),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ] else if (daysLeft != null && daysLeft < 0) ...[
+              Text(l('sub.expired'), style: t.footnote.copyWith(color: c.danger)),
+              const SizedBox(height: 2),
+            ],
+            if (meta.isNotEmpty) Text(meta.join(' · '), style: t.caption),
+            if (s.announce != null && s.announce!.trim().isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(s.announce!,
+                  style: t.caption.copyWith(color: c.label),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis),
+            ],
+          ]),
+        ),
+      if (!collapsed) const Hairline(),
+    ]);
   }
 
   static String _time(DateTime t) {
@@ -623,7 +576,7 @@ class _SubMenu extends StatelessWidget {
     return PopupMenuButton<String>(
       tooltip: l('common.more'),
       position: PopupMenuPosition.under,
-      icon: Icon(Icons.more_horiz_rounded, color: c.secondaryLabel),
+      icon: Icon(Icons.more_horiz_rounded, size: 20, color: c.secondaryLabel),
       onSelected: (v) async {
         switch (v) {
           case 'rename':
@@ -647,14 +600,14 @@ class _SubMenu extends StatelessWidget {
         }
       },
       itemBuilder: (_) => [
-        PopupMenuItem(value: 'rename', child: _mi(Icons.edit_rounded, l('common.rename'))),
+        PopupMenuItem(value: 'rename', child: _mi(Icons.edit_outlined, l('common.rename'))),
         if (sub.url != null) ...[
           PopupMenuItem(value: 'copy', child: _mi(Icons.link_rounded, l('sub.copyUrl'))),
           PopupMenuItem(value: 'interval', child: _mi(Icons.schedule_rounded, l('sub.interval'))),
         ],
         if (sub.webPageUrl != null || sub.supportUrl != null)
           PopupMenuItem(value: 'web', child: _mi(Icons.open_in_new_rounded, l('sub.site'))),
-        PopupMenuItem(value: 'delete', child: _mi(Icons.delete_rounded, l('common.delete'), color: c.danger)),
+        PopupMenuItem(value: 'delete', child: _mi(Icons.delete_outline_rounded, l('common.delete'), color: c.danger)),
       ],
     );
   }
@@ -662,7 +615,7 @@ class _SubMenu extends StatelessWidget {
 
 Widget _mi(IconData icon, String text, {Color? color}) => Builder(
       builder: (context) => Row(children: [
-        Icon(icon, size: 19, color: color ?? context.c.secondaryLabel),
+        Icon(icon, size: 17, color: color ?? context.c.secondaryLabel),
         const SizedBox(width: Space.m),
         Text(text, style: TextStyle(color: color)),
       ]),
@@ -679,17 +632,18 @@ class _NodeRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.app;
     final c = context.c;
+    final t = context.t;
     final l = context.l;
     final selected = app.selectedNode?.id == node.id && !app.settings.autoSelect;
     final active = app.connected && app.activeNode?.id == node.id;
     final lat = app.latencies[node.id];
     final ms = lat?.ms ?? app.statOf(node)?.latencyMs;
     final radius = BorderRadius.vertical(
-      bottom: last ? const Radius.circular(Radii.l) : Radius.zero,
+      bottom: last ? const Radius.circular(Radii.m) : Radius.zero,
     );
 
     final row = PressableScale(
-      scale: 0.985,
+      scale: 0.99,
       onTap: () {
         HapticFeedback.selectionClick();
         app.selectNode(node.id);
@@ -698,39 +652,37 @@ class _NodeRow extends StatelessWidget {
       child: GestureDetector(
         onSecondaryTap: () => showNodeActions(context, node),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: const Duration(milliseconds: 180),
           decoration: ShapeDecoration(
-            color: selected || active
-                ? Color.alphaBlend(c.accent.withValues(alpha: c.isDark ? 0.16 : 0.08), c.surface)
-                : c.surface,
-            shape: RoundedSuperellipseBorder(borderRadius: radius),
+            color: selected ? c.fill : Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: radius),
           ),
           child: Column(children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(Space.l, Space.m - 1, Space.s, Space.m - 1),
+              padding: const EdgeInsets.fromLTRB(Space.l, Space.m - 1, Space.m, Space.m - 1),
               child: Row(children: [
-                FlagBadge(node.countryCode, size: 34),
+                CountryCode(node.countryCode),
                 const SizedBox(width: Space.m),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(nodeTitle(node),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: context.t.callout.copyWith(fontWeight: FontWeight.w500)),
+                        style: t.body.copyWith(fontWeight: FontWeight.w500)),
                     const SizedBox(height: 3),
                     Row(children: [
                       ProtocolBadge(node.protocol),
                       if (active) ...[
-                        const SizedBox(width: Space.s),
-                        Icon(Icons.circle, size: 6, color: c.success),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: Space.s + 2),
+                        StatusDot(c.success, size: 6),
+                        const SizedBox(width: 5),
                         Text(l('servers.active'),
-                            style: context.t.caption.copyWith(color: c.success, fontWeight: FontWeight.w600)),
+                            style: t.caption.copyWith(color: c.success)),
                       ],
                     ]),
                   ]),
                 ),
-                const SizedBox(width: Space.s),
+                const SizedBox(width: Space.m),
                 Tooltip(
                   message: lat == null
                       ? ''
@@ -746,22 +698,18 @@ class _NodeRow extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 32,
+                  width: 28,
                   child: SpringValue(
                     target: selected ? 1 : 0,
                     spring: Springs.momentum,
                     builder: (context, v, child) =>
                         Transform.scale(scale: v.clamp(0.0, 1.2), child: child),
-                    child: Icon(Icons.check_rounded, color: c.accent, size: 22),
+                    child: Icon(Icons.check_rounded, color: c.accent, size: 18),
                   ),
                 ),
               ]),
             ),
-            if (!last)
-              Padding(
-                padding: const EdgeInsets.only(left: 62),
-                child: Container(height: 0.5, color: c.separator),
-              ),
+            if (!last) const Hairline(inset: Space.l),
           ]),
         ),
       ),
@@ -773,8 +721,8 @@ class _NodeRow extends StatelessWidget {
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: Space.xl),
-        decoration: ShapeDecoration(color: c.danger, shape: RoundedSuperellipseBorder(borderRadius: radius)),
-        child: const Icon(Icons.delete_rounded, color: Colors.white),
+        decoration: ShapeDecoration(color: c.danger, shape: RoundedRectangleBorder(borderRadius: radius)),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
       ),
       onDismissed: (_) {
         HapticFeedback.mediumImpact();
@@ -790,17 +738,19 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
   final app = context.appRead;
   final l = context.l;
   final c = context.c;
+  Widget ic(IconData i, {Color? color}) => Icon(i, size: 18, color: color ?? c.secondaryLabel);
   return showMelsiSheet(context, builder: (ctx) {
     void close() => Navigator.of(ctx).pop();
     return SafeArea(
       top: false,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(Space.l, 0, Space.l, Space.l),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           SheetHeader(title: nodeTitle(node)),
           GroupCard(children: [
             RowTile(
-              leading: IconTile(Icons.check_circle_rounded, color: c.accent),
+              dense: true,
+              leading: ic(Icons.check_rounded),
               title: l('node.select'),
               onTap: () {
                 close();
@@ -808,7 +758,8 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
               },
             ),
             RowTile(
-              leading: IconTile(Icons.speed_rounded, color: c.success),
+              dense: true,
+              leading: ic(Icons.speed_rounded),
               title: app.connected ? l('servers.pingAllUrl') : l('ping.tcp'),
               onTap: () {
                 close();
@@ -817,7 +768,8 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
             ),
             if (node.rawLink != null) ...[
               RowTile(
-                leading: IconTile(Icons.link_rounded, color: c.info),
+                dense: true,
+                leading: ic(Icons.link_rounded),
                 title: l('node.copyLink'),
                 onTap: () async {
                   await Clipboard.setData(ClipboardData(text: node.rawLink!));
@@ -826,7 +778,8 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
                 },
               ),
               RowTile(
-                leading: IconTile(Icons.qr_code_rounded, color: const Color(0xFF5856D6)),
+                dense: true,
+                leading: ic(Icons.qr_code_2_rounded),
                 title: l('node.qr'),
                 onTap: () {
                   close();
@@ -835,7 +788,8 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
               ),
             ],
             RowTile(
-              leading: IconTile(Icons.edit_rounded, color: c.warning),
+              dense: true,
+              leading: ic(Icons.edit_outlined),
               title: l('common.rename'),
               onTap: () async {
                 close();
@@ -844,7 +798,8 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
               },
             ),
             RowTile(
-              leading: IconTile(Icons.delete_rounded, color: c.danger),
+              dense: true,
+              leading: ic(Icons.delete_outline_rounded, color: c.danger),
               title: l('common.delete'),
               destructive: true,
               onTap: () {
@@ -853,8 +808,12 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
               },
             ),
           ]),
-          const SizedBox(height: Space.s),
-          Text('${node.server}:${node.port}', style: context.t.caption),
+          const SizedBox(height: Space.m),
+          Padding(
+            padding: const EdgeInsets.only(left: Space.xs),
+            child: Text('${node.server}:${node.port}',
+                style: context.t.monoSmall),
+          ),
         ]),
       ),
     );
@@ -871,13 +830,15 @@ Future<void> showQr(BuildContext context, ProxyNode node) {
             SheetHeader(title: nodeTitle(node)),
             Container(
               padding: const EdgeInsets.all(Space.l),
-              decoration: ShapeDecoration(color: Colors.white, shape: Radii.shape(Radii.l)),
+              decoration: ShapeDecoration(
+                  color: Colors.white,
+                  shape: Radii.shape(Radii.m, side: BorderSide(color: ctx.c.separator, width: kHairline))),
               child: QrImageView(
                 data: node.rawLink!,
-                size: 240,
-                eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.circle, color: Color(0xFF0B0B12)),
+                size: 232,
+                eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Color(0xFF1B1A17)),
                 dataModuleStyle: const QrDataModuleStyle(
-                    dataModuleShape: QrDataModuleShape.circle, color: Color(0xFF0B0B12)),
+                    dataModuleShape: QrDataModuleShape.square, color: Color(0xFF1B1A17)),
               ),
             ),
             const SizedBox(height: Space.l),
@@ -893,7 +854,7 @@ Future<void> showQr(BuildContext context, ProxyNode node) {
                   },
                 ),
               ),
-              const SizedBox(width: Space.m),
+              const SizedBox(width: Space.s),
               Expanded(
                 child: SecondaryButton(
                   label: l('common.share'),
@@ -926,7 +887,9 @@ Future<String?> promptText(BuildContext context,
         onSubmitted: (v) => Navigator.pop(ctx, v),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l('common.cancel'))),
+        TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l('common.cancel'), style: TextStyle(color: context.c.secondaryLabel))),
         TextButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: Text(l('common.ok'))),
       ],
     ),
@@ -942,7 +905,9 @@ Future<bool> confirm(BuildContext context,
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l('common.cancel'))),
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l('common.cancel'), style: TextStyle(color: context.c.secondaryLabel))),
         TextButton(
           onPressed: () => Navigator.pop(ctx, true),
           child: Text(destructive, style: TextStyle(color: context.c.danger, fontWeight: FontWeight.w600)),

@@ -10,8 +10,8 @@ import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../../state/traffic.dart';
 import '../shell.dart';
-import '../theme/glass.dart';
 import '../theme/pressable.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/charts.dart';
 import '../widgets/common.dart';
@@ -32,78 +32,84 @@ class HomeScreen extends StatelessWidget {
     final wide = context.isWide;
     return PageScaffold(
       title: l('tab.home'),
-      maxContentWidth: wide ? 980 : 760,
-      compactLeading: wide ? const SizedBox.shrink() : const _Wordmark(),
+      maxContentWidth: wide ? 1040 : 760,
+      compactLeading: wide ? const SizedBox.shrink() : const Wordmark(),
       slivers: [
         SliverToBoxAdapter(
           child: LayoutBuilder(builder: (context, box) {
             final connected = app.displayStatus == VpnStatus.connected;
-            final node = _NodeCard(app: app);
-            final traffic = _Reveal(
-              visible: connected,
-              child: _TrafficCard(traffic: app.traffic, connected: connected),
-            );
+            final main = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _Status(app: app),
+              const SizedBox(height: Space.l),
+              ConnectButton(status: app.displayStatus, onTap: app.toggle),
+              SectionHeader(
+                l('home.server'),
+                trailing: app.settings.autoSelect ? Tag(l('home.smartBadge')) : null,
+              ),
+              _NodePanel(app: app),
+              _Reveal(
+                visible: connected,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  SectionHeader(l('home.traffic')),
+                  _TrafficPanel(traffic: app.traffic, connected: connected),
+                ]),
+              ),
+            ]);
+            final side = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              SectionHeader(l('home.quick')),
+              _QuickToggles(app: app),
+              SectionHeader(l('home.routing')),
+              Segmented<RoutingPreset>(
+                value: app.routing.preset,
+                onChanged: (p) => app.updateRouting((r) => r.preset = p),
+                segments: [
+                  for (final p in RoutingPreset.values) Segment(p, l('preset.${p.name}.short')),
+                ],
+              ),
+              SectionFooter(l('preset.${app.routing.preset.name}.desc')),
+            ]);
             if (box.maxWidth < 820) {
-              return Column(children: [
-                _Hero(app: app),
-                node,
-                _Reveal(
-                  visible: connected,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: Space.m),
-                    child: _TrafficCard(traffic: app.traffic, connected: connected),
-                  ),
-                ),
-              ]);
+              return Padding(
+                padding: const EdgeInsets.only(top: Space.m),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [main, side]),
+              );
             }
-            // Wide: control column on the left, live cards on the right.
+            // Wide: live column on the left, controls on the right. The side
+            // column drops its first header's top margin to align with the
+            // status line.
             return Padding(
-              padding: const EdgeInsets.only(top: Space.l),
+              padding: const EdgeInsets.only(top: Space.xl),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                SizedBox(width: 340, child: _Hero(app: app, large: true)),
-                const SizedBox(width: Space.xxl),
-                Expanded(
-                  child: Column(children: [
-                    const SizedBox(height: Space.s),
-                    node,
-                    const SizedBox(height: Space.m),
-                    traffic,
+                Expanded(child: main),
+                const SizedBox(width: Space.x4),
+                SizedBox(
+                  width: 320,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    SectionHeader(l('home.quick'),
+                        padding: const EdgeInsets.fromLTRB(Space.xs, 0, Space.xs, Space.s + 2)),
+                    _QuickToggles(app: app),
+                    SectionHeader(l('home.routing')),
+                    Segmented<RoutingPreset>(
+                      value: app.routing.preset,
+                      onChanged: (p) => app.updateRouting((r) => r.preset = p),
+                      segments: [
+                        for (final p in RoutingPreset.values)
+                          Segment(p, l('preset.${p.name}.short')),
+                      ],
+                    ),
+                    SectionFooter(l('preset.${app.routing.preset.name}.desc')),
                   ]),
                 ),
               ]),
             );
           }),
         ),
-        SliverToBoxAdapter(child: SectionHeader(l('home.quick'))),
-        SliverToBoxAdapter(child: _QuickToggles(app: app)),
-        SliverToBoxAdapter(child: SectionHeader(l('home.routing'))),
-        SliverToBoxAdapter(
-          child: Segmented<RoutingPreset>(
-            height: 38,
-            value: app.routing.preset,
-            onChanged: (p) => app.updateRouting((r) => r.preset = p),
-            segments: [
-              for (final p in RoutingPreset.values) Segment(p, l('preset.${p.name}.short')),
-            ],
-          ),
-        ),
-        SliverToBoxAdapter(child: SectionFooter(l('preset.${app.routing.preset.name}.desc'))),
       ],
     );
   }
 }
 
-class _Wordmark extends StatelessWidget {
-  const _Wordmark();
-  @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-        const MelsiLogo(size: 28),
-        const SizedBox(width: Space.s + 2),
-        Text('Melsi', style: context.t.title3.copyWith(fontWeight: FontWeight.w700, letterSpacing: -0.5)),
-      ]);
-}
-
-/// Springs a card open/closed (height + fade) as it becomes relevant.
+/// Springs a block open/closed (height + fade) as it becomes relevant.
 class _Reveal extends StatelessWidget {
   const _Reveal({required this.visible, required this.child});
   final bool visible;
@@ -113,18 +119,13 @@ class _Reveal extends StatelessWidget {
   Widget build(BuildContext context) {
     final reduce = context.reduceMotion;
     return AnimatedSize(
-      duration: Duration(milliseconds: reduce ? 1 : 420),
+      duration: Duration(milliseconds: reduce ? 1 : 380),
       curve: Curves.easeOutCubic,
       alignment: Alignment.topCenter,
       child: AnimatedSwitcher(
-        duration: Duration(milliseconds: reduce ? 150 : 320),
+        duration: Duration(milliseconds: reduce ? 150 : 260),
         switchInCurve: Curves.easeOut,
-        transitionBuilder: (w, a) => FadeTransition(
-          opacity: a,
-          child: reduce
-              ? w
-              : ScaleTransition(scale: Tween(begin: 0.97, end: 1.0).animate(a), child: w),
-        ),
+        transitionBuilder: (w, a) => FadeTransition(opacity: a, child: w),
         child: visible
             ? KeyedSubtree(key: const ValueKey(1), child: child)
             : const SizedBox(key: ValueKey(0), width: double.infinity),
@@ -133,97 +134,79 @@ class _Reveal extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------------ hero
+// ------------------------------------------------------------------ status
 
-class _Hero extends StatelessWidget {
-  const _Hero({required this.app, this.large = false});
+/// One line: a dot in the meaning colour, the status, and — while connected —
+/// the session timer in tabular mono. Errors add their message underneath.
+class _Status extends StatelessWidget {
+  const _Status({required this.app});
   final AppState app;
-  final bool large;
 
   @override
   Widget build(BuildContext context) {
     final l = context.l;
     final c = context.c;
+    final t = context.t;
     final s = app.displayStatus;
-    final h = MediaQuery.sizeOf(context).height;
-    final size = large ? 188.0 : (h < 760 || MediaQuery.sizeOf(context).width < 380 ? 150.0 : 168.0);
-
-    final Widget detail = switch (s) {
-      VpnStatus.connected => _Timer(key: const ValueKey('timer'), since: app.sessionSince ?? DateTime.now()),
-      VpnStatus.error => Padding(
-          key: const ValueKey('err'),
-          padding: const EdgeInsets.symmetric(horizontal: Space.l),
-          child: Text(
-            app.vpnState.message == 'permission'
-                ? l('notice.permissionDenied')
-                : (app.vpnState.message ?? l('status.error')),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: context.t.footnote.copyWith(color: c.danger),
-          ),
-        ),
-      VpnStatus.connecting => Text(l('home.connectingHint'),
-          key: const ValueKey('hint-c'),
-          textAlign: TextAlign.center,
-          style: context.t.subhead.copyWith(color: c.secondaryLabel)),
-      _ => Text(app.nodes.isEmpty ? l('home.addServerHint') : l('home.tapToConnect'),
-          key: const ValueKey('hint'),
-          textAlign: TextAlign.center,
-          style: context.t.subhead.copyWith(color: c.secondaryLabel)),
+    final color = switch (s) {
+      VpnStatus.connected => c.success,
+      VpnStatus.connecting || VpnStatus.stopping => c.warning,
+      VpnStatus.error => c.danger,
+      VpnStatus.stopped => c.tertiaryLabel,
+    };
+    final String? note = switch (s) {
+      VpnStatus.error => app.vpnState.message == 'permission'
+          ? l('notice.permissionDenied')
+          : (app.vpnState.message ?? l('status.error')),
+      VpnStatus.stopped when app.nodes.isEmpty => l('home.addServerHint'),
+      _ => null,
     };
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: large ? 0 : Space.l),
-      child: Column(
-        children: [
-          ConnectButton(status: s, size: size, onTap: app.toggle),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(
+        height: 24,
+        child: Row(children: [
           AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            transitionBuilder: (child, a) => FadeTransition(
-              opacity: a,
-              child: SlideTransition(
-                position: Tween(begin: const Offset(0, 0.15), end: Offset.zero).animate(a),
-                child: child,
-              ),
-            ),
-            child: Text(
-              l('status.${s.name}'),
-              key: ValueKey(s),
-              style: context.t.title2.copyWith(
-                color: switch (s) {
-                  VpnStatus.connected => c.success,
-                  VpnStatus.error => c.danger,
-                  _ => c.label,
-                },
-              ),
-            ),
+            duration: const Duration(milliseconds: 200),
+            child: StatusDot(color, key: ValueKey(s), hollow: s == VpnStatus.stopped),
           ),
-          const SizedBox(height: Space.xs),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutCubic,
+          const SizedBox(width: Space.s + 2),
+          Flexible(
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              child: detail,
+              duration: const Duration(milliseconds: 200),
+              child: Text(l('status.${s.name}'),
+                  key: ValueKey(s),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.headline.copyWith(fontSize: 15)),
             ),
           ),
-          if (app.nodes.isEmpty && s == VpnStatus.stopped) ...[
-            const SizedBox(height: Space.l),
-            PrimaryButton(
-              label: l('servers.addSub'),
-              icon: Icons.add_rounded,
-              onTap: () => showAddSheet(context),
-            ),
+          if (s == VpnStatus.connected) ...[
+            Text(' · ', style: t.headline.copyWith(fontSize: 15, color: c.tertiaryLabel)),
+            _Timer(since: app.sessionSince ?? DateTime.now()),
           ],
-        ],
+        ]),
       ),
-    );
+      AnimatedSize(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topLeft,
+        child: note == null
+            ? const SizedBox(width: double.infinity)
+            : Padding(
+                padding: const EdgeInsets.only(top: Space.xs, left: Space.l + 2),
+                child: Text(note,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.footnote.copyWith(color: s == VpnStatus.error ? c.danger : null)),
+              ),
+      ),
+    ]);
   }
 }
 
 class _Timer extends StatefulWidget {
-  const _Timer({super.key, required this.since});
+  const _Timer({required this.since});
   final DateTime since;
   @override
   State<_Timer> createState() => _TimerState();
@@ -241,23 +224,25 @@ class _TimerState extends State<_Timer> {
   }
 
   @override
-  Widget build(BuildContext context) => Text(
-        formatDuration(DateTime.now().difference(widget.since)),
-        semanticsLabel: formatDuration(DateTime.now().difference(widget.since)),
-        style: context.t.display.copyWith(fontSize: 38, fontWeight: FontWeight.w500, letterSpacing: -1.1),
-      );
+  Widget build(BuildContext context) {
+    final s = formatDuration(DateTime.now().difference(widget.since));
+    return Text(s,
+        semanticsLabel: s,
+        style: context.t.mono.copyWith(fontSize: 15, color: context.c.secondaryLabel));
+  }
 }
 
-// ------------------------------------------------------------------ node card
+// ------------------------------------------------------------------ node panel
 
-class _NodeCard extends StatelessWidget {
-  const _NodeCard({required this.app});
+class _NodePanel extends StatelessWidget {
+  const _NodePanel({required this.app});
   final AppState app;
 
   @override
   Widget build(BuildContext context) {
     final l = context.l;
     final c = context.c;
+    final t = context.t;
     final node = app.activeNode;
     final auto = app.settings.autoSelect;
     final connected = app.displayStatus == VpnStatus.connected;
@@ -267,83 +252,87 @@ class _NodeCard extends StatelessWidget {
     final sub = app.subscriptionById(node?.subscriptionId);
 
     return PressableScale(
-      scale: 0.98,
+      key: const ValueKey('home-node-panel'),
+      scale: 0.99,
       semanticLabel: l('switcher.title'),
       onTap: () => node == null ? showAddSheet(context) : showServerSwitcher(context),
-      child: Card2(
-        padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.m, Space.l),
+      child: Panel(
+        padding: EdgeInsets.zero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CardLabel(
-              l('home.server'),
-              trailing: auto ? Pill(l('home.smartBadge'), icon: Icons.auto_awesome_rounded) : null,
-            ),
-            const SizedBox(height: Space.m),
-            if (node == null)
-              Row(children: [
-                Expanded(
-                  child: Text(l('home.noServer'),
-                      style: context.t.headline.copyWith(color: c.secondaryLabel)),
-                ),
-                Icon(Icons.add_circle_rounded, color: c.accent),
-              ])
-            else
-              Row(children: [
-                FlagBadge(node.countryCode, size: 40),
-                const SizedBox(width: Space.m),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(nodeTitle(node),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: context.t.headline),
-                      const SizedBox(height: 3),
-                      Row(children: [
-                        ProtocolBadge(node.protocol),
-                        if (sub != null) ...[
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(sub.name,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.m, Space.m + 2),
+              child: node == null
+                  ? Row(children: [
+                      Expanded(
+                        child: Text(l('home.noServer'),
+                            style: t.body.copyWith(color: c.secondaryLabel)),
+                      ),
+                      Icon(Icons.add_rounded, color: c.accent, size: 20),
+                    ])
+                  : Row(children: [
+                      CountryCode(node.countryCode),
+                      const SizedBox(width: Space.m),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(nodeTitle(node),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: context.t.caption),
-                          ),
-                        ],
-                      ]),
-                    ],
-                  ),
-                ),
-                if (!connected) ...[
-                  const SizedBox(width: Space.s),
-                  LatencyChip(
-                    ms: lat,
-                    testing: app.pinging.contains(node.id),
-                    failed: app.latencies[node.id]?.failed ?? false,
-                    label: l('ping.timeout'),
-                    onTest: () => app.pingNode(node.id),
-                  ),
-                ],
-                const SizedBox(width: Space.xs),
-                Icon(Icons.unfold_more_rounded, color: c.tertiaryLabel, size: 20),
-              ]),
+                                style: t.headline),
+                            const SizedBox(height: 3),
+                            Row(children: [
+                              ProtocolBadge(node.protocol),
+                              if (sub != null) ...[
+                                Text(' · ', style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
+                                Flexible(
+                                  child: Text(sub.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.caption),
+                                ),
+                              ],
+                            ]),
+                          ],
+                        ),
+                      ),
+                      if (!connected) ...[
+                        const SizedBox(width: Space.m),
+                        LatencyChip(
+                          ms: lat,
+                          testing: app.pinging.contains(node.id),
+                          failed: app.latencies[node.id]?.failed ?? false,
+                          label: l('ping.timeout'),
+                          onTest: () => app.pingNode(node.id),
+                        ),
+                      ],
+                      const SizedBox(width: Space.s),
+                      Icon(Icons.unfold_more_rounded, color: c.tertiaryLabel, size: 18),
+                    ]),
+            ),
             if (node != null && connected) ...[
-              const SizedBox(height: Space.m),
-              MetricsRow(items: [
-                (l('stat.latency'), formatMs(lat, l), lat == null ? null : c.latency(lat)),
-                (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
-                (
-                  l('stat.loss'),
-                  stat?.loss == null ? '—' : formatLoss(stat!.loss!),
-                  (stat?.loss ?? 0) > 0.02 ? c.warning : null,
-                ),
-              ]),
+              const Hairline(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m + 2),
+                child: MetricsRow(items: [
+                  (l('stat.latency'), formatMs(lat, l), lat == null ? null : c.latency(lat)),
+                  (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
+                  (
+                    l('stat.loss'),
+                    stat?.loss == null ? '—' : formatLoss(stat!.loss!),
+                    (stat?.loss ?? 0) > 0.02 ? c.warning : null,
+                  ),
+                ]),
+              ),
             ],
             if (auto && connected && sw?.reason != null) ...[
-              const SizedBox(height: Space.m),
-              _SwitchReason(sw: sw!),
+              const Hairline(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.l, Space.s + 2, Space.l, Space.m),
+                child: _SwitchReason(sw: sw!),
+              ),
             ],
           ],
         ),
@@ -365,23 +354,14 @@ class _SwitchReason extends StatelessWidget {
             'ago': formatAgo(l, DateTime.now().difference(sw.at!)),
             'reason': sw.reason!,
           });
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.only(top: 1),
-        child: Icon(Icons.swap_horiz_rounded, size: 16, color: context.c.accent),
-      ),
-      const SizedBox(width: 6),
-      Expanded(
-        child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: context.t.footnote),
-      ),
-    ]);
+    return Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: context.t.footnote);
   }
 }
 
 // ------------------------------------------------------------------ traffic
 
-class _TrafficCard extends StatelessWidget {
-  const _TrafficCard({required this.traffic, required this.connected});
+class _TrafficPanel extends StatelessWidget {
+  const _TrafficPanel({required this.traffic, required this.connected});
   final TrafficMonitor traffic;
   final bool connected;
 
@@ -389,40 +369,46 @@ class _TrafficCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l;
     final c = context.c;
-    return Card2(
-      padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.l),
+    return Panel(
+      padding: EdgeInsets.zero,
       child: ListenableBuilder(
         listenable: traffic,
         builder: (context, _) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CardLabel(l('home.traffic')),
-              const SizedBox(height: Space.s),
-              Row(children: [
-                Expanded(child: _Speed(icon: Icons.south_rounded, color: c.success, bps: traffic.down, label: l('home.down'))),
-                Expanded(child: _Speed(icon: Icons.north_rounded, color: c.accent2, bps: traffic.up, label: l('home.up'))),
-              ]),
-              const SizedBox(height: Space.m),
-              SizedBox(
-                height: 64,
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: SpeedChartPainter(
-                    down: traffic.downHistory,
-                    up: traffic.upHistory,
-                    downColor: c.success,
-                    upColor: c.accent2,
-                    gridColor: c.separator.withValues(alpha: 0.5),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, 0),
+                child: Row(children: [
+                  Expanded(child: _Speed(glyph: '↓', bps: traffic.down, label: l('home.down'))),
+                  Expanded(child: _Speed(glyph: '↑', bps: traffic.up, label: l('home.up'), quiet: true)),
+                ]),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m),
+                child: SizedBox(
+                  height: 56,
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: SpeedChartPainter(
+                      down: traffic.downHistory,
+                      up: traffic.upHistory,
+                      downColor: c.label,
+                      upColor: c.tertiaryLabel,
+                      gridColor: c.separator,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: Space.m),
-              Row(children: [
-                Expanded(child: _Total(label: l('home.downloaded'), value: formatBytes(traffic.downTotal, l: l))),
-                Expanded(child: _Total(label: l('home.uploaded'), value: formatBytes(traffic.upTotal, l: l))),
-                Expanded(child: _Total(label: l('home.connections'), value: connected ? '${traffic.connections}' : '—')),
-              ]),
+              const Hairline(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m + 2),
+                child: MetricsRow(items: [
+                  (l('home.downloaded'), formatBytes(traffic.downTotal, l: l), null),
+                  (l('home.uploaded'), formatBytes(traffic.upTotal, l: l), null),
+                  (l('home.connections'), connected ? '${traffic.connections}' : '—', null),
+                ]),
+              ),
             ],
           );
         },
@@ -431,57 +417,39 @@ class _TrafficCard extends StatelessWidget {
   }
 }
 
+/// Speed: overline label, then a large tabular mono number with its unit.
 class _Speed extends StatelessWidget {
-  const _Speed({required this.icon, required this.color, required this.bps, required this.label});
-  final IconData icon;
-  final Color color;
+  const _Speed({required this.glyph, required this.bps, required this.label, this.quiet = false});
+  final String glyph;
   final int bps;
   final String label;
+  final bool quiet;
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
     final (v, unit) = splitSpeed(bps, l: context.l);
-    return Row(children: [
-      Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.15), shape: BoxShape.circle),
-        child: Icon(icon, size: 16, color: color),
-      ),
-      const SizedBox(width: Space.s),
-      Flexible(
-        child: Text.rich(
-          TextSpan(children: [
-            TextSpan(text: v, style: context.t.title2.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
-            TextSpan(text: ' $unit', style: context.t.caption),
-          ]),
-          maxLines: 1,
-          overflow: TextOverflow.fade,
-          softWrap: false,
-          semanticsLabel: '$label $v $unit',
-        ),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Overline('$glyph $label'),
+      const SizedBox(height: 4),
+      Text.rich(
+        TextSpan(children: [
+          TextSpan(text: v, style: t.monoLarge.copyWith(color: quiet ? c.secondaryLabel : c.label)),
+          TextSpan(text: ' $unit', style: t.mono.copyWith(color: c.tertiaryLabel)),
+        ]),
+        maxLines: 1,
+        overflow: TextOverflow.fade,
+        softWrap: false,
+        semanticsLabel: '$label $v $unit',
       ),
     ]);
   }
 }
 
-class _Total extends StatelessWidget {
-  const _Total({required this.label, required this.value});
-  final String label;
-  final String value;
-  @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: context.t.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 2),
-          Text(value, style: context.t.mono.copyWith(fontSize: 14)),
-        ],
-      );
-}
-
 // ------------------------------------------------------------------ quick toggles
 
+/// Quick settings as plain switch rows: title, current value, switch.
 class _QuickToggles extends StatelessWidget {
   const _QuickToggles({required this.app});
   final AppState app;
@@ -489,128 +457,56 @@ class _QuickToggles extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l;
-    final c = context.c;
-    final tiles = [
-      _Toggle(
-        icon: Icons.auto_awesome_rounded,
-        color: c.accent,
+    return GroupCard(children: [
+      _QuickRow(
         title: l('quick.smart'),
-        subtitle: app.settings.autoSelect ? l('smart.${app.settings.smartMode.name}.short') : l('common.off'),
-        value: app.settings.autoSelect,
+        value: app.settings.autoSelect ? l('smart.${app.settings.smartMode.name}.short') : null,
+        on: app.settings.autoSelect,
         onChanged: app.setAutoSelect,
       ),
-      _Toggle(
-        icon: Icons.sports_esports_rounded,
-        color: const Color(0xFFFF7A1A),
+      _QuickRow(
         title: l('quick.game'),
-        subtitle: app.game.enabled
+        value: app.game.enabled
             ? l('quick.gameOn', {'n': '${app.game.gameIds.length + app.game.customApps.length}'})
-            : l('common.off'),
-        value: app.game.enabled,
+            : null,
+        on: app.game.enabled,
         onChanged: (v) => app.updateGame((g) => g.enabled = v),
       ),
-      _Toggle(
-        icon: Icons.lock_rounded,
-        color: const Color(0xFF14A8C9),
+      _QuickRow(
         title: l('quick.killSwitch'),
-        subtitle: app.settings.killSwitch ? l('common.on') : l('common.off'),
-        value: app.settings.killSwitch,
+        on: app.settings.killSwitch,
         onChanged: (v) => app.updateSettings((s) => s.killSwitch = v),
       ),
-      _Toggle(
-        icon: Icons.content_cut_rounded,
-        color: const Color(0xFFD9468A),
+      _QuickRow(
         title: l('quick.antiDpi'),
-        subtitle: app.settings.antiDpi ? l('common.on') : l('common.off'),
-        value: app.settings.antiDpi,
+        on: app.settings.antiDpi,
         onChanged: (v) => app.updateSettings((s) => s.antiDpi = v),
       ),
-    ];
-    return LayoutBuilder(builder: (context, box) {
-      final cols = box.maxWidth >= 640 ? 4 : 2;
-      final w = (box.maxWidth - Space.s * (cols - 1)) / cols;
-      return Wrap(
-        spacing: Space.s,
-        runSpacing: Space.s,
-        children: [for (final t in tiles) SizedBox(width: w, child: t)],
-      );
-    });
+    ]);
   }
 }
 
-/// Compact Control-Center-style toggle: the icon tile fills with colour when
-/// on; the whole tile is the hit target.
-class _Toggle extends StatelessWidget {
-  const _Toggle({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-  final IconData icon;
-  final Color color;
+class _QuickRow extends StatelessWidget {
+  const _QuickRow({required this.title, required this.on, required this.onChanged, this.value});
   final String title;
-  final String subtitle;
-  final bool value;
+  final String? value;
+  final bool on;
   final ValueChanged<bool> onChanged;
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Semantics(
-      toggled: value,
-      child: PressableScale(
-        haptic: true,
-        onTap: () => onChanged(!value),
-        semanticLabel: title,
-        child: SpringValue(
-          target: value ? 1 : 0,
-          builder: (context, v, _) {
-            final t = v.clamp(0.0, 1.0);
-            return Card2(
-              padding: const EdgeInsets.fromLTRB(Space.m, Space.m, Space.s, Space.m),
-              radius: Radii.l,
-              border: BorderSide(color: color.withValues(alpha: (c.isDark ? 0.45 : 0.35) * t), width: 1),
-              color: Color.lerp(c.surface,
-                  Color.alphaBlend(color.withValues(alpha: c.isDark ? 0.18 : 0.08), c.surface), t),
-              child: Row(children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: ShapeDecoration(
-                    shape: Radii.shape(10),
-                    color: Color.lerp(c.fill, color, t),
-                  ),
-                  child: Icon(icon, size: 19, color: Color.lerp(c.secondaryLabel, Colors.white, t)),
-                ),
-                const SizedBox(width: Space.s + 2),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(title,
-                            maxLines: 1,
-                            style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-                      ),
-                      Text(subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: context.t.caption.copyWith(
-                              color: Color.lerp(c.secondaryLabel,
-                                  c.isDark ? color : Color.lerp(color, Colors.black, 0.2), t))),
-                    ],
-                  ),
-                ),
-              ]),
-            );
-          },
+  Widget build(BuildContext context) => Semantics(
+        toggled: on,
+        child: RowTile(
+          dense: true,
+          title: title,
+          onTap: () => onChanged(!on),
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (value != null) ...[
+              Text(value!, style: context.t.footnote),
+              const SizedBox(width: Space.m),
+            ],
+            MSwitch(value: on, onChanged: onChanged),
+          ]),
         ),
-      ),
-    );
-  }
+      );
 }

@@ -4,14 +4,30 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/country.dart';
 import '../../core/models.dart';
 import '../../l10n/l10n.dart';
-import '../theme/glass.dart';
 import '../theme/pressable.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 
-/// Section title above a group of cards.
+/// Small uppercase tracked label. The workhorse of the hierarchy: section
+/// headers, panel labels, metric captions all use it.
+class Overline extends StatelessWidget {
+  const Overline(this.text, {super.key, this.color, this.maxLines = 1});
+  final String text;
+  final Color? color;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text.toUpperCase(),
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+        style: context.t.overline.copyWith(color: color),
+      );
+}
+
+/// Section title above a group of panels.
 class SectionHeader extends StatelessWidget {
   const SectionHeader(this.title, {super.key, this.trailing, this.padding});
   final String title;
@@ -21,21 +37,18 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: padding ??
-            const EdgeInsets.fromLTRB(Space.xs, Space.xxl, Space.xs, Space.s),
+            const EdgeInsets.fromLTRB(Space.xs, Space.x3, Space.xs, Space.s + 2),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Expanded(
-              child: Text(title,
-                  style: context.t.headline.copyWith(fontSize: 18, letterSpacing: -0.3)),
-            ),
+            Expanded(child: Overline(title)),
             ?trailing,
           ],
         ),
       );
 }
 
-/// Small label at the top of a card ("Сервер", "Трафик"): sentence case,
-/// secondary colour, semibold — the same everywhere.
+/// Label at the top of a panel ("Сервер", "Трафик").
 class CardLabel extends StatelessWidget {
   const CardLabel(this.text, {super.key, this.trailing});
   final String text;
@@ -43,14 +56,9 @@ class CardLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 22,
+        height: 20,
         child: Row(children: [
-          Expanded(
-            child: Text(text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.t.footnote.copyWith(fontWeight: FontWeight.w600)),
-          ),
+          Expanded(child: Overline(text)),
           ?trailing,
         ]),
       );
@@ -62,14 +70,14 @@ class SectionFooter extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.l, Space.s, Space.l, 0),
+        padding: const EdgeInsets.fromLTRB(Space.xs, Space.s + 2, Space.xs, 0),
         child: Text(text, style: context.t.footnote),
       );
 }
 
-/// Grouped rows in one card with inset hairline separators.
+/// Grouped rows in one panel with inset hairline separators.
 class GroupCard extends StatelessWidget {
-  const GroupCard({super.key, required this.children, this.inset = 58});
+  const GroupCard({super.key, required this.children, this.inset = Space.l});
   final List<Widget> children;
   final double inset;
 
@@ -78,47 +86,17 @@ class GroupCard extends StatelessWidget {
     final items = <Widget>[];
     for (var i = 0; i < children.length; i++) {
       items.add(children[i]);
-      if (i < children.length - 1) {
-        items.add(Padding(
-          padding: EdgeInsetsDirectional.only(start: inset),
-          child: Container(height: 0.5, color: context.c.separator),
-        ));
-      }
+      if (i < children.length - 1) items.add(Hairline(inset: inset));
     }
-    return Card2(
+    return Panel(
       padding: EdgeInsets.zero,
-      child: ClipRSuperellipse(
-        borderRadius: BorderRadius.circular(Radii.l),
-        child: Column(mainAxisSize: MainAxisSize.min, children: items),
-      ),
+      clip: true,
+      child: Column(mainAxisSize: MainAxisSize.min, children: items),
     );
   }
 }
 
-/// Rounded-square coloured icon used at the start of rows.
-class IconTile extends StatelessWidget {
-  const IconTile(this.icon, {super.key, required this.color, this.size = 30});
-  final IconData icon;
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        decoration: ShapeDecoration(
-          shape: Radii.shape(size * 0.28),
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color.lerp(color, Colors.white, 0.12)!, color],
-          ),
-        ),
-        child: Icon(icon, color: Colors.white, size: size * 0.6),
-      );
-}
-
-/// A settings-style row.
+/// A settings-style row: title (+ subtitle), optional trailing value, chevron.
 class RowTile extends StatelessWidget {
   const RowTile({
     super.key,
@@ -149,10 +127,10 @@ class RowTile extends StatelessWidget {
     final t = context.t;
     Widget row = Padding(
       padding: EdgeInsets.symmetric(
-          horizontal: Space.l, vertical: dense ? Space.s : Space.m - 1),
+          horizontal: Space.l, vertical: dense ? Space.s + 1 : Space.m),
       child: Row(
         children: [
-          if (leading != null) ...[leading!, const SizedBox(width: Space.m + 2)],
+          if (leading != null) ...[leading!, const SizedBox(width: Space.m)],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,10 +149,10 @@ class RowTile extends StatelessWidget {
               ],
             ),
           ),
-          if (trailing != null) ...[const SizedBox(width: Space.s), trailing!],
+          if (trailing != null) ...[const SizedBox(width: Space.m), trailing!],
           if (chevron) ...[
-            const SizedBox(width: Space.xs),
-            Icon(Icons.chevron_right_rounded, color: c.tertiaryLabel, size: 22),
+            const SizedBox(width: Space.s),
+            Icon(Icons.chevron_right_rounded, color: c.tertiaryLabel, size: 18),
           ],
         ],
       ),
@@ -182,7 +160,7 @@ class RowTile extends StatelessWidget {
     if (onTap != null) {
       row = _Highlight(onTap: onTap!, child: row);
     }
-    return ConstrainedBox(constraints: const BoxConstraints(minHeight: 48), child: row);
+    return ConstrainedBox(constraints: const BoxConstraints(minHeight: 44), child: row);
   }
 }
 
@@ -215,7 +193,7 @@ class _HighlightState extends State<_Highlight> {
               color: _down
                   ? context.c.fillStrong
                   : _hover
-                      ? context.c.fill.withValues(alpha: 0.5)
+                      ? context.c.fill
                       : Colors.transparent,
               child: widget.child,
             ),
@@ -224,7 +202,8 @@ class _HighlightState extends State<_Highlight> {
       );
 }
 
-/// iOS-style switch (with a light haptic on flip).
+/// Switch (with a light haptic on flip). "On" is the accent: it is an
+/// interactive state, not a health signal.
 class MSwitch extends StatelessWidget {
   const MSwitch({super.key, required this.value, required this.onChanged, this.color});
   final bool value;
@@ -234,7 +213,8 @@ class MSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) => CupertinoSwitch(
         value: value,
-        activeTrackColor: color ?? context.c.success,
+        activeTrackColor: color ?? context.c.accent,
+        inactiveTrackColor: context.c.fillStrong,
         onChanged: onChanged == null
             ? null
             : (v) {
@@ -253,6 +233,7 @@ class SwitchRow extends StatelessWidget {
     this.subtitle,
     this.leading,
     this.color,
+    this.dense = false,
   });
   final String title;
   final String? subtitle;
@@ -260,52 +241,33 @@ class SwitchRow extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
   final Widget? leading;
   final Color? color;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) => RowTile(
         title: title,
         subtitle: subtitle,
         leading: leading,
+        dense: dense,
         onTap: onChanged == null ? null : () => onChanged!(!value),
         trailing: MSwitch(value: value, onChanged: onChanged, color: color),
       );
 }
 
-/// Quiet protocol tag. Deliberately neutral: the node name usually already
-/// says the protocol, so the badge is a scannable hint, not a headline.
-/// UDP-native protocols (good for games) get a faint warm tint.
+/// Protocol as a small monospaced tag. One neutral style for every
+/// protocol: the name is what matters, not a colour code.
 class ProtocolBadge extends StatelessWidget {
   const ProtocolBadge(this.protocol, {super.key});
   final ProxyProtocol protocol;
 
-  static Color colorFor(ProxyProtocol p, MelsiColors c) =>
-      p.udpNative ? const Color(0xFFE8773A) : c.secondaryLabel;
-
   @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final color = colorFor(protocol, c);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-      decoration: ShapeDecoration(
-        color: protocol.udpNative
-            ? color.withValues(alpha: c.isDark ? 0.16 : 0.10)
-            : c.fill,
-        shape: Radii.shape(Radii.xs - 1),
-      ),
-      child: Text(protocol.label,
-          style: context.t.caption2.copyWith(
-              color: protocol.udpNative ? color : c.secondaryLabel,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.15)),
-    );
-  }
+  Widget build(BuildContext context) =>
+      Text(protocol.label.toUpperCase(), style: context.t.monoSmall);
 }
 
-/// Latency pill: "48 мс" on a soft tint of its quality colour. Unknown shows
-/// a quiet "—" which, when [onTest] is set, is tappable to measure just that
-/// node. Shows a spinner while testing.
+/// Latency as right-aligned tabular text coloured by quality. Unknown shows
+/// "—" which, when [onTest] is set, is tappable to measure just that node.
+/// Shows a spinner while testing.
 class LatencyChip extends StatelessWidget {
   const LatencyChip({
     super.key,
@@ -314,12 +276,14 @@ class LatencyChip extends StatelessWidget {
     this.failed = false,
     this.label,
     this.onTest,
+    this.size = 13,
   });
   final int? ms;
   final bool testing;
   final bool failed;
   final String? label;
   final VoidCallback? onTest;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -329,21 +293,20 @@ class LatencyChip extends StatelessWidget {
     if (testing) {
       child = const SizedBox(
           key: ValueKey('t'),
-          width: 52,
-          height: 24,
-          child: Center(child: CupertinoActivityIndicator(radius: 7)));
+          width: 44,
+          height: 22,
+          child: Center(child: CupertinoActivityIndicator(radius: 6)));
     } else if (ms == null && !failed) {
-      child = Container(
+      child = SizedBox(
         key: const ValueKey('u'),
-        width: onTest == null ? 52 : 28,
-        height: 28,
-        alignment: Alignment.center,
-        decoration: onTest == null
-            ? null
-            : BoxDecoration(color: c.fill, shape: BoxShape.circle),
-        child: onTest == null
-            ? Text('—', style: context.t.footnote.copyWith(color: c.tertiaryLabel))
-            : Icon(Icons.speed_rounded, size: 15, color: c.secondaryLabel),
+        width: 44,
+        height: 22,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: onTest == null
+              ? Text('—', style: context.t.mono.copyWith(color: c.tertiaryLabel))
+              : Icon(Icons.speed_rounded, size: 16, color: c.tertiaryLabel),
+        ),
       );
       if (onTest != null) {
         child = Tooltip(
@@ -354,141 +317,105 @@ class LatencyChip extends StatelessWidget {
       }
     } else {
       final color = failed ? c.danger : c.latency(ms);
-      child = Container(
+      child = SizedBox(
         key: ValueKey('$ms$failed'),
-        height: 24,
-        constraints: const BoxConstraints(minWidth: 52),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        alignment: Alignment.center,
-        decoration: ShapeDecoration(
-          color: color.withValues(alpha: c.isDark ? 0.18 : 0.12),
-          shape: Radii.shape(Radii.pill),
-        ),
-        child: Text(
-          failed ? (label ?? '×') : l('unit.ms', {'n': '$ms'}),
-          style: context.t.mono.copyWith(
-              fontSize: 12.5,
-              color: failed || c.isDark ? color : Color.lerp(color, Colors.black, 0.18)),
+        height: 22,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            failed ? (label ?? '×') : l('unit.ms', {'n': '$ms'}),
+            maxLines: 1,
+            style: context.t.mono.copyWith(fontSize: size, color: color),
+          ),
         ),
       );
       if (onTest != null) {
-        child = PressableScale(key: child.key, scale: 0.92, onTap: onTest, child: child);
+        child = PressableScale(key: child.key, scale: 0.94, onTap: onTest, child: child);
       }
     }
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 200),
-      transitionBuilder: (w, a) => FadeTransition(
-          opacity: a, child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(a), child: w)),
+      duration: const Duration(milliseconds: 180),
+      transitionBuilder: (w, a) => FadeTransition(opacity: a, child: w),
       child: child,
     );
   }
 }
 
-/// Evenly spaced live metrics, label over tabular value.
+/// Metrics in columns: overline label over a tabular mono value, separated
+/// by hairlines. No fill — the type does the work.
 class MetricsRow extends StatelessWidget {
-  const MetricsRow({super.key, required this.items});
+  const MetricsRow({super.key, required this.items, this.large = false});
   final List<(String, String, Color?)> items;
+  final bool large;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: Space.s + 2),
-      decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(Radii.m)),
-      child: IntrinsicHeight(
-        child: Row(children: [
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0) VerticalDivider(width: 1, thickness: 0.5, color: c.separator, indent: 4, endIndent: 4),
-            Expanded(
-              child: Column(children: [
-                Text(items[i].$1, style: context.t.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Text(items[i].$2,
-                    maxLines: 1,
-                    style: context.t.mono.copyWith(fontSize: 16, color: items[i].$3 ?? c.label)),
-              ]),
-            ),
+    final t = context.t;
+    return IntrinsicHeight(
+      child: Row(children: [
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) ...[
+            const SizedBox(width: Space.m),
+            VerticalDivider(width: kHairline, thickness: kHairline, color: c.separator),
+            const SizedBox(width: Space.m),
           ],
-        ]),
-      ),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Overline(items[i].$1),
+              const SizedBox(height: 4),
+              Text(items[i].$2,
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: (large ? t.monoLarge : t.mono.copyWith(fontSize: 15))
+                      .copyWith(color: items[i].$3 ?? c.label)),
+            ]),
+          ),
+        ],
+      ]),
     );
   }
 }
 
-/// Stat chip: small caption over a value ("Jitter / 3 ms").
-class StatChip extends StatelessWidget {
-  const StatChip({super.key, required this.label, required this.value, this.color, this.icon});
-  final String label;
-  final String value;
-  final Color? color;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: Space.m - 2, vertical: Space.s - 2),
-        decoration: ShapeDecoration(color: context.c.fill, shape: Radii.shape(Radii.s)),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 14, color: color ?? context.c.secondaryLabel),
-              const SizedBox(width: 4),
-            ],
-            Text(label, style: context.t.caption),
-            const SizedBox(width: 6),
-            Text(value,
-                style: context.t.mono.copyWith(fontSize: 13, color: color ?? context.c.label)),
-          ],
-        ),
-      );
-}
-
 /// Emoji flags don't render on Windows (no flag glyphs) and are unreliable
-/// on Linux, so there we draw the ISO code instead.
+/// on Linux, so there we show the ISO code instead.
 final bool emojiFlagsSupported = !(Platform.isWindows || Platform.isLinux);
 
-/// Node name without a leading flag emoji (the [FlagBadge] shows it).
+/// Node name without a leading flag emoji (the [CountryCode] box carries
+/// the country).
 String nodeTitle(ProxyNode n) {
   final s = n.name.replaceFirst(RegExp(r'^(?:[\u{1F1E6}-\u{1F1FF}]{2}|\u{1F3F4}[\u{E0061}-\u{E007A}]+\u{E007F})\s*', unicode: true), '');
   return s.isEmpty ? n.name : s;
 }
 
-/// Round flag — emoji where the platform renders flags, ISO code otherwise.
-class FlagBadge extends StatelessWidget {
-  const FlagBadge(this.countryCode, {super.key, this.size = 34});
+/// ISO country code in a small monospaced box. Unknown → "—".
+class CountryCode extends StatelessWidget {
+  const CountryCode(this.countryCode, {super.key, this.width = 30});
   final String? countryCode;
-  final double size;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final cc = countryCode;
-    Widget inner;
-    if (cc == null || cc.length != 2) {
-      inner = Icon(Icons.public_rounded, size: size * 0.55, color: c.secondaryLabel);
-    } else if (emojiFlagsSupported) {
-      inner = Text(flagEmoji(cc),
-          style: TextStyle(fontSize: size * 0.56, height: 1.1), textAlign: TextAlign.center);
-    } else {
-      inner = Text(cc.toUpperCase(),
-          style: context.t.caption2.copyWith(
-              fontSize: size * 0.32, fontWeight: FontWeight.w700, color: c.label, letterSpacing: 0.3));
-    }
     return Container(
-      width: size,
-      height: size,
+      width: width,
+      height: 20,
       alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
+      decoration: ShapeDecoration(
         color: c.fill,
-        border: Border.all(color: c.separator.withValues(alpha: 0.6), width: 0.5),
+        shape: Radii.shape(Radii.xs, side: BorderSide(color: c.separator, width: kHairline)),
       ),
-      child: inner,
+      child: Text(
+        cc == null || cc.length != 2 ? '—' : cc.toUpperCase(),
+        style: context.t.monoSmall.copyWith(color: c.label, letterSpacing: 0.6),
+      ),
     );
   }
 }
 
-/// Primary call-to-action: gradient pill.
+/// Primary call-to-action: solid accent, no shadow.
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
     super.key,
@@ -496,14 +423,12 @@ class PrimaryButton extends StatelessWidget {
     this.icon,
     this.onTap,
     this.expand = false,
-    this.gradient,
     this.busy = false,
   });
   final String label;
   final IconData? icon;
   final VoidCallback? onTap;
   final bool expand;
-  final Gradient? gradient;
   final bool busy;
 
   @override
@@ -513,35 +438,27 @@ class PrimaryButton extends StatelessWidget {
     return PressableScale(
       onTap: enabled ? onTap : null,
       haptic: true,
+      scale: 0.98,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 150),
         opacity: enabled || busy ? 1 : 0.45,
         child: Container(
-          height: 48,
+          height: 44,
           padding: const EdgeInsets.symmetric(horizontal: Space.xl),
-          decoration: ShapeDecoration(
-            gradient: gradient ?? c.accentGradient,
-            shape: Radii.shape(Radii.m),
-            shadows: [
-              BoxShadow(
-                  color: c.accent.withValues(alpha: 0.28),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6)),
-            ],
-          ),
+          decoration: ShapeDecoration(color: c.accent, shape: Radii.shape(Radii.m - 2)),
           child: Row(
             mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (busy)
-                const CupertinoActivityIndicator(color: Colors.white, radius: 9)
+                CupertinoActivityIndicator(color: c.onAccent, radius: 8)
               else if (icon != null)
-                Icon(icon, color: c.onAccent, size: 20),
+                Icon(icon, color: c.onAccent, size: 18),
               if (busy || icon != null) const SizedBox(width: Space.s),
               Flexible(
                 child: Text(label,
                     overflow: TextOverflow.ellipsis,
-                    style: context.t.headline.copyWith(color: c.onAccent, fontSize: 16)),
+                    style: context.t.subhead.copyWith(color: c.onAccent, fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -551,7 +468,7 @@ class PrimaryButton extends StatelessWidget {
   }
 }
 
-/// Secondary: neutral fill.
+/// Secondary: hairline outline, label colour.
 class SecondaryButton extends StatelessWidget {
   const SecondaryButton({super.key, required this.label, this.icon, this.onTap, this.expand = false, this.color});
   final String label;
@@ -563,25 +480,26 @@ class SecondaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final fg = color ?? c.accent;
+    final fg = color ?? c.label;
     return PressableScale(
       onTap: onTap,
+      scale: 0.98,
       child: Container(
-        height: 44,
+        height: 40,
         padding: const EdgeInsets.symmetric(horizontal: Space.l),
         decoration: ShapeDecoration(
-          color: fg.withValues(alpha: c.isDark ? 0.18 : 0.1),
-          shape: Radii.shape(Radii.m),
+          color: c.surface,
+          shape: Radii.shape(Radii.m - 2, side: BorderSide(color: c.separator, width: kHairline)),
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (icon != null) ...[Icon(icon, size: 19, color: fg), const SizedBox(width: 6)],
+            if (icon != null) ...[Icon(icon, size: 17, color: fg), const SizedBox(width: 6)],
             Flexible(
               child: Text(label,
                   overflow: TextOverflow.ellipsis,
-                  style: context.t.callout.copyWith(color: fg, fontWeight: FontWeight.w600)),
+                  style: context.t.subhead.copyWith(color: fg, fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -590,16 +508,16 @@ class SecondaryButton extends StatelessWidget {
   }
 }
 
-/// Circular icon button (toolbar actions).
-class CircleIconButton extends StatelessWidget {
-  const CircleIconButton({
+/// Square icon button for toolbars. [filled] makes it the accent primary.
+class ToolButton extends StatelessWidget {
+  const ToolButton({
     super.key,
     required this.icon,
     this.onTap,
     this.tooltip,
     this.color,
     this.busy = false,
-    this.size = 36,
+    this.size = 32,
     this.filled = false,
   });
   final IconData icon;
@@ -608,8 +526,6 @@ class CircleIconButton extends StatelessWidget {
   final Color? color;
   final bool busy;
   final double size;
-
-  /// Primary action: accent gradient fill with a white glyph.
   final bool filled;
 
   @override
@@ -617,7 +533,7 @@ class CircleIconButton extends StatelessWidget {
     final c = context.c;
     Widget w = PressableScale(
       onTap: busy ? null : onTap,
-      scale: 0.9,
+      scale: 0.92,
       semanticLabel: tooltip,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 150),
@@ -625,17 +541,14 @@ class CircleIconButton extends StatelessWidget {
         child: Container(
           width: size,
           height: size,
-          decoration: BoxDecoration(
-            color: filled ? null : c.fill,
-            gradient: filled ? c.accentGradient : null,
-            shape: BoxShape.circle,
-            boxShadow: filled
-                ? [BoxShadow(color: c.accent.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 3))]
-                : null,
+          decoration: ShapeDecoration(
+            color: filled ? c.accent : c.surface,
+            shape: Radii.shape(Radii.s + 1,
+                side: filled ? BorderSide.none : BorderSide(color: c.separator, width: kHairline)),
           ),
           child: busy
-              ? CupertinoActivityIndicator(radius: 8, color: filled ? Colors.white : null)
-              : Icon(icon, size: size * 0.53, color: filled ? Colors.white : (color ?? c.accent)),
+              ? CupertinoActivityIndicator(radius: 7, color: filled ? c.onAccent : null)
+              : Icon(icon, size: size * 0.56, color: filled ? c.onAccent : (color ?? c.label)),
         ),
       ),
     );
@@ -659,19 +572,8 @@ class EmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: ShapeDecoration(
-              shape: Radii.shape(22),
-              gradient: LinearGradient(colors: [
-                c.accent.withValues(alpha: 0.16),
-                c.accent2.withValues(alpha: 0.16),
-              ]),
-            ),
-            child: Icon(icon, size: 34, color: c.accent),
-          ),
-          const SizedBox(height: Space.l),
+          Icon(icon, size: 28, color: c.tertiaryLabel),
+          const SizedBox(height: Space.m),
           Text(title, style: context.t.title3, textAlign: TextAlign.center),
           if (message != null) ...[
             const SizedBox(height: Space.s),
@@ -686,37 +588,28 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-/// Small pill label ("Умный выбор").
-class Pill extends StatelessWidget {
-  const Pill(this.text, {super.key, this.icon, this.color, this.filled = false});
+/// Small uppercase tag with a hairline border ("Умный выбор", "Авто").
+class Tag extends StatelessWidget {
+  const Tag(this.text, {super.key, this.color});
   final String text;
-  final IconData? icon;
   final Color? color;
-  final bool filled;
 
   @override
   Widget build(BuildContext context) {
-    final col = color ?? context.c.accent;
+    final c = context.c;
+    final col = color ?? c.secondaryLabel;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
       decoration: ShapeDecoration(
-        color: filled ? col : col.withValues(alpha: context.c.isDark ? 0.2 : 0.12),
-        shape: Radii.shape(Radii.pill),
+        shape: Radii.shape(Radii.xs, side: BorderSide(color: color ?? c.separator, width: kHairline)),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (icon != null) ...[
-          Icon(icon, size: 12, color: filled ? Colors.white : col),
-          const SizedBox(width: 4),
-        ],
-        Text(text,
-            style: context.t.caption2.copyWith(
-                color: filled ? Colors.white : col, letterSpacing: 0.1)),
-      ]),
+      child: Text(text.toUpperCase(),
+          style: context.t.overline.copyWith(color: col, fontSize: 10, letterSpacing: 0.7)),
     );
   }
 }
 
-/// Tappable neutral tile (fill background) with press feedback.
+/// Tappable neutral panel with press feedback.
 class PressableScaleCard extends StatelessWidget {
   const PressableScaleCard({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.symmetric(vertical: Space.l, horizontal: Space.s)});
   final Widget child;
@@ -727,14 +620,31 @@ class PressableScaleCard extends StatelessWidget {
   Widget build(BuildContext context) => PressableScale(
         onTap: onTap,
         haptic: true,
+        scale: 0.98,
         child: AnimatedOpacity(
           duration: const Duration(milliseconds: 150),
           opacity: onTap == null ? 0.5 : 1,
-          child: Container(
-            padding: padding,
-            decoration: ShapeDecoration(color: context.c.fill, shape: Radii.shape(Radii.m)),
-            child: child,
-          ),
+          child: Panel(padding: padding, child: child),
+        ),
+      );
+}
+
+/// Status dot: 8px, meaning colour. [pulse] adds a soft one-off ring while a
+/// state is in flux (never loops once settled).
+class StatusDot extends StatelessWidget {
+  const StatusDot(this.color, {super.key, this.size = 8, this.hollow = false});
+  final Color color;
+  final double size;
+  final bool hollow;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: hollow ? Colors.transparent : color,
+          border: hollow ? Border.all(color: color, width: 1.5) : null,
         ),
       );
 }

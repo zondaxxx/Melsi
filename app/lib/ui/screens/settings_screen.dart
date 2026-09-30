@@ -11,7 +11,7 @@ import '../../l10n/l10n.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
-import '../theme/glass.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/page.dart';
@@ -29,6 +29,7 @@ class SettingsScreen extends StatelessWidget {
     final app = context.app;
     final l = context.l;
     final c = context.c;
+    final t = context.t;
     final s = app.settings;
 
     Future<void> editText(String title, String initial, void Function(String v) apply,
@@ -37,12 +38,29 @@ class SettingsScreen extends StatelessWidget {
       if (v != null && v.trim().isNotEmpty) apply(v.trim());
     }
 
-    Widget value(String v) => ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 160),
+    /// Row value: text in secondary; numbers and hosts in mono.
+    Widget value(String v, {bool mono = false}) => ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 170),
           child: Text(v,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: context.t.callout.copyWith(color: c.secondaryLabel)),
+              style: mono
+                  ? t.mono.copyWith(color: c.secondaryLabel)
+                  : t.callout.copyWith(color: c.secondaryLabel)),
+        );
+
+    /// A labelled segmented control inside a panel.
+    Widget choice(String label, Widget control, String? desc) => Panel(
+          padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.l),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Overline(label),
+            const SizedBox(height: Space.s + 2),
+            control,
+            if (desc != null) ...[
+              const SizedBox(height: Space.s + 2),
+              Text(desc, style: t.footnote),
+            ],
+          ]),
         );
 
     return PageScaffold(
@@ -50,11 +68,12 @@ class SettingsScreen extends StatelessWidget {
       maxContentWidth: 720,
       slivers: [
         // ------------------------------------------------ smart
-        SliverToBoxAdapter(child: SectionHeader(l('settings.smart'), padding: const EdgeInsets.fromLTRB(4, 4, 4, 8))),
+        SliverToBoxAdapter(
+            child: SectionHeader(l('settings.smart'),
+                padding: const EdgeInsets.fromLTRB(Space.xs, Space.xs, Space.xs, Space.s + 2))),
         SliverToBoxAdapter(
           child: GroupCard(children: [
             SwitchRow(
-              leading: IconTile(Icons.auto_awesome_rounded, color: c.accent),
               title: l('quick.smart'),
               subtitle: l('settings.smartHint'),
               value: s.autoSelect,
@@ -75,17 +94,15 @@ class SettingsScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
-              leading: IconTile(Icons.travel_explore_rounded, color: c.info),
               title: l('settings.probeUrl'),
-              trailing: value(Uri.tryParse(s.probeUrl)?.host ?? s.probeUrl),
+              trailing: value(Uri.tryParse(s.probeUrl)?.host ?? s.probeUrl, mono: true),
               chevron: true,
               onTap: () => editText(l('settings.probeUrl'), s.probeUrl,
                   (v) => app.updateSettings((x) => x.probeUrl = v)),
             ),
             RowTile(
-              leading: IconTile(Icons.timer_rounded, color: c.warning),
               title: l('settings.probeInterval'),
-              trailing: value(l('unit.sec', {'n': '${s.probeIntervalSec}'})),
+              trailing: value(l('unit.sec', {'n': '${s.probeIntervalSec}'}), mono: true),
               chevron: true,
               onTap: () => editText(l('settings.probeInterval'), '${s.probeIntervalSec}', (v) {
                 final n = int.tryParse(v);
@@ -94,8 +111,8 @@ class SettingsScreen extends StatelessWidget {
             ),
             if (app.displayStatus == VpnStatus.connected && s.autoSelect)
               RowTile(
-                leading: IconTile(Icons.refresh_rounded, color: c.success),
                 title: l('settings.probeNow'),
+                trailing: Icon(Icons.refresh_rounded, size: 18, color: c.accent),
                 onTap: () {
                   HapticFeedback.lightImpact();
                   app.probeNow();
@@ -108,17 +125,15 @@ class SettingsScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
-              leading: IconTile(Icons.dns_rounded, color: c.accent),
               title: l('settings.remoteDns'),
-              trailing: value(_short(s.remoteDns)),
+              trailing: value(_short(s.remoteDns), mono: true),
               chevron: true,
               onTap: () => editText(l('settings.remoteDns'), s.remoteDns,
                   (v) => app.updateSettings((x) => x.remoteDns = v)),
             ),
             RowTile(
-              leading: IconTile(Icons.dns_outlined, color: c.success),
               title: l('settings.directDns'),
-              trailing: value(_short(s.directDns)),
+              trailing: value(_short(s.directDns), mono: true),
               chevron: true,
               onTap: () => editText(l('settings.directDns'), s.directDns,
                   (v) => app.updateSettings((x) => x.directDns = v)),
@@ -130,51 +145,42 @@ class SettingsScreen extends StatelessWidget {
         SliverToBoxAdapter(child: SectionHeader(l('settings.network'))),
         if (app.isDesktopPlatform) ...[
           SliverToBoxAdapter(
-            child: Card2(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text(l('settings.captureMode'), style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(height: Space.s),
-                Segmented<CaptureMode>(
-                  value: s.captureMode,
-                  onChanged: (m) => app.updateSettings((x) => x.captureMode = m),
-                  segments: [
-                    Segment(CaptureMode.tun, 'TUN', icon: Icons.lan_rounded),
-                    Segment(CaptureMode.systemProxy, l('settings.systemProxy'), icon: Icons.settings_ethernet_rounded),
-                  ],
-                ),
-                const SizedBox(height: Space.s),
-                Text(l('capture.${s.captureMode.name}.desc'), style: context.t.footnote),
-              ]),
+            child: choice(
+              l('settings.captureMode'),
+              Segmented<CaptureMode>(
+                value: s.captureMode,
+                onChanged: (m) => app.updateSettings((x) => x.captureMode = m),
+                segments: [
+                  Segment(CaptureMode.tun, 'TUN'),
+                  Segment(CaptureMode.systemProxy, l('settings.systemProxy')),
+                ],
+              ),
+              l('capture.${s.captureMode.name}.desc'),
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
         ],
         SliverToBoxAdapter(
-          child: Card2(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(l('settings.tunStack'), style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(height: Space.s),
-              Segmented<TunStack>(
-                value: s.tunStack,
-                onChanged: (v) => app.updateSettings((x) => x.tunStack = v),
-                segments: const [
-                  Segment(TunStack.system, 'System'),
-                  Segment(TunStack.gvisor, 'gVisor'),
-                  Segment(TunStack.mixed, 'Mixed'),
-                ],
-              ),
-              const SizedBox(height: Space.s),
-              Text(l('stack.${s.tunStack.name}.desc'), style: context.t.footnote),
-            ]),
+          child: choice(
+            l('settings.tunStack'),
+            Segmented<TunStack>(
+              value: s.tunStack,
+              onChanged: (v) => app.updateSettings((x) => x.tunStack = v),
+              segments: const [
+                Segment(TunStack.system, 'System'),
+                Segment(TunStack.gvisor, 'gVisor'),
+                Segment(TunStack.mixed, 'Mixed'),
+              ],
+            ),
+            l('stack.${s.tunStack.name}.desc'),
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: Space.m)),
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
-              leading: IconTile(Icons.straighten_rounded, color: c.info),
               title: 'MTU',
-              trailing: value('${s.mtu}'),
+              trailing: value('${s.mtu}', mono: true),
               chevron: true,
               onTap: () => editText('MTU', '${s.mtu}', (v) {
                 final n = int.tryParse(v);
@@ -182,36 +188,31 @@ class SettingsScreen extends StatelessWidget {
               }, number: true),
             ),
             SwitchRow(
-              leading: IconTile(Icons.six_ft_apart_rounded, color: c.accent2),
               title: 'IPv6',
               value: s.ipv6,
               onChanged: (v) => app.updateSettings((x) => x.ipv6 = v),
             ),
             SwitchRow(
-              leading: IconTile(Icons.lock_rounded, color: const Color(0xFF14A8C9)),
               title: l('quick.killSwitch'),
               subtitle: l('settings.killSwitchHint'),
               value: s.killSwitch,
               onChanged: (v) => app.updateSettings((x) => x.killSwitch = v),
             ),
             SwitchRow(
-              leading: IconTile(Icons.content_cut_rounded, color: const Color(0xFFD9468A)),
               title: l('quick.antiDpi'),
               subtitle: l('settings.antiDpiHint'),
               value: s.antiDpi,
               onChanged: (v) => app.updateSettings((x) => x.antiDpi = v),
             ),
             SwitchRow(
-              leading: IconTile(Icons.wifi_tethering_rounded, color: c.success),
               title: l('settings.allowLan'),
               subtitle: l('settings.allowLanHint'),
               value: s.allowLan,
               onChanged: (v) => app.updateSettings((x) => x.allowLan = v),
             ),
             RowTile(
-              leading: IconTile(Icons.input_rounded, color: c.warning),
               title: l('settings.mixedPort'),
-              trailing: value('${s.mixedPort}'),
+              trailing: value('${s.mixedPort}', mono: true),
               chevron: true,
               onTap: () => editText(l('settings.mixedPort'), '${s.mixedPort}', (v) {
                 final n = int.tryParse(v);
@@ -223,22 +224,23 @@ class SettingsScreen extends StatelessWidget {
         // ------------------------------------------------ app
         SliverToBoxAdapter(child: SectionHeader(l('settings.app'))),
         SliverToBoxAdapter(
-          child: Card2(
+          child: Panel(
+            padding: const EdgeInsets.fromLTRB(Space.l, Space.m + 2, Space.l, Space.l),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(l('settings.theme'), style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(height: Space.s),
+              Overline(l('settings.theme')),
+              const SizedBox(height: Space.s + 2),
               Segmented<String>(
                 value: s.themeMode,
                 onChanged: (v) => app.updateSettings((x) => x.themeMode = v, affectsConfig: false),
                 segments: [
-                  Segment('system', l('theme.system'), icon: Icons.brightness_auto_rounded),
-                  Segment('light', l('theme.light'), icon: Icons.light_mode_rounded),
-                  Segment('dark', l('theme.dark'), icon: Icons.dark_mode_rounded),
+                  Segment('system', l('theme.system')),
+                  Segment('light', l('theme.light')),
+                  Segment('dark', l('theme.dark')),
                 ],
               ),
               const SizedBox(height: Space.l),
-              Text(l('settings.language'), style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(height: Space.s),
+              Overline(l('settings.language')),
+              const SizedBox(height: Space.s + 2),
               Segmented<String>(
                 value: s.locale ?? 'system',
                 onChanged: (v) => app.updateSettings((x) => x.locale = v == 'system' ? null : v,
@@ -256,13 +258,11 @@ class SettingsScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             SwitchRow(
-              leading: IconTile(Icons.play_circle_rounded, color: c.success),
               title: l('settings.connectOnLaunch'),
               value: s.connectOnLaunch,
               onChanged: (v) => app.updateSettings((x) => x.connectOnLaunch = v, affectsConfig: false),
             ),
             RowTile(
-              leading: const IconTile(Icons.bug_report_rounded, color: Color(0xFF8E8E93)),
               title: l('settings.logLevel'),
               trailing: PopupMenuButton<LogLevel>(
                 initialValue: s.logLevel,
@@ -272,8 +272,9 @@ class SettingsScreen extends StatelessWidget {
                   for (final v in LogLevel.values) PopupMenuItem(value: v, child: Text(v.name)),
                 ],
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  value(s.logLevel.name),
-                  Icon(Icons.unfold_more_rounded, size: 18, color: c.tertiaryLabel),
+                  value(s.logLevel.name, mono: true),
+                  const SizedBox(width: 2),
+                  Icon(Icons.unfold_more_rounded, size: 16, color: c.tertiaryLabel),
                 ]),
               ),
             ),
@@ -284,14 +285,12 @@ class SettingsScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
-              leading: IconTile(Icons.receipt_long_rounded, color: c.info),
               title: l('settings.logs'),
               chevron: true,
               onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => LogsScreen(state: app))),
             ),
             RowTile(
-              leading: IconTile(Icons.ios_share_rounded, color: c.accent),
               title: l('settings.export'),
               subtitle: l('settings.exportHint'),
               chevron: true,
@@ -304,14 +303,14 @@ class SettingsScreen extends StatelessWidget {
         SliverToBoxAdapter(
           child: GroupCard(children: [
             RowTile(
-              leading: IconTile(Icons.shield_rounded, color: c.accent),
               title: 'Melsi',
-              trailing: value(appVersion),
+              trailing: value(appVersion, mono: true),
             ),
             RowTile(
-              leading: IconTile(Icons.memory_rounded, color: c.accent2),
               title: l('settings.core'),
-              trailing: value(app.coreVersion ?? (app.isDesktopPlatform ? l('settings.coreMissing') : 'sing-box 1.14')),
+              trailing: value(
+                  app.coreVersion ?? (app.isDesktopPlatform ? l('settings.coreMissing') : 'sing-box 1.14'),
+                  mono: true),
             ),
           ]),
         ),
@@ -356,35 +355,27 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-/// One option of the smart-selection mode: a radio row with the same tile
-/// style as every other row. Only the selected option shows its
-/// description, so the list stays short.
+/// One option of the smart-selection mode: a radio row. Only the selected
+/// option shows its description, so the list stays short.
 class _ModeRow extends StatelessWidget {
   const _ModeRow({required this.mode, required this.selected, required this.onTap});
   final SmartMode mode;
   final bool selected;
   final VoidCallback onTap;
 
-  static (IconData, Color) look(SmartMode m) => switch (m) {
-        SmartMode.latency => (Icons.flash_on_rounded, const Color(0xFFFF9F0A)),
-        SmartMode.balanced => (Icons.balance_rounded, const Color(0xFF5B50F0)),
-        SmartMode.stability => (Icons.shield_rounded, const Color(0xFF14A8C9)),
-        SmartMode.game => (Icons.sports_esports_rounded, const Color(0xFFE8457C)),
-      };
-
   @override
   Widget build(BuildContext context) {
     final l = context.l;
     final c = context.c;
-    final (icon, color) = look(mode);
     return Semantics(
       inMutuallyExclusiveGroup: true,
       checked: selected,
       child: RowTile(
-        leading: IconTile(icon, color: color),
+        dense: true,
+        leading: const SizedBox(width: Space.s),
         title: l('smart.${mode.name}'),
         subtitleWidget: AnimatedSize(
-          duration: Duration(milliseconds: context.reduceMotion ? 1 : 260),
+          duration: Duration(milliseconds: context.reduceMotion ? 1 : 240),
           curve: Curves.easeOutCubic,
           alignment: Alignment.topLeft,
           child: selected
@@ -392,12 +383,12 @@ class _ModeRow extends StatelessWidget {
               : const SizedBox(width: double.infinity),
         ),
         trailing: SizedBox(
-          width: 24,
+          width: 22,
           child: SpringValue(
             target: selected ? 1 : 0,
             spring: Springs.momentum,
             builder: (context, v, child) => Transform.scale(scale: v.clamp(0.0, 1.2), child: child),
-            child: Icon(Icons.check_rounded, color: c.accent),
+            child: Icon(Icons.check_rounded, size: 18, color: c.accent),
           ),
         ),
         onTap: onTap,

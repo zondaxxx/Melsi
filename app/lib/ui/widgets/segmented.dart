@@ -10,16 +10,17 @@ class Segment<T> {
   final IconData? icon;
 }
 
-/// Sliding segmented control. The thumb springs (with a hint of momentum)
-/// from wherever it currently is, so rapid taps retarget smoothly. Dragging
-/// across the track moves the selection 1:1.
+/// Sliding segmented control: a flat track with a hairline, the thumb is a
+/// raised surface. The thumb springs (with a hint of momentum) from wherever
+/// it currently is, so rapid taps retarget smoothly. Dragging across the
+/// track moves the selection 1:1.
 class Segmented<T> extends StatefulWidget {
   const Segmented({
     super.key,
     required this.segments,
     required this.value,
     required this.onChanged,
-    this.height = 36,
+    this.height = 34,
   });
 
   final List<Segment<T>> segments;
@@ -69,10 +70,11 @@ class _SegmentedState<T> extends State<Segmented<T>>
   Widget build(BuildContext context) {
     final c = context.c;
     final n = widget.segments.length;
+    const pad = 3.0;
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth;
-      final segW = (w - 4) / n;
-      int hit(double dx) => (dx / segW).floor().clamp(0, n - 1);
+      final segW = (w - pad * 2) / n;
+      int hit(double dx) => ((dx - pad) / segW).floor().clamp(0, n - 1);
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapUp: (d) => _select(hit(d.localPosition.dx)),
@@ -82,8 +84,12 @@ class _SegmentedState<T> extends State<Segmented<T>>
         },
         child: Container(
           height: widget.height,
-          padding: const EdgeInsets.all(2),
-          decoration: ShapeDecoration(color: c.fill, shape: Radii.shape(Radii.s + 1)),
+          padding: const EdgeInsets.all(pad),
+          decoration: ShapeDecoration(
+            color: c.fill,
+            shape: Radii.shape(Radii.m - 2,
+                side: BorderSide(color: c.separator, width: kHairline)),
+          ),
           child: Stack(
             children: [
               AnimatedBuilder(
@@ -95,18 +101,9 @@ class _SegmentedState<T> extends State<Segmented<T>>
                   width: segW,
                   child: Container(
                     decoration: ShapeDecoration(
-                      color: c.isDark ? const Color(0xFF636366) : Colors.white,
-                      shape: Radii.shape(Radii.s - 1),
-                      shadows: [
-                        BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3)),
-                        BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.04),
-                            blurRadius: 1,
-                            offset: const Offset(0, 1)),
-                      ],
+                      color: c.isDark ? c.fillStrong : c.surface,
+                      shape: Radii.shape(Radii.s,
+                          side: BorderSide(color: c.separator, width: kHairline)),
                     ),
                   ),
                 ),
@@ -125,9 +122,9 @@ class _SegmentedState<T> extends State<Segmented<T>>
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (widget.segments[i].icon != null) ...[
-                                  Icon(widget.segments[i].icon, size: 15,
+                                  Icon(widget.segments[i].icon, size: 14,
                                       color: i == _index ? c.label : c.secondaryLabel),
-                                  const SizedBox(width: 4),
+                                  const SizedBox(width: 5),
                                 ],
                                 Flexible(
                                   child: Text(

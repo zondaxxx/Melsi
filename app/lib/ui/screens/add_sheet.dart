@@ -114,7 +114,6 @@ class _AddSheetState extends State<AddSheet> {
   @override
   Widget build(BuildContext context) {
     final l = context.l;
-    final c = context.c;
     final mobile = Platform.isAndroid || Platform.isIOS;
     return SafeArea(
       top: false,
@@ -130,41 +129,38 @@ class _AddSheetState extends State<AddSheet> {
               Expanded(
                 child: _Source(
                   icon: Icons.content_paste_rounded,
-                  color: c.accent,
                   label: l('add.clipboard'),
                   onTap: _busy ? null : _paste,
                 ),
               ),
               if (mobile) ...[
-                const SizedBox(width: Space.m),
+                const SizedBox(width: Space.s),
                 Expanded(
                   child: _Source(
                     icon: Icons.qr_code_scanner_rounded,
-                    color: const Color(0xFF14A8C9),
                     label: l('add.scan'),
                     onTap: _busy ? null : _scan,
                   ),
                 ),
               ],
-              const SizedBox(width: Space.m),
+              const SizedBox(width: Space.s),
               Expanded(
                 child: _Source(
-                  icon: Icons.folder_open_rounded,
-                  color: const Color(0xFFFF7A1A),
+                  icon: Icons.folder_open_outlined,
                   label: l('add.file'),
                   onTap: _busy ? null : _file,
                 ),
               ),
             ]),
-            const SizedBox(height: Space.xl),
-            Text(l('add.manual'), style: context.t.subhead.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: Space.s),
+            const SizedBox(height: Space.xxl),
+            Overline(l('add.manual')),
+            const SizedBox(height: Space.s + 2),
             TextField(
               key: const ValueKey('add-link-field'),
               controller: _ctrl,
               minLines: 3,
               maxLines: 6,
-              style: context.t.callout.copyWith(fontFamily: 'monospace', fontSize: 13),
+              style: context.t.mono,
               decoration: InputDecoration(hintText: l('add.hint')),
               onChanged: (_) => setState(() {}),
             ),
@@ -174,13 +170,12 @@ class _AddSheetState extends State<AddSheet> {
               style: context.t.callout,
               decoration: InputDecoration(hintText: l('add.nameHint')),
             ),
-            const SizedBox(height: Space.s),
+            const SizedBox(height: Space.s + 2),
             Text(l('add.supported'), style: context.t.caption),
             const SizedBox(height: Space.l),
             PrimaryButton(
               key: const ValueKey('add-submit'),
               label: l('add.submit'),
-              icon: Icons.add_rounded,
               expand: true,
               busy: _busy,
               onTap: _ctrl.text.trim().isEmpty ? null : () => _import(_ctrl.text),
@@ -193,9 +188,8 @@ class _AddSheetState extends State<AddSheet> {
 }
 
 class _Source extends StatelessWidget {
-  const _Source({required this.icon, required this.color, required this.label, required this.onTap});
+  const _Source({required this.icon, required this.label, required this.onTap});
   final IconData icon;
-  final Color color;
   final String label;
   final VoidCallback? onTap;
 
@@ -204,13 +198,14 @@ class _Source extends StatelessWidget {
     final c = context.c;
     return PressableScaleCard(
       onTap: onTap,
+      padding: const EdgeInsets.symmetric(vertical: Space.m + 2, horizontal: Space.s),
       child: Column(children: [
-        IconTile(icon, color: color, size: 40),
+        Icon(icon, size: 20, color: c.secondaryLabel),
         const SizedBox(height: Space.s),
         Text(label,
             textAlign: TextAlign.center,
             maxLines: 2,
-            style: context.t.footnote.copyWith(color: c.label, fontWeight: FontWeight.w500)),
+            style: context.t.caption.copyWith(color: c.label)),
       ]),
     );
   }

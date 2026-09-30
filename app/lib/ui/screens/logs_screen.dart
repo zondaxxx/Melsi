@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import '../../l10n/l10n.dart';
 import '../../services/clash_api.dart';
 import '../../state/app_state.dart';
-import '../theme/glass.dart';
+import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 
@@ -91,11 +91,12 @@ class _LogsScreenState extends State<LogsScreen> {
     super.dispose();
   }
 
+  /// Level marker: red / amber carry meaning; everything else is neutral.
   Color _levelColor(MelsiColors c, String level) => switch (level) {
         'error' || 'fatal' => c.danger,
         'warning' || 'warn' => c.warning,
-        'debug' || 'trace' => c.tertiaryLabel,
-        _ => c.info,
+        'debug' || 'trace' => c.separator,
+        _ => c.tertiaryLabel,
       };
 
   @override
@@ -109,17 +110,18 @@ class _LogsScreenState extends State<LogsScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        flexibleSpace: const Glass(radius: 0, edge: false, child: SizedBox.expand()),
+        scrolledUnderElevation: 0,
+        flexibleSpace: const Chrome(child: SizedBox.expand()),
         title: Text(l('settings.logs'), style: context.t.headline),
         actions: [
           IconButton(
             tooltip: _paused ? l('logs.resume') : l('logs.pause'),
-            icon: Icon(_paused ? Icons.play_arrow_rounded : Icons.pause_rounded),
+            icon: Icon(_paused ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 20),
             onPressed: () => setState(() => _paused = !_paused),
           ),
           IconButton(
             tooltip: l('logs.copy'),
-            icon: const Icon(Icons.copy_rounded),
+            icon: const Icon(Icons.copy_rounded, size: 18),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: shown.map((e) => e.payload).join('\n')));
               widget.state.notice('notice.copied');
@@ -127,19 +129,20 @@ class _LogsScreenState extends State<LogsScreen> {
           ),
           IconButton(
             tooltip: l('logs.clear'),
-            icon: const Icon(Icons.delete_sweep_rounded),
+            icon: const Icon(Icons.delete_sweep_outlined, size: 20),
             onPressed: () => setState(_lines.clear),
           ),
         ],
       ),
       body: Column(children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(Space.l, Space.s, Space.l, Space.s),
+          padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.s),
           child: TextField(
             onChanged: (v) => setState(() => _filter = v),
             decoration: InputDecoration(
               hintText: l('logs.filter'),
-              prefixIcon: Icon(Icons.filter_list_rounded, size: 20, color: c.secondaryLabel),
+              prefixIcon: Icon(Icons.filter_list_rounded, size: 18, color: c.tertiaryLabel),
+              prefixIconConstraints: const BoxConstraints(minWidth: 38),
             ),
           ),
         ),
@@ -147,7 +150,7 @@ class _LogsScreenState extends State<LogsScreen> {
           child: shown.isEmpty
               ? Center(
                   child: EmptyState(
-                    icon: Icons.receipt_long_rounded,
+                    icon: Icons.receipt_long_outlined,
                     title: l('logs.empty'),
                     message: widget.state.connected ? l('logs.waiting') : l('logs.notConnected'),
                   ),
@@ -164,16 +167,14 @@ class _LogsScreenState extends State<LogsScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 2),
                         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Container(
-                            width: 3,
-                            height: 16,
-                            margin: const EdgeInsets.only(top: 2, right: 8),
-                            decoration: BoxDecoration(
-                                color: _levelColor(c, e.level), borderRadius: BorderRadius.circular(2)),
+                            width: 2,
+                            height: 15,
+                            margin: const EdgeInsets.only(top: 2, right: 10),
+                            color: _levelColor(c, e.level),
                           ),
                           Expanded(
                             child: Text(e.payload,
-                                style: TextStyle(
-                                    fontFamily: 'monospace', fontSize: 12, height: 1.4, color: c.label)),
+                                style: context.t.mono.copyWith(fontSize: 12, fontWeight: FontWeight.w400, height: 1.45)),
                           ),
                         ]),
                       );

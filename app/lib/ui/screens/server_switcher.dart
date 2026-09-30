@@ -53,24 +53,15 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
       SheetHeader(
         title: l('switcher.title'),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          CircleIconButton(
+          ToolButton(
             icon: Icons.speed_rounded,
             size: 30,
             tooltip: app.connected ? l('servers.pingAllUrl') : l('servers.pingAllTcp'),
             busy: app.pingingAll,
             onTap: app.pingAll,
           ),
-          const SizedBox(width: Space.xs),
-          IconButton(
-            tooltip: l('common.close'),
-            onPressed: () => Navigator.of(context).maybePop(),
-            icon: Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(color: c.fill, shape: BoxShape.circle),
-              child: Icon(Icons.close_rounded, size: 18, color: c.secondaryLabel),
-            ),
-          ),
+          const SizedBox(width: Space.s),
+          const SheetClose(),
         ]),
       ),
       if (app.nodes.length > 5)
@@ -82,8 +73,8 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
             style: context.t.body,
             decoration: InputDecoration(
               hintText: l('servers.search'),
-              prefixIcon: Icon(Icons.search_rounded, color: c.secondaryLabel, size: 20),
-              prefixIconConstraints: const BoxConstraints(minWidth: 40),
+              prefixIcon: Icon(Icons.search_rounded, color: c.tertiaryLabel, size: 18),
+              prefixIconConstraints: const BoxConstraints(minWidth: 38),
             ),
           ),
         ),
@@ -93,9 +84,8 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
               Space.l, Space.xs, Space.l, Space.xl + MediaQuery.paddingOf(context).bottom),
           children: [
             if (_search.text.isEmpty) ...[
-              GroupCard(inset: 62, children: [
+              GroupCard(children: [
                 RowTile(
-                  leading: IconTile(Icons.auto_awesome_rounded, color: c.accent, size: 34),
                   title: l('quick.smart'),
                   subtitle: auto && current != null
                       ? l('switcher.autoNow', {'name': nodeTitle(current)})
@@ -108,7 +98,7 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
                   },
                 ),
               ]),
-              const SizedBox(height: Space.l),
+              const SizedBox(height: Space.m),
             ],
             if (nodes.isEmpty)
               Padding(
@@ -116,19 +106,18 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
                 child: Text(l('apps.none'), textAlign: TextAlign.center, style: context.t.footnote),
               )
             else
-              GroupCard(inset: 62, children: [
+              GroupCard(children: [
                 for (final n in nodes) _Row(node: n, app: app, onTap: () => _pick(app, n.id)),
               ]),
             if (widget.onManage != null) ...[
               const SizedBox(height: Space.m),
               Center(
-                child: TextButton.icon(
+                child: TextButton(
                   onPressed: () {
                     Navigator.of(context).maybePop();
                     widget.onManage!();
                   },
-                  icon: const Icon(Icons.tune_rounded, size: 18),
-                  label: Text(l('switcher.manage')),
+                  child: Text(l('switcher.manage')),
                 ),
               ),
             ],
@@ -148,26 +137,27 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final t = context.t;
     final selected = !app.settings.autoSelect && app.selectedNode?.id == node.id;
     final active = app.connected && app.activeNode?.id == node.id;
     final lat = app.latencies[node.id];
     final sub = app.subscriptionById(node.subscriptionId);
     return RowTile(
       dense: true,
-      leading: FlagBadge(node.countryCode, size: 34),
+      leading: CountryCode(node.countryCode),
       title: nodeTitle(node),
       subtitleWidget: Row(children: [
         ProtocolBadge(node.protocol),
         if (sub != null) ...[
-          const SizedBox(width: 6),
+          Text(' · ', style: t.monoSmall.copyWith(color: c.tertiaryLabel)),
           Flexible(
             child: Text(sub.name,
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: context.t.caption),
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: t.caption),
           ),
         ],
         if (active) ...[
-          const SizedBox(width: 6),
-          Icon(Icons.circle, size: 6, color: c.success),
+          const SizedBox(width: Space.s),
+          StatusDot(c.success, size: 6),
         ],
       ]),
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -178,7 +168,7 @@ class _Row extends StatelessWidget {
           label: context.l('ping.timeout'),
           onTest: () => app.pingNode(node.id),
         ),
-        const SizedBox(width: Space.s),
+        const SizedBox(width: Space.m),
         _Check(on: selected),
       ]),
       onTap: onTap,
@@ -197,7 +187,7 @@ class _Check extends StatelessWidget {
           spring: Springs.momentum,
           builder: (context, v, child) =>
               Transform.scale(scale: v.clamp(0.0, 1.2), child: child),
-          child: Icon(Icons.check_rounded, color: context.c.accent, size: 22),
+          child: Icon(Icons.check_rounded, color: context.c.accent, size: 18),
         ),
       );
 }
