@@ -6,6 +6,7 @@ import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../shell.dart';
+import '../slots/servers_slots.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/page.dart';
@@ -110,6 +111,7 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
                 ),
               ]),
               const SizedBox(height: Space.m),
+              ...SwitcherSlots.top(context, app),
             ],
             if (nodes.isEmpty)
               Padding(

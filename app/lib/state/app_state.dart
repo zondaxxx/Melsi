@@ -88,7 +88,26 @@ class AppState extends ChangeNotifier {
   RoutingSettings routing = RoutingSettings();
   GameSettings game = GameSettings();
   AppSettings settings = AppSettings();
+  ChainSettings chain = ChainSettings();
   String? _lastSecret;
+
+  /// Pinned servers (node ids, in pin order).
+  final List<String> favouriteIds = [];
+
+  /// Recently selected servers, newest first (max [maxRecents]).
+  final List<String> recentIds = [];
+  static const maxRecents = 6;
+
+  /// Feature-owned JSON blobs persisted in the same document
+  /// (`sections.<name>`), loaded and saved verbatim.
+  final Map<String, Map<String, dynamic>> sections = {};
+
+  // ----------------------------------------------------------- hooks
+  /// Called after every tunnel status change (only when it changed).
+  final List<void Function(VpnStatus prev, VpnStatus next)> statusHooks = [];
+
+  /// Called when the app returns to the foreground.
+  final List<VoidCallback> resumeHooks = [];
 
   // ----------------------------------------------------------- runtime
   bool loaded = false;
@@ -197,6 +216,9 @@ class AppState extends ChangeNotifier {
     unawaited(vpn.currentState().then((s) {
       if (s.status != vpnState.status && s.status != VpnStatus.error) _onVpnState(s);
     }));
+    for (final h in List.of(resumeHooks)) {
+      h();
+    }
   }
 
   @override
@@ -218,6 +240,8 @@ class AppState extends ChangeNotifier {
   void _save() => store.scheduleSave(toJson);
 
   void _changed({bool save = true}) {
+    // Anyone who already has servers has nothing to be onboarded about.
+    if (!settings.onboardingDone && nodes.isNotEmpty) settings.onboardingDone = true;
     if (save) _save();
     notifyListeners();
   }
@@ -247,6 +271,10 @@ class AppState extends ChangeNotifier {
         'routing': routing.toJson(),
         'game': game.toJson(),
         'settings': settings.toJson(),
+        'chain': chain.toJson(),
+        'favourites': favouriteIds,
+        'recents': recentIds,
+        'sections': sections,
         'lastSecret': _lastSecret,
       };
 
@@ -276,7 +304,80 @@ class AppState extends ChangeNotifier {
     routing = tryParse(() => RoutingSettings.fromJson(m(j['routing']))) ?? RoutingSettings();
     game = tryParse(() => GameSettings.fromJson(m(j['game']))) ?? GameSettings();
     settings = tryParse(() => AppSettings.fromJson(m(j['settings']))) ?? AppSettings();
-    _lastSecret = j['lastSecret'] as String?;
+    chain = tryParse(() => ChainSettings.fromJson(m(j['chain']))) ?? ChainSettings();
+    favouriteIds
+      ..clear()
+      ..addAll((j['favourites'] as List? ?? const []).map((e) => e.toString()));
+    recentIds
+      ..clear()
+      ..addAll((j['recents'] as List? ?? const []).map((e) => e.toString()).take(maxRecents));
+    sections.clear();
+    (j['sections'] as Map? ?? const {}).forEach((k, v) {
+      if (v is Map) sections[k.toString()] = v.cast<String, dynamic>();
+    });
+    _pruneRefs();
+  }
+
+  /// Replaces the whole persisted state (backup restore). Config-affecting,
+  /// so a running tunnel re-applies.
+  void replaceFromJson(Map<String, dynamic> j) {
+    _fromJson(j);
+    _markConfigChanged();
+    _changed();
+  }
+
+  /// Drops favourites / recents / chain entry that point at removed nodes.
+  void _pruneRefs() {
+    final ids = nodes.map((n) => n.id).toSet();
+    favouriteIds.removeWhere((id) => !ids.contains(id));
+    recentIds.removeWhere((id) => !ids.contains(id));
+    if (chain.entryNodeId != null && !ids.contains(chain.entryNodeId)) {
+      chain.entryNodeId = null;
+    }
+  }
+
+  // ============================================================ favourites / sections
+
+  bool isFavourite(String id) => favouriteIds.contains(id);
+
+  void toggleFavourite(String id) {
+    if (!favouriteIds.remove(id)) favouriteIds.add(id);
+    _changed();
+  }
+
+  /// Favourites in pin order (missing nodes skipped).
+  List<ProxyNode> get favouriteNodes =>
+      favouriteIds.map(nodeById).whereType<ProxyNode>().toList();
+
+  /// Recently selected, newest first.
+  List<ProxyNode> get recentNodes =>
+      recentIds.map(nodeById).whereType<ProxyNode>().toList();
+
+  /// Lowest known latency per country: country code -> node id.
+  Map<String, String> bestByCountry() {
+    final best = <String, (String, int)>{};
+    for (final n in nodes) {
+      final cc = n.countryCode;
+      final ms = latencyOf(n);
+      if (cc == null || ms == null || ms <= 0) continue;
+      final cur = best[cc];
+      if (cur == null || ms < cur.$2) best[cc] = (n.id, ms);
+    }
+    return {for (final e in best.entries) e.key: e.value.$1};
+  }
+
+  Map<String, dynamic>? sectionOf(String name) => sections[name];
+
+  void setSection(String name, Map<String, dynamic> json) {
+    sections[name] = json;
+    _save();
+    notifyListeners();
+  }
+
+  void updateChain(void Function(ChainSettings c) f) {
+    f(chain);
+    _markConfigChanged();
+    _changed();
   }
 
   // ============================================================ queries
@@ -497,6 +598,7 @@ class AppState extends ChangeNotifier {
         selectedNodeId = nodesOf(id).firstOrNull?.id ?? nodes.firstOrNull?.id;
       }
       final newIds = nodesOf(id).map((n) => n.id).toSet();
+      _pruneRefs();
       if (!setEquals(oldIds, newIds)) _markConfigChanged();
       if (!quiet) {
         notice('notice.subUpdated',
@@ -536,6 +638,7 @@ class AppState extends ChangeNotifier {
     subscriptions.removeWhere((s) => s.id == id);
     nodes.removeWhere((n) => n.subscriptionId == id);
     if (nodeById(selectedNodeId) == null) selectedNodeId = nodes.firstOrNull?.id;
+    _pruneRefs();
     _markConfigChanged();
     _changed();
   }
@@ -555,6 +658,7 @@ class AppState extends ChangeNotifier {
     latencies.remove(id);
     if (selectedNodeId == id) selectedNodeId = nodes.firstOrNull?.id;
     if (game.gameNodeId == id) game.gameNodeId = null;
+    _pruneRefs();
     _markConfigChanged();
     _changed();
   }
@@ -569,6 +673,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> selectNode(String id) async {
     selectedNodeId = id;
+    recentIds
+      ..remove(id)
+      ..insert(0, id);
+    if (recentIds.length > maxRecents) recentIds.removeLast();
     final wasAuto = settings.autoSelect;
     if (connected) {
       final tag = tagOf(id);
@@ -835,6 +943,7 @@ class AppState extends ChangeNotifier {
       routing: routing,
       game: game,
       settings: settings,
+      chain: chain,
       platform: currentPlatformKind(),
       endpoints: endpoints,
       cacheDir: await store.cacheDir(),
@@ -965,6 +1074,11 @@ class AppState extends ChangeNotifier {
         break;
     }
     notifyListeners();
+    if (prev != s.status) {
+      for (final h in List.of(statusHooks)) {
+        h(prev, s.status);
+      }
+    }
   }
 
   void _startRuntime() {

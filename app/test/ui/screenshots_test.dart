@@ -30,11 +30,18 @@ Future<void> _loadFonts() async {
   }
 
   const inter = '/usr/share/fonts/opentype/inter';
+  const mac = '/System/Library/Fonts/Supplemental';
   final text = [
     for (final w in ['Regular', 'Medium', 'SemiBold', 'Bold']) '$inter/Inter-$w.otf',
+    // macOS fallbacks (Linux paths above do not exist there).
+    '$mac/Arial.ttf',
+    '$mac/Arial Bold.ttf',
   ];
   await family('Roboto', text);
-  await family('monospace', ['/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf']);
+  await family('monospace', [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+    '/System/Library/Fonts/Monaco.ttf',
+  ]);
   final flutterRoot = Platform.environment['FLUTTER_ROOT'] ??
       File(Platform.resolvedExecutable).parent.parent.parent.parent.parent.parent.path;
   await family('MaterialIcons', ['$flutterRoot/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf']);
@@ -151,7 +158,8 @@ void main() {
         final vpn = FakeVpn();
         final state = testState(data: _demo(theme), vpn: vpn);
         await state.load();
-        await tester.pumpWidget(RepaintBoundary(key: key, child: MelsiApp(state: state)));
+        await tester.pumpWidget(RepaintBoundary(
+            key: key, child: MelsiApp(state: state, features: testFeatures(state), launchMoment: false)));
         await pumpFrames(tester);
         await shoot(tester, '${tag}_home');
         if (phone) await shootBottom(tester, '${tag}_home_bottom');
@@ -226,7 +234,8 @@ void main() {
       addTearDown(tester.view.reset);
       final state = testState(data: {'settings': {'themeMode': theme, 'locale': 'ru'}});
       await state.load();
-      await tester.pumpWidget(RepaintBoundary(key: key, child: MelsiApp(state: state)));
+      await tester.pumpWidget(RepaintBoundary(
+            key: key, child: MelsiApp(state: state, features: testFeatures(state), launchMoment: false)));
       await pumpFrames(tester);
       await shoot(tester, 'phone_${theme}_home_empty');
       await tester.tap(find.text('Серверы').last);

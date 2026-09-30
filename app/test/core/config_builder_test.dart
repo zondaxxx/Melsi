@@ -27,6 +27,7 @@ Map<String, dynamic> buildJson({
   RoutingSettings? routing,
   GameSettings? game,
   AppSettings? settings,
+  ChainSettings? chain,
   PlatformKind platform = PlatformKind.windows,
   void Function(BuiltConfig)? inspect,
 }) {
@@ -36,6 +37,7 @@ Map<String, dynamic> buildJson({
     routing: routing ?? RoutingSettings(),
     game: game ?? GameSettings(),
     settings: settings ?? AppSettings(),
+    chain: chain,
     platform: platform,
     endpoints: _endpoints,
     cacheDir: '/tmp/melsi-test',
@@ -418,6 +420,30 @@ void main() {
   // (+ with_gvisor). Naive nodes are included only if the binary was built
   // with with_naive_outbound.
   final bin = Platform.environment['SING_BOX_BIN'];
+  group('probe hosts', () {
+    test('measurement hosts are proxied before any preset rule, under every preset', () {
+      for (final preset in RoutingPreset.values) {
+        final c = buildJson(routing: RoutingSettings(preset: preset));
+        final rules = rulesOf(c);
+        final i = rules.indexWhere((r) =>
+            r['outbound'] == 'proxy' &&
+            r['domain_suffix'] is List &&
+            (r['domain_suffix'] as List).contains('speed.cloudflare.com'));
+        expect(i, greaterThanOrEqualTo(0), reason: '$preset: probe rule missing');
+        // Preset rules (rule_set / geoip / final fallbacks) all come later.
+        final firstPreset = rules.indexWhere((r) => r.containsKey('rule_set'));
+        if (firstPreset >= 0) expect(i, lessThan(firstPreset), reason: '$preset');
+        final dns = (c['dns']['rules'] as List).cast<Map<String, dynamic>>();
+        expect(
+            dns.any((r) =>
+                r['server'] == 'dns-remote' &&
+                (r['domain_suffix'] as List?)?.contains('ipwho.is') == true),
+            isTrue,
+            reason: '$preset: probe DNS rule missing');
+      }
+    });
+  });
+
   group('sing-box check', () {
     late bool hasNaive;
     late Directory tmp;

@@ -73,6 +73,17 @@ class ConfigBuilder {
   /// Not compiled into the desktop `melsi-core` (naive needs cronet/cgo).
   static const desktopUnsupportedTypes = {'naive'};
 
+  /// Hosts the app itself talks to for measurements (public IP lookup,
+  /// speed test, DNS check). They are always routed through the proxy so
+  /// the answer describes the tunnel, whatever the routing preset says.
+  static const probeHosts = [
+    'ipwho.is',
+    'ip.sb',
+    'ipinfo.io',
+    'speed.cloudflare.com',
+    'dns.google',
+  ];
+
   static const _tcpTypes = {
     'shadowsocks', 'vmess', 'vless', 'trojan', 'anytls', 'shadowtls',
     'http', 'socks', 'ssh', 'snell',
@@ -88,6 +99,7 @@ class ConfigBuilder {
     required RuntimeEndpoints endpoints,
     required String cacheDir,
     String? bundledRuleSetDir,
+    ChainSettings? chain,
   }) {
     final isDesktop = platform == PlatformKind.windows ||
         platform == PlatformKind.macos ||
@@ -240,6 +252,10 @@ class ConfigBuilder {
     if (routing.bypassLan) {
       rules.add({'ip_is_private': true, 'outbound': tagDirect});
     }
+    // Measurement hosts always go through the tunnel (see [probeHosts]);
+    // placed before every preset so "direct" presets still measure the
+    // proxy — the user asked for the tunnel's numbers, not the ISP's.
+    rules.add({'domain_suffix': probeHosts, 'outbound': tagProxy});
     final block = _domains(routing.blockDomains);
     if (block.isNotEmpty) {
       rules.add({'domain_suffix': block, 'action': 'reject'});
@@ -395,6 +411,7 @@ class ConfigBuilder {
     if (block.isNotEmpty) {
       dnsRules.add({'domain_suffix': block, 'action': 'reject'});
     }
+    dnsRules.add({'domain_suffix': probeHosts, 'server': dnsRemote});
     if (routing.blockAds) {
       dnsRules.add({
         'rule_set': [rs('geosite-category-ads-all')],
@@ -568,6 +585,10 @@ class ConfigBuilder {
       singBox: enc.convert(config),
       engine: enc.convert(engine),
       nodeTags: nodeTags,
+      // Chain (double VPN) behaviour is wired by the chain feature; the
+      // parameter is threaded here so callers already pass it.
+      entryTag: null,
+      chainActive: false,
     );
   }
 

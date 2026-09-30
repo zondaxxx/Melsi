@@ -1,7 +1,30 @@
 // UI strings. Russian is the source language; English mirrors every key
 // (a test checks the key sets match). Placeholders: {name}.
+//
+// The core table lives here; feature modules contribute their own
+// [StringTable] (one file each, `strings_<feature>.dart`) and register it
+// in `tables.dart`. [kStrings] is the merge of all tables.
 
-const Map<String, Map<String, String>> kStrings = {'ru': _ru, 'en': _en};
+import 'tables.dart';
+
+/// A partial string table: the same keys in Russian and English. Feature
+/// tables declare the key [prefixes] they own (a test enforces them).
+class StringTable {
+  const StringTable({required this.ru, required this.en, this.prefixes = const []});
+  final Map<String, String> ru;
+  final Map<String, String> en;
+  final List<String> prefixes;
+}
+
+/// The core UI strings (tabs, status, servers, routing, game, settings).
+const StringTable kCoreStrings = StringTable(ru: _ru, en: _en);
+
+/// Every table merged, per locale. Later tables override earlier keys (a
+/// test asserts there are no duplicates).
+final Map<String, Map<String, String>> kStrings = {
+  'ru': {for (final t in kStringTables) ...t.ru},
+  'en': {for (final t in kStringTables) ...t.en},
+};
 
 const _ru = <String, String>{
   // tabs

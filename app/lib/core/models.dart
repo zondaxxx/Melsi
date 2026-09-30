@@ -520,6 +520,13 @@ class AppSettings {
     this.connectOnLaunch = false,
     this.themeMode = 'system',
     this.locale,
+    this.onboardingDone = false,
+    this.ipCheck = true,
+    this.clipboardWatch,
+    this.checkUpdates = true,
+    this.skippedVersion,
+    this.lastUpdateCheck,
+    this.lastClipboardHash,
   });
 
   bool autoSelect;
@@ -554,6 +561,26 @@ class AppSettings {
   /// 'ru' | 'en' | null (system)
   String? locale;
 
+  /// First-run onboarding completed (also set when servers first appear).
+  bool onboardingDone;
+
+  /// Show the public IP / geo panel on Home.
+  bool ipCheck;
+
+  /// Offer to import a proxy link found on the clipboard on resume.
+  /// null = platform default (off on iOS, on elsewhere).
+  bool? clipboardWatch;
+
+  /// Check GitHub releases for a newer version once a day.
+  bool checkUpdates;
+
+  /// Release tag the user chose to skip.
+  String? skippedVersion;
+  DateTime? lastUpdateCheck;
+
+  /// Hash of the last clipboard text we offered, so it is offered once.
+  String? lastClipboardHash;
+
   Map<String, dynamic> toJson() => {
         'autoSelect': autoSelect,
         'smartMode': smartMode.name,
@@ -573,6 +600,13 @@ class AppSettings {
         'connectOnLaunch': connectOnLaunch,
         'themeMode': themeMode,
         'locale': locale,
+        'onboardingDone': onboardingDone,
+        'ipCheck': ipCheck,
+        'clipboardWatch': clipboardWatch,
+        'checkUpdates': checkUpdates,
+        'skippedVersion': skippedVersion,
+        'lastUpdateCheck': lastUpdateCheck?.toIso8601String(),
+        'lastClipboardHash': lastClipboardHash,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
@@ -596,6 +630,75 @@ class AppSettings {
         connectOnLaunch: j['connectOnLaunch'] as bool? ?? false,
         themeMode: j['themeMode'] as String? ?? 'system',
         locale: j['locale'] as String?,
+        onboardingDone: j['onboardingDone'] as bool? ?? false,
+        ipCheck: j['ipCheck'] as bool? ?? true,
+        clipboardWatch: j['clipboardWatch'] as bool?,
+        checkUpdates: j['checkUpdates'] as bool? ?? true,
+        skippedVersion: j['skippedVersion'] as String?,
+        lastUpdateCheck: _date(j['lastUpdateCheck']),
+        lastClipboardHash: j['lastClipboardHash'] as String?,
+      );
+}
+
+// ---------------------------------------------------------------- chain
+
+/// Double VPN: every exit node dials through one fixed entry node
+/// (sing-box `detour`). Auto-select keeps choosing the exit.
+class ChainSettings {
+  ChainSettings({this.enabled = false, this.entryNodeId});
+
+  bool enabled;
+
+  /// The entry (first hop). null = chain configured but no entry chosen,
+  /// which the config builder treats as disabled.
+  String? entryNodeId;
+
+  bool get active => enabled && entryNodeId != null;
+
+  Map<String, dynamic> toJson() => {'enabled': enabled, 'entryNodeId': entryNodeId};
+
+  factory ChainSettings.fromJson(Map<String, dynamic> j) => ChainSettings(
+        enabled: j['enabled'] as bool? ?? false,
+        entryNodeId: j['entryNodeId'] as String?,
+      );
+}
+
+// ---------------------------------------------------------------- ip info
+
+/// A public IP lookup result (real IP, or the tunnel exit).
+class IpInfo {
+  const IpInfo({
+    required this.ip,
+    this.countryCode,
+    this.city,
+    this.org,
+    required this.at,
+  });
+
+  final String ip;
+
+  /// ISO 3166-1 alpha-2.
+  final String? countryCode;
+  final String? city;
+
+  /// ISP / organisation.
+  final String? org;
+  final DateTime at;
+
+  Map<String, dynamic> toJson() => {
+        'ip': ip,
+        'countryCode': countryCode,
+        'city': city,
+        'org': org,
+        'at': at.toIso8601String(),
+      };
+
+  factory IpInfo.fromJson(Map<String, dynamic> j) => IpInfo(
+        ip: j['ip'] as String? ?? '',
+        countryCode: j['countryCode'] as String?,
+        city: j['city'] as String?,
+        org: j['org'] as String?,
+        at: _date(j['at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
       );
 }
 
@@ -622,6 +725,8 @@ class BuiltConfig {
     required this.singBox,
     required this.engine,
     required this.nodeTags,
+    this.entryTag,
+    this.chainActive = false,
   });
 
   /// sing-box 1.14 configuration JSON.
@@ -632,6 +737,12 @@ class BuiltConfig {
 
   /// node id -> outbound tag used in [singBox].
   final Map<String, String> nodeTags;
+
+  /// Tag of the chain entry outbound when the double VPN is active.
+  final String? entryTag;
+
+  /// Whether the config routes exits through [entryTag].
+  final bool chainActive;
 }
 
 // ---------------------------------------------------------------- helpers

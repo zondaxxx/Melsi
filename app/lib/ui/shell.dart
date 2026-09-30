@@ -11,12 +11,15 @@ import 'screens/game_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/routing_screen.dart';
 import 'screens/servers_screen.dart';
+import '../features/motion/status_pulse.dart';
 import 'screens/settings_screen.dart';
+import 'slots/shell_slots.dart';
 import 'theme/pressable.dart';
 import 'theme/surfaces.dart';
 import 'theme/theme.dart';
 import 'widgets/apply_toast.dart';
 import 'widgets/common.dart';
+import 'widgets/fade_stack.dart';
 import 'widgets/page.dart';
 
 enum AppTab { home, servers, routing, game, settings }
@@ -122,10 +125,11 @@ class _ShellState extends State<Shell> {
     ];
     final bottomBar = wide ? 0.0 : _tabBarHeight(context);
 
-    final stack = _FadeIndexedStack(index: _tab.index, children: pages);
+    final stack = FadeIndexedStack(index: _tab.index, children: pages);
 
     return CallbackShortcuts(
       bindings: {
+        ...ShellSlots.shortcuts(context),
         for (var i = 0; i < AppTab.values.length; i++) ...{
           SingleActivator(LogicalKeyboardKey(LogicalKeyboardKey.digit1.keyId + i), control: true):
               () => _go(AppTab.values[i]),
@@ -138,7 +142,7 @@ class _ShellState extends State<Shell> {
         child: ShellNav(
           go: _go,
           current: _tab,
-          child: Scaffold(
+          child: ShellSlots.overlays(context, Scaffold(
             backgroundColor: context.c.background,
             body: wide
                 ? Row(
@@ -186,7 +190,7 @@ class _ShellState extends State<Shell> {
                       ],
                     ),
                   ),
-          ),
+          )),
         ),
       ),
     );
@@ -402,7 +406,8 @@ class _SidebarStatus extends StatelessWidget {
         const Hairline(),
         const SizedBox(height: Space.m),
         Row(children: [
-          StatusDot(color, hollow: s == VpnStatus.stopped),
+          StatusPulse(
+              color: color, hollow: s == VpnStatus.stopped, active: s == VpnStatus.connected),
           const SizedBox(width: Space.s + 2),
           Expanded(
             child: Text(l('status.${s.name}'),
@@ -431,57 +436,4 @@ class Wordmark extends StatelessWidget {
   Widget build(BuildContext context) => Text('Melsi',
       style: context.t.title3.copyWith(
           fontSize: size, fontWeight: FontWeight.w700, letterSpacing: -0.6));
-}
-
-/// IndexedStack that keeps pages alive and cross-fades between them, with a
-/// tiny upward settle (disabled with reduced motion).
-class _FadeIndexedStack extends StatefulWidget {
-  const _FadeIndexedStack({required this.index, required this.children});
-  final int index;
-  final List<Widget> children;
-  @override
-  State<_FadeIndexedStack> createState() => _FadeIndexedStackState();
-}
-
-class _FadeIndexedStackState extends State<_FadeIndexedStack>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 240), value: 1);
-
-  @override
-  void didUpdateWidget(_FadeIndexedStack old) {
-    super.didUpdateWidget(old);
-    if (old.index != widget.index) _c.forward(from: 0);
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final reduce = context.reduceMotion;
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (context, child) {
-        final t = Curves.easeOutCubic.transform(_c.value);
-        return Opacity(
-          opacity: t,
-          child: Transform.translate(
-            offset: Offset(0, reduce ? 0 : (1 - t) * 6),
-            child: child,
-          ),
-        );
-      },
-      child: IndexedStack(
-        index: widget.index,
-        children: [
-          for (var i = 0; i < widget.children.length; i++)
-            TickerMode(enabled: i == widget.index, child: widget.children[i]),
-        ],
-      ),
-    );
-  }
 }

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/models.dart';
+import '../../features/motion/rolling_number.dart';
+import '../../features/motion/status_pulse.dart';
 import '../../l10n/l10n.dart';
 import '../../services/engine_api.dart';
 import '../../services/vpn_controller.dart';
@@ -10,6 +12,7 @@ import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../../state/traffic.dart';
 import '../shell.dart';
+import '../slots/home_slots.dart';
 import '../theme/pressable.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
@@ -59,6 +62,7 @@ class HomeScreen extends StatelessWidget {
             final traffic = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               SectionHeader(l('home.traffic')),
               _TrafficPanel(traffic: app.traffic, idle: !connected),
+              HomeSlots.afterTraffic(context, app),
             ]);
 
             final main = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -75,8 +79,10 @@ class HomeScreen extends StatelessWidget {
                     ? app.toggle
                     : () => app.nodes.isEmpty ? showAddSheet(context) : showServerSwitcher(context),
               ),
+              HomeSlots.underButton(context, app),
               SectionHeader(l('home.server')),
               _NodePanel(app: app),
+              HomeSlots.afterNodePanel(context, app),
               // Telemetry appears with the session (dashes while the tunnel
               // comes up, live once connected). An empty chart is not
               // information, on a phone or a desktop.
@@ -85,6 +91,7 @@ class HomeScreen extends StatelessWidget {
 
             Widget side({EdgeInsetsGeometry? firstHeaderPadding}) =>
                 Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  HomeSlots.railTop(context, app),
                   SectionHeader(l('home.quick'), padding: firstHeaderPadding),
                   _QuickToggles(app: app),
                   SectionHeader(l('home.routing')),
@@ -207,7 +214,12 @@ class _Status extends StatelessWidget {
         child: Row(children: [
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
-            child: StatusDot(color, key: ValueKey(s), size: _dot, hollow: s == VpnStatus.stopped),
+            child: StatusPulse(
+                key: ValueKey(s),
+                color: color,
+                size: _dot,
+                hollow: s == VpnStatus.stopped,
+                active: s == VpnStatus.connected),
           ),
           const SizedBox(width: _gap),
           Flexible(
@@ -231,7 +243,13 @@ class _Status extends StatelessWidget {
         curve: Curves.easeOutCubic,
         alignment: Alignment.topLeft,
         child: note == null
-            ? const SizedBox(width: double.infinity)
+            ? SizedBox(
+                width: double.infinity,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: _dot + _gap),
+                  child: HomeSlots.statusNote(context, app),
+                ),
+              )
             : Padding(
                 padding: const EdgeInsets.only(top: Space.xs, left: _dot + _gap),
                 child: Text(note,
@@ -265,7 +283,7 @@ class _TimerState extends State<_Timer> {
   @override
   Widget build(BuildContext context) {
     final s = formatDuration(DateTime.now().difference(widget.since));
-    return Text(s,
+    return MonoNumber(s,
         semanticsLabel: s,
         style: context.t.monoLarge.copyWith(fontSize: 23, color: context.c.secondaryLabel));
   }
@@ -533,18 +551,19 @@ class _Speed extends StatelessWidget {
         Flexible(child: Overline('$glyph $label')),
       ]),
       const SizedBox(height: 4),
-      Text.rich(
-        TextSpan(children: [
-          TextSpan(
-              text: v,
-              style: t.monoLarge.copyWith(color: bps == null ? c.tertiaryLabel : c.label)),
-          if (unit.isNotEmpty)
-            TextSpan(text: ' $unit', style: t.mono.copyWith(color: c.tertiaryLabel)),
-        ]),
-        maxLines: 1,
-        overflow: TextOverflow.fade,
-        softWrap: false,
-        semanticsLabel: '$label $v $unit',
+      Semantics(
+        label: '$label $v $unit',
+        child: ExcludeSemantics(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+            Flexible(
+              child: MonoNumber(v,
+                  style: t.monoLarge.copyWith(color: bps == null ? c.tertiaryLabel : c.label)),
+            ),
+            if (unit.isNotEmpty)
+              Text(' $unit',
+                  maxLines: 1, softWrap: false, style: t.mono.copyWith(color: c.tertiaryLabel)),
+          ]),
+        ),
       ),
     ]);
   }

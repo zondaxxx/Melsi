@@ -19,6 +19,12 @@ class TrafficMonitor extends ChangeNotifier {
   int downTotal = 0;
   int connections = 0;
 
+  /// Totals of the session that just ended (captured by [stop] with
+  /// `reset: true`, before the counters are zeroed).
+  int lastUpTotal = 0;
+  int lastDownTotal = 0;
+  DateTime? lastStoppedAt;
+
   StreamSubscription<TrafficSample>? _sub;
   ClashApi? _api;
   Timer? _retry;
@@ -76,6 +82,9 @@ class TrafficMonitor extends ChangeNotifier {
     up = 0;
     down = 0;
     if (reset) {
+      lastUpTotal = upTotal;
+      lastDownTotal = downTotal;
+      lastStoppedAt = DateTime.now();
       upTotal = 0;
       downTotal = 0;
       connections = 0;

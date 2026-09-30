@@ -1,40 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:melsi/l10n/strings.dart';
-import 'package:melsi/main.dart';
+import 'package:melsi/l10n/tables.dart';
 import 'package:melsi/services/vpn_controller.dart';
 import 'package:melsi/state/app_state.dart';
 import 'package:melsi/state/import_input.dart';
 
 import 'fakes.dart';
+import 'harness.dart';
 
 Future<AppState> _boot(WidgetTester tester, {Size size = const Size(390, 844), FakeVpn? vpn}) async {
-  tester.view.physicalSize = size * 2;
-  tester.view.devicePixelRatio = 2;
-  addTearDown(tester.view.reset);
-  final state = testState(vpn: vpn)..settings.locale = 'ru';
-  await state.load();
-  await tester.pumpWidget(MelsiApp(state: state));
-  await tester.pump(const Duration(milliseconds: 500));
+  final (state, _) = await bootApp(tester, size: size, vpn: vpn);
   return state;
 }
 
-/// Advances enough frames for route/sheet transitions to finish.
-Future<void> _settle(WidgetTester tester) async {
-  for (var i = 0; i < 6; i++) {
-    await tester.pump(const Duration(milliseconds: 120));
-  }
-}
+Future<void> _settle(WidgetTester tester) => settle(tester);
 
-/// Unmount and let pending timers settle.
-Future<void> _shutdown(WidgetTester tester, AppState state) async {
-  if (state.vpnState.status != VpnStatus.stopped) {
-    state.disconnect();
-    await tester.pump(const Duration(milliseconds: 50));
-  }
-  await tester.pumpWidget(const SizedBox());
-  await tester.pump(const Duration(seconds: 3));
-}
+Future<void> _shutdown(WidgetTester tester, AppState state) => shutdownApp(tester, state);
 
 void main() {
   testWidgets('app boots on phone layout with a tab bar', (tester) async {
@@ -181,6 +163,25 @@ void main() {
     final en = kStrings['en']!.keys.toSet();
     expect(ru.difference(en), isEmpty, reason: 'missing in en');
     expect(en.difference(ru), isEmpty, reason: 'missing in ru');
+  });
+
+  test('every string table mirrors its keys and none overlap', () {
+    final seen = <String, int>{};
+    for (final (i, t) in kStringTables.indexed) {
+      expect(t.ru.keys.toSet().difference(t.en.keys.toSet()), isEmpty,
+          reason: 'table $i: missing in en');
+      expect(t.en.keys.toSet().difference(t.ru.keys.toSet()), isEmpty,
+          reason: 'table $i: missing in ru');
+      for (final k in t.ru.keys) {
+        expect(seen.containsKey(k), isFalse,
+            reason: 'key "$k" defined in tables ${seen[k]} and $i');
+        seen[k] = i;
+        if (i > 0) {
+          expect(t.prefixes.any(k.startsWith), isTrue,
+              reason: 'key "$k" is outside table $i prefixes ${t.prefixes}');
+        }
+      }
+    }
   });
 
   group('ImportInput', () {

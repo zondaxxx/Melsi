@@ -10,6 +10,7 @@ import '../../core/models.dart';
 import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
+import '../slots/servers_slots.dart';
 import '../theme/pressable.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
@@ -101,6 +102,7 @@ class _ServersScreenState extends State<ServersScreen> {
           )
         else ...[
           SliverToBoxAdapter(child: _searchBar(app, l, c)),
+          ...ServersSlots.beforeGroups(context, app),
           for (final (i, (sub, nodes)) in groups.indexed)
             if (!_filtering || nodes.isNotEmpty) ...[
               SliverToBoxAdapter(child: SizedBox(height: i == 0 ? Space.l : Space.m)),
@@ -135,7 +137,7 @@ class _ServersScreenState extends State<ServersScreen> {
                     else
                       SliverList.builder(
                         itemCount: nodes.length,
-                        itemBuilder: (context, i) => _NodeRow(
+                        itemBuilder: (context, i) => NodeRow(
                           node: nodes[i],
                           last: i == nodes.length - 1,
                         ),
@@ -317,6 +319,7 @@ class ServersEmptyState extends StatelessWidget {
             ]),
           ]),
         ),
+        ServersSlots.emptyHint(context),
       ]),
     );
   }
@@ -664,8 +667,10 @@ Widget _mi(IconData icon, String text, {Color? color}) => Builder(
 
 // ------------------------------------------------------------------ node row
 
-class _NodeRow extends StatelessWidget {
-  const _NodeRow({required this.node, required this.last});
+/// One server in a subscription panel. Public so feature modules and tests
+/// can find it by type.
+class NodeRow extends StatelessWidget {
+  const NodeRow({super.key, required this.node, required this.last});
   final ProxyNode node;
   final bool last;
 
@@ -733,6 +738,7 @@ class _NodeRow extends StatelessWidget {
                     ]),
                   ),
                   const SizedBox(width: Space.m),
+                  ServersSlots.nodeTrailing(context, node),
                   Tooltip(
                     message: lat == null
                         ? ''
@@ -852,6 +858,7 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
                     if (name != null && name.trim().isNotEmpty) app.renameNode(node.id, name.trim());
                   },
                 ),
+                ...ServersSlots.nodeActions(ctx, node, close),
                 RowTile(
                   dense: true,
                   leading: ic(Icons.delete_outline_rounded, color: c.danger),

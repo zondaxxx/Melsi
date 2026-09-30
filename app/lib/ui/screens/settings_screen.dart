@@ -11,6 +11,7 @@ import '../../l10n/l10n.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
+import '../slots/settings_slots.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/page.dart';
@@ -114,6 +115,7 @@ class SettingsScreen extends StatelessWidget {
               ),
           ]),
         ),
+        ...SettingsSlots.afterSmart(context, app),
         // ------------------------------------------------ DNS
         SliverToBoxAdapter(child: SectionHeader(l('settings.dns'))),
         SliverToBoxAdapter(
@@ -270,6 +272,7 @@ class SettingsScreen extends StatelessWidget {
                 ]),
               ),
             ),
+            ...SettingsSlots.appRows(context, app),
           ]),
         ),
         // ------------------------------------------------ tools
@@ -288,6 +291,7 @@ class SettingsScreen extends StatelessWidget {
               chevron: true,
               onTap: () => _export(context, app),
             ),
+            ...SettingsSlots.toolsRows(context, app),
           ]),
         ),
         // ------------------------------------------------ about
@@ -307,6 +311,7 @@ class SettingsScreen extends StatelessWidget {
                       style: t.caption.copyWith(fontSize: 13, color: c.danger))
                   : value(app.coreVersion ?? 'sing-box 1.14', mono: true),
             ),
+            ...SettingsSlots.aboutRows(context, app),
           ]),
         ),
         SliverToBoxAdapter(child: SectionFooter(l('settings.aboutText'))),

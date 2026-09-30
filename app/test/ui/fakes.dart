@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:melsi/core/models.dart';
 import 'package:melsi/services/platform_apps.dart';
 import 'package:melsi/services/vpn_controller.dart';
 import 'package:melsi/state/app_state.dart';
+import 'package:melsi/state/features.dart';
 import 'package:melsi/state/store.dart';
 
 /// In-process VPN that "connects" instantly.
@@ -56,11 +59,44 @@ class FakeApps extends PlatformApps {
       ];
 }
 
-AppState testState({Map<String, dynamic>? data, FakeVpn? vpn}) => AppState(
-      store: MemoryStateStore(data),
-      vpn: vpn ?? FakeVpn(),
-      apps: FakeApps(),
-      enableNetwork: false,
+/// Deterministic clock for feature tests.
+class FakeClock {
+  FakeClock([DateTime? start]) : now = start ?? DateTime(2026, 10, 1, 12);
+  DateTime now;
+  void advance(Duration d) => now = now.add(d);
+  DateTime call() => now;
+}
+
+/// App state for tests: in-memory store, fake VPN, no network. Unless the
+/// data says otherwise, onboarding counts as done so tests boot straight
+/// into the shell (onboarding tests pass `onboardingDone: false`).
+AppState testState({Map<String, dynamic>? data, FakeVpn? vpn}) {
+  final merged = <String, dynamic>{...?data};
+  final settings = <String, dynamic>{...?(merged['settings'] as Map?)?.cast<String, dynamic>()};
+  settings.putIfAbsent('onboardingDone', () => true);
+  merged['settings'] = settings;
+  return AppState(
+    store: MemoryStateStore(merged),
+    vpn: vpn ?? FakeVpn(),
+    apps: FakeApps(),
+    enableNetwork: false,
+  );
+}
+
+/// Feature modules wired to [state] with an offline HTTP client (every
+/// request answers 404 unless [client] is given), a fake clock and an
+/// optional fake clipboard.
+Features testFeatures(
+  AppState state, {
+  http.Client? client,
+  DateTime Function()? clock,
+  Future<String?> Function()? readClipboard,
+}) =>
+    Features(
+      state,
+      httpClient: () => client ?? MockClient((_) async => http.Response('', 404)),
+      clock: clock ?? FakeClock().call,
+      readClipboard: readClipboard,
     );
 
 const kSampleVless =
