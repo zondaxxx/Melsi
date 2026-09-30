@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
+import '../theme/entrance.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 
@@ -283,54 +284,264 @@ class _CompactHeader extends SliverPersistentHeaderDelegate {
       old.hPad != hPad;
 }
 
-/// Opens [builder] as a bottom sheet on phones and a centred dialog on wide
-/// screens (the sheet grows from the bottom edge it's attached to).
+/// Opens [builder] as a bottom sheet on phones (it grows from the bottom edge
+/// it's attached to) and as a centred dialog on wide layouts (520px wide,
+/// 640px tall — 720 with [expand]; on phones [expand] pins the sheet to 86%
+/// of the screen).
+///
+/// Motion: the sheet springs up ([Springs.sheet]) and a drag-dismiss turns the
+/// release velocity into a spring fling; the dialog scales 0.96→1 with a fade
+/// on a spring, the barrier fades in ~200ms and the close reverses in 160ms
+/// (ease-in). Reduced motion: a 160ms cross-fade, nothing moves or scales. The
+/// transition controller is created per call, owned by the route and disposed
+/// with it — after the exit animation, so nothing ticks past the pop.
 Future<T?> showMelsiSheet<T>(BuildContext context,
     {required WidgetBuilder builder, bool expand = false}) {
+  final reduce = context.reduceMotion;
+  final navigator = Navigator.of(context, rootNavigator: context.isWide);
+  final themes = InheritedTheme.capture(from: context, to: navigator.context);
+  final localizations = MaterialLocalizations.of(context);
+  final barrier = Colors.black.withValues(alpha: 0.4);
+
   if (context.isWide) {
-    return showDialog<T>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.4),
-      builder: (ctx) => Dialog(
-        insetPadding: const EdgeInsets.all(Space.x3),
-        clipBehavior: Clip.antiAlias,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxWidth: 520, maxHeight: expand ? 720 : 640),
-          child: builder(ctx),
+    return navigator.push(_MelsiDialogRoute<T>(
+      reduceMotion: reduce,
+      barrierColor: barrier,
+      barrierLabel: localizations.modalBarrierDismissLabel,
+      pageBuilder: (ctx, _, _) => themes.wrap(SafeArea(
+        child: Dialog(
+          insetPadding: const EdgeInsets.all(Space.x3),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxWidth: 520, maxHeight: expand ? 720 : 640),
+            child: Builder(builder: builder),
+          ),
+        ),
+      )),
+    ));
+  }
+
+  final controller = _SheetMotionController(
+    vsync: navigator,
+    spring: reduce ? null : Springs.sheet,
+  );
+  Widget content(BuildContext ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 4 + the grip's 12px box puts the 4px bar on the same 8..12px line
+          // the plain handle used to sit on.
+          const SizedBox(height: 4),
+          const _SheetGrip(),
+          Flexible(
+            child: expand
+                ? SizedBox(
+                    height: MediaQuery.sizeOf(ctx).height * 0.86, child: builder(ctx))
+                : builder(ctx),
+          ),
+        ],
+      );
+  return navigator.push(_MelsiSheetRoute<T>(
+    controller: controller,
+    capturedThemes: themes,
+    barrierLabel: localizations.scrimLabel,
+    barrierOnTapHint: localizations.scrimOnTapHint(localizations.bottomSheetLabel),
+    modalBarrierColor: barrier,
+    // With reduced motion the sheet's own surface is drawn inside the fade so
+    // the whole thing cross-fades in place instead of the Material popping in.
+    backgroundColor: reduce ? Colors.transparent : null,
+    elevation: reduce ? 0 : null,
+    sheetAnimationStyle: reduce
+        ? const AnimationStyle(curve: Threshold(0), reverseCurve: Threshold(0))
+        : const AnimationStyle(curve: Curves.linear, reverseCurve: Curves.easeIn),
+    builder: (ctx) {
+      if (!reduce) return content(ctx);
+      return FadeTransition(
+        opacity: controller,
+        child: Material(
+          color: ctx.c.surfaceRaised,
+          clipBehavior: Clip.antiAlias,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.l))),
+          child: content(ctx),
+        ),
+      );
+    },
+  ));
+}
+
+/// Bounded 0–1 transition controller whose *entrance* is a spring: the route
+/// calls [forward] on push (and [BottomSheet] on a released drag), and both
+/// continue from the current value and velocity. Drag-dismiss flings use a
+/// critically damped sibling of the sheet spring ([fling] rejects underdamped
+/// ones). With [spring] null (reduced motion) it is a plain 160ms controller.
+class _SheetMotionController extends AnimationController {
+  _SheetMotionController({required super.vsync, required this.spring})
+      : super(
+          duration: const Duration(milliseconds: 160),
+          reverseDuration: Duration(milliseconds: spring == null ? 160 : 220),
+        );
+
+  final SpringDescription? spring;
+
+  static final _flingSpring = Springs.of(0.3, 1.0);
+
+  @override
+  TickerFuture forward({double? from}) {
+    final s = spring;
+    if (s == null) return super.forward(from: from);
+    if (from != null) value = from;
+    return animateWith(
+        SettlingSpring(s, start: value, end: upperBound, velocity: velocity));
+  }
+
+  @override
+  TickerFuture fling({
+    double velocity = 1.0,
+    SpringDescription? springDescription,
+    AnimationBehavior? animationBehavior,
+  }) =>
+      super.fling(
+        velocity: velocity,
+        springDescription: springDescription ?? (spring == null ? null : _flingSpring),
+        animationBehavior: animationBehavior,
+      );
+}
+
+/// The framework's modal sheet route with a controller it owns: disposing in
+/// [dispose] (after the exit transition and the route's own listeners are
+/// gone) is the one moment that is guaranteed leak- and use-after-dispose-free.
+class _MelsiSheetRoute<T> extends ModalBottomSheetRoute<T> {
+  _MelsiSheetRoute({
+    required _SheetMotionController controller,
+    required super.builder,
+    required super.capturedThemes,
+    required super.barrierLabel,
+    required super.barrierOnTapHint,
+    required super.modalBarrierColor,
+    required super.backgroundColor,
+    required super.elevation,
+    required super.sheetAnimationStyle,
+  }) : super(
+          transitionAnimationController: controller,
+          isScrollControlled: true,
+          useSafeArea: true,
+        );
+
+  @override
+  void dispose() {
+    super.dispose();
+    transitionAnimationController!.dispose();
+  }
+}
+
+/// Desktop counterpart: a general dialog route whose entrance controller is
+/// spring-driven (scale 0.96→1 + fade) and whose close is a 160ms ease-in.
+class _MelsiDialogRoute<T> extends RawDialogRoute<T> {
+  _MelsiDialogRoute({
+    required this.reduceMotion,
+    required super.pageBuilder,
+    required super.barrierColor,
+    required super.barrierLabel,
+  }) : super(transitionDuration: Duration(milliseconds: reduceMotion ? 160 : 200));
+
+  final bool reduceMotion;
+
+  static final _spring = Springs.of(0.32, 1.0);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 160);
+
+  @override
+  AnimationController createAnimationController() =>
+      _DialogMotionController(vsync: navigator!,
+          spring: reduceMotion ? null : _spring,
+          duration: transitionDuration,
+          reverseDuration: reverseTransitionDuration);
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    if (reduceMotion) return FadeTransition(opacity: animation, child: child);
+    // The spring shapes the entrance; the exit gets its own ease-in.
+    final curved = CurvedAnimation(
+        parent: animation, curve: Curves.linear, reverseCurve: Curves.easeIn);
+    return FadeTransition(
+      opacity: curved,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Route-owned controller for the dialog: spring on [forward], durations on
+/// [reverse]; disposed by the route.
+class _DialogMotionController extends AnimationController {
+  _DialogMotionController({
+    required super.vsync,
+    required this.spring,
+    required super.duration,
+    required super.reverseDuration,
+  });
+
+  final SpringDescription? spring;
+
+  @override
+  TickerFuture forward({double? from}) {
+    final s = spring;
+    if (s == null) return super.forward(from: from);
+    if (from != null) value = from;
+    return animateWith(
+        SettlingSpring(s, start: value, end: upperBound, velocity: velocity));
+  }
+}
+
+/// The sheet's drag handle: 32px at rest, springs to 40px while a pointer is
+/// down on it ([Springs.press]) as a hint that the sheet can be thrown. A
+/// [Listener] rather than a gesture so the sheet's own drag still wins.
+class _SheetGrip extends StatefulWidget {
+  const _SheetGrip();
+
+  @override
+  State<_SheetGrip> createState() => _SheetGripState();
+}
+
+class _SheetGripState extends State<_SheetGrip> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down != v) setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduce = context.reduceMotion;
+    final width = reduce ? 32.0 : (_down ? 40.0 : 32.0);
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: SizedBox(
+        width: 64,
+        height: 12,
+        child: Center(
+          child: SpringValue(
+            target: width,
+            spring: Springs.press,
+            builder: (context, w, _) => Container(
+              width: w,
+              height: 4,
+              decoration: ShapeDecoration(
+                  color: context.c.fillStrong, shape: Radii.shape(2)),
+            ),
+          ),
         ),
       ),
     );
   }
-  return showModalBottomSheet<T>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    barrierColor: Colors.black.withValues(alpha: 0.4),
-    sheetAnimationStyle: const AnimationStyle(
-      duration: Duration(milliseconds: 380),
-      curve: Curves.easeOutCubic,
-      reverseDuration: Duration(milliseconds: 260),
-    ),
-    builder: (ctx) => Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(height: 8),
-        Container(
-          width: 32,
-          height: 4,
-          decoration: ShapeDecoration(
-              color: ctx.c.fillStrong, shape: Radii.shape(2)),
-        ),
-        Flexible(
-          child: expand
-              ? SizedBox(
-                  height: MediaQuery.sizeOf(ctx).height * 0.86, child: builder(ctx))
-              : builder(ctx),
-        ),
-      ],
-    ),
-  );
 }
 
 /// Standard sheet header: title + optional close / done. It always sits at
