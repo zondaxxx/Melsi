@@ -36,6 +36,21 @@
 //         it only touches connections that fall through to direct.
 //     Proxied connections never hit these route-options rules except the
 //     custom-direct / ru-blocked ones in presets where they go direct anyway.
+//
+// Double VPN (chain) — "fixed entry, selectable exit", zero Go changes:
+//   * One node is the entry. Every other node dials THROUGH it with sing-box
+//     `detour` on its outermost dial (the shadowtls helper when the node has
+//     one, else the outbound itself; WireGuard endpoints get it too). The
+//     entry outbound stays plain — it is the only handshake the ISP sees.
+//   * The `proxy` / `game` selectors and the engine's candidate lists
+//     exclude the entry, so auto-select keeps picking the *exit*; latencies
+//     the engine measures are end-to-end (entry + exit) by construction.
+//   * A detoured outbound gets neither TCP Fast Open (the inner connection
+//     is a stream inside the entry's tunnel) nor `record_fragment` (DPI only
+//     sees the entry's ClientHello).
+//   * The chain is silently inactive when the entry is the only usable node
+//     or an endpoint type (WireGuard can't carry a detour target): the
+//     output is then identical to "no chain".
 
 import 'dart:convert';
 
@@ -122,22 +137,53 @@ class ConfigBuilder {
     final nodeOutbounds = <Map<String, dynamic>>[];
     final tagToNode = <String, ProxyNode>{};
 
+    // Tags first: an exit built before the entry still needs the entry's
+    // tag for its detour, so tagging is a pass of its own.
+    final ordered = <ProxyNode>[];
     for (final n in usable) {
       if (nodeTags.containsKey(n.id)) continue;
       final tag = _uniqueTag(_sanitizeTag(n.name), usedTags);
       nodeTags[n.id] = tag;
       tagToNode[tag] = n;
+      ordered.add(n);
+    }
+
+    // ---------------------------------------------------------- chain
+    final entryTag =
+        chain?.enabled == true ? nodeTags[chain!.entryNodeId] : null;
+    final entryNode = entryTag == null ? null : tagToNode[entryTag];
+    final chainActive = entryNode != null &&
+        !entryNode.protocol.isEndpoint &&
+        ordered.length > 1;
+
+    for (final n in ordered) {
+      final tag = nodeTags[n.id]!;
       final ob = _deepCopy(n.outbound)..['tag'] = tag;
-      final chain = n.chain;
-      if (chain != null) {
-        for (final dep in chain) {
-          final placeholder = dep['tag'];
+      final helpers = <Map<String, dynamic>>[];
+      final deps = n.chain;
+      if (deps != null) {
+        // Placeholder -> real tag for every helper, then rewrite detours on
+        // the outbound AND between helpers (a helper may dial another).
+        final renamed = <String, String>{};
+        for (final dep in deps) {
           final depTag = _uniqueTag('$tag-${dep['type']}', usedTags);
-          final d = _deepCopy(dep)..['tag'] = depTag;
-          if (ob['detour'] == placeholder) ob['detour'] = depTag;
-          _tune(d, settings, lowLatency && !isIos);
-          nodeOutbounds.add(d);
+          final placeholder = dep['tag'];
+          if (placeholder is String) renamed[placeholder] = depTag;
+          helpers.add(_deepCopy(dep)..['tag'] = depTag);
         }
+        for (final h in [ob, ...helpers]) {
+          final det = h['detour'];
+          if (det is String && renamed.containsKey(det)) h['detour'] = renamed[det];
+        }
+      }
+      if (chainActive && tag != entryTag) {
+        _outermost(ob, helpers)['detour'] = entryTag;
+      }
+      // Tune after the detour is in place: a detoured dial skips TFO and
+      // record fragmentation.
+      for (final h in helpers) {
+        _tune(h, settings, lowLatency && !isIos);
+        nodeOutbounds.add(h);
       }
       _tune(ob, settings, lowLatency && !isIos);
       if (n.protocol.isEndpoint) {
@@ -148,22 +194,30 @@ class ConfigBuilder {
     }
     final allTags = nodeTags.values.toList();
 
+    // Selectable members: every node but the entry. The entry is a hop, not
+    // a destination — offering it as an exit would loop it onto itself.
+    final exitTags =
+        chainActive ? allTags.where((t) => t != entryTag).toList() : allTags;
+
     // ---------------------------------------------------------- selectors
-    final proxyMembers = allTags.isEmpty ? [tagDirect] : allTags;
+    final proxyMembers = exitTags.isEmpty ? [tagDirect] : exitTags;
     final selectedTag =
         selectedNodeId == null ? null : nodeTags[selectedNodeId];
     final proxySelector = <String, dynamic>{
       'type': 'selector',
       'tag': tagProxy,
       'outbounds': proxyMembers,
-      'default': selectedTag ?? proxyMembers.first,
+      // A selection that became the entry falls back to the first exit.
+      'default': selectedTag != null && proxyMembers.contains(selectedTag)
+          ? selectedTag
+          : proxyMembers.first,
       'interrupt_exist_connections': false,
     };
 
     List<String> gameOrder = const [];
     Map<String, dynamic>? gameSelector;
     if (game.enabled) {
-      gameOrder = [...allTags];
+      gameOrder = [...exitTags];
       if (game.preferUdpProtocols) {
         final udp = gameOrder
             .where((t) => tagToNode[t]!.protocol.udpNative)
@@ -180,7 +234,7 @@ class ConfigBuilder {
         'type': 'selector',
         'tag': tagGame,
         'outbounds': members,
-        'default': pinned ?? members.first,
+        'default': pinned != null && members.contains(pinned) ? pinned : members.first,
         'interrupt_exist_connections': false,
       };
     }
@@ -542,12 +596,14 @@ class ConfigBuilder {
     };
 
     // ---------------------------------------------------------- engine
+    // Through a chain, UDP is native only when BOTH hops carry it natively.
+    final entryUdp = chainActive ? entryNode.protocol.udpNative : true;
     Map<String, dynamic> cand(String tag) {
       final n = tagToNode[tag]!;
       return {
         'tag': tag,
         'type': n.type,
-        'udp_native': n.protocol.udpNative,
+        'udp_native': n.protocol.udpNative && entryUdp,
       };
     }
 
@@ -564,7 +620,7 @@ class ConfigBuilder {
           'probe_url': settings.probeUrl,
           'interval_sec': settings.probeIntervalSec,
           'timeout_ms': 3000,
-          'candidates': allTags.map(cand).toList(),
+          'candidates': exitTags.map(cand).toList(),
         },
         if (game.enabled)
           {
@@ -585,10 +641,8 @@ class ConfigBuilder {
       singBox: enc.convert(config),
       engine: enc.convert(engine),
       nodeTags: nodeTags,
-      // Chain (double VPN) behaviour is wired by the chain feature; the
-      // parameter is threaded here so callers already pass it.
-      entryTag: null,
-      chainActive: false,
+      entryTag: chainActive ? entryTag : null,
+      chainActive: chainActive,
     );
   }
 
@@ -611,8 +665,27 @@ class ConfigBuilder {
     return 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/$tag.srs';
   }
 
+  /// The dial that actually opens the socket for a node: the last helper in
+  /// its detour chain (e.g. the shadowtls wrapper), or the outbound itself.
+  /// That is where a chain entry detour belongs — one hop below and the
+  /// helper would dial around the entry.
+  static Map<String, dynamic> _outermost(
+      Map<String, dynamic> ob, List<Map<String, dynamic>> helpers) {
+    final byTag = {for (final h in helpers) h['tag'] as String: h};
+    var cur = ob;
+    final seen = <String>{};
+    while (true) {
+      final det = cur['detour'];
+      final next = det is String ? byTag[det] : null;
+      if (next == null || !seen.add(det as String)) return cur;
+      cur = next;
+    }
+  }
+
   /// Per-node tweaks: TCP Fast Open (Game Mode low-latency) and TLS record
-  /// fragmentation (anti-DPI) for TCP-based nodes.
+  /// fragmentation (anti-DPI) for TCP-based nodes. Neither applies to a
+  /// detoured dial: TFO needs a real socket, and the ClientHello of a
+  /// connection inside another tunnel is invisible to DPI anyway.
   static void _tune(
       Map<String, dynamic> ob, AppSettings settings, bool tfo) {
     final type = ob['type'];
@@ -620,7 +693,7 @@ class ConfigBuilder {
     final hasDetour = ob['detour'] is String;
     // anytls rejects tcp_fast_open ("not supported with anytls outbound").
     if (tfo && !hasDetour && type != 'anytls') ob['tcp_fast_open'] = true;
-    if (settings.antiDpi) {
+    if (settings.antiDpi && !hasDetour) {
       final tls = ob['tls'];
       if (tls is Map &&
           tls['enabled'] == true &&

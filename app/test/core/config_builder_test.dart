@@ -585,4 +585,211 @@ void main() {
       }
     });
   }, skip: bin == null ? 'SING_BOX_BIN not set' : false);
+
+  // ------------------------------------------------------------------------
+  group('chain', () {
+    List<Map<String, dynamic>> engineGroups(BuiltConfig b) =>
+        ((jsonDecode(b.engine) as Map<String, dynamic>)['groups'] as List)
+            .cast<Map<String, dynamic>>();
+
+    test('exits detour through the entry; selectors and engine exclude it', () {
+      final nodes = allNodes();
+      // A TLS-over-TCP entry: the one handshake DPI sees, so it is the one
+      // that keeps TFO and record fragmentation.
+      final entry = nodes.firstWhere((n) => n.name == 'Trojan WS' || n.type == 'trojan');
+      final stls = nodes.firstWhere((n) => n.name == 'SS ShadowTLS');
+      late BuiltConfig built;
+      final c = buildJson(
+        nodes: nodes,
+        selected: entry.id,
+        chain: ChainSettings(enabled: true, entryNodeId: entry.id),
+        settings: AppSettings(antiDpi: true),
+        game: GameSettings(enabled: true, gameIds: {'cs2'}, lowLatencyStack: true),
+        inspect: (b) => built = b,
+      );
+      final entryTag = built.nodeTags[entry.id]!;
+      expect(built.chainActive, isTrue);
+      expect(built.entryTag, entryTag);
+
+      // Every node but the entry dials through it; the entry stays plain.
+      // A node with helpers (shadowtls) carries the detour on its outermost
+      // helper, so walk each node's own detour chain to its end.
+      final nodeTagSet = built.nodeTags.values.toSet();
+      for (final e in built.nodeTags.entries) {
+        final o = outboundByTag(c, e.value);
+        if (e.key == entry.id) {
+          expect(o['detour'], isNull, reason: 'entry ${e.value}');
+          continue;
+        }
+        var outer = o;
+        while (outer['detour'] is String && !nodeTagSet.contains(outer['detour'])) {
+          outer = outboundByTag(c, outer['detour'] as String);
+        }
+        expect(outer['detour'], entryTag, reason: e.value);
+        // Detoured dials get neither TFO nor record fragmentation.
+        expect(outer['tcp_fast_open'], isNull, reason: e.value);
+        final tls = outer['tls'];
+        if (tls is Map) expect(tls['record_fragment'], isNull, reason: e.value);
+      }
+      // The shadowtls helper is the outermost dial: it carries the detour,
+      // its Shadowsocks user keeps dialling the (renamed) helper.
+      final ss = outboundByTag(c, built.nodeTags[stls.id]!);
+      final helper = outboundByTag(c, ss['detour'] as String);
+      expect(helper['type'], 'shadowtls');
+      expect(helper['detour'], entryTag);
+      expect(helper['tcp_fast_open'], isNull);
+      // WireGuard exits (endpoints) get the detour too.
+      for (final e in c['endpoints'] as List) {
+        expect(e['detour'], entryTag, reason: '${e['tag']}');
+      }
+      // The entry keeps TFO and record fragmentation.
+      final eo = outboundByTag(c, entryTag);
+      expect(eo['tcp_fast_open'], true);
+      expect((eo['tls'] as Map)['record_fragment'], true);
+
+      // Selectors: members = every node but the entry; the selection that
+      // became the entry falls back to the first exit.
+      final allTags = built.nodeTags.values.toList();
+      final exits = allTags.where((t) => t != entryTag).toList();
+      final proxy = outboundByTag(c, 'proxy');
+      expect(proxy['outbounds'], exits);
+      expect(proxy['default'], exits.first);
+      final game = outboundByTag(c, 'game');
+      expect(game['outbounds'], isNot(contains(entryTag)));
+      expect((game['outbounds'] as List).toSet(), exits.toSet());
+      // Engine candidates: same exclusion in both groups; UDP is native only
+      // when both hops are (trojan entry -> never).
+      for (final g in engineGroups(built)) {
+        final cands = (g['candidates'] as List).cast<Map>();
+        expect(cands.map((x) => x['tag']), isNot(contains(entryTag)));
+        expect(cands.length, exits.length, reason: '${g['selector']}');
+        for (final x in cands) {
+          expect(x['udp_native'], false, reason: '${x['tag']}');
+        }
+      }
+    });
+
+    test('udp_native survives a UDP-native entry', () {
+      final nodes = allNodes();
+      final entry = nodes.firstWhere((n) => n.type == 'hysteria2');
+      late BuiltConfig built;
+      buildJson(
+        nodes: nodes,
+        chain: ChainSettings(enabled: true, entryNodeId: entry.id),
+        game: GameSettings(enabled: true, gameIds: {'cs2'}),
+        inspect: (b) => built = b,
+      );
+      final g = engineGroups(built)[1];
+      final cands = (g['candidates'] as List).cast<Map>();
+      final tuic = cands.firstWhere((x) => x['type'] == 'tuic');
+      final vless = cands.firstWhere((x) => x['type'] == 'vless');
+      expect(tuic['udp_native'], true);
+      expect(vless['udp_native'], false);
+      // A pinned game node that became the entry falls back too.
+      late BuiltConfig pinned;
+      final c = buildJson(
+        nodes: nodes,
+        chain: ChainSettings(enabled: true, entryNodeId: entry.id),
+        game: GameSettings(enabled: true, gameIds: {'cs2'}, gameNodeId: entry.id),
+        inspect: (b) => pinned = b,
+      );
+      final game = outboundByTag(c, 'game');
+      expect(game['default'], (game['outbounds'] as List).first);
+      final pinnedCands = (engineGroups(pinned)[1]['candidates'] as List).cast<Map>();
+      expect(pinnedCands.map((x) => x['tag']), isNot(contains(pinned.entryTag)));
+    });
+
+    test('inactive chains produce the same output as no chain', () {
+      final nodes = allNodes();
+      final vless = nodes.firstWhere((n) => n.type == 'vless');
+      final wg = nodes.firstWhere((n) => n.type == 'wireguard');
+      BuiltConfig build(List<ProxyNode> ns, ChainSettings? chain) =>
+          ConfigBuilder.build(
+            nodes: ns,
+            selectedNodeId: ns.first.id,
+            routing: RoutingSettings(),
+            game: GameSettings(enabled: true, gameIds: {'cs2'}),
+            settings: AppSettings(antiDpi: true),
+            platform: PlatformKind.windows,
+            endpoints: _endpoints,
+            cacheDir: '/tmp/melsi-test',
+            chain: chain,
+          );
+      void same(String label, List<ProxyNode> ns, ChainSettings chain) {
+        final a = build(ns, chain);
+        final b = build(ns, null);
+        expect(a.singBox, b.singBox, reason: label);
+        expect(a.engine, b.engine, reason: label);
+        expect(a.chainActive, isFalse, reason: label);
+        expect(a.entryTag, isNull, reason: label);
+        expect(a.singBox, isNot(contains('"detour": "${a.nodeTags[chain.entryNodeId]}"')));
+      }
+
+      // Entry is the only node.
+      same('entry only', [vless], ChainSettings(enabled: true, entryNodeId: vless.id));
+      // WireGuard can't be an entry.
+      same('wireguard entry', nodes, ChainSettings(enabled: true, entryNodeId: wg.id));
+      // Switched off, or no / unknown entry.
+      same('disabled', nodes, ChainSettings(enabled: false, entryNodeId: vless.id));
+      same('no entry', nodes, ChainSettings(enabled: true));
+      same('unknown entry', nodes, ChainSettings(enabled: true, entryNodeId: 'nope'));
+      // The entry is a dropped (unsupported) node.
+      final ssr = nodes.firstWhere((n) => n.type == 'shadowsocksr');
+      same('unsupported entry', nodes, ChainSettings(enabled: true, entryNodeId: ssr.id));
+    });
+
+    test('an active chain still passes every existing structural check', () {
+      final nodes = allNodes();
+      final entry = nodes.firstWhere((n) => n.type == 'vless');
+      late BuiltConfig built;
+      final c = buildJson(
+        nodes: nodes,
+        chain: ChainSettings(enabled: true, entryNodeId: entry.id),
+        inspect: (b) => built = b,
+      );
+      final tags = [
+        ...(c['outbounds'] as List).map((o) => o['tag']),
+        ...(c['endpoints'] as List).map((o) => o['tag']),
+      ];
+      expect(tags.toSet().length, tags.length, reason: 'unique tags');
+      // Every detour points at an existing tag.
+      for (final o in [...c['outbounds'] as List, ...c['endpoints'] as List]) {
+        final d = o['detour'];
+        if (d != null) expect(tags, contains(d), reason: '${o['tag']}');
+      }
+      expect(built.nodeTags.length, greaterThan(1));
+      expect(rulesOf(c).first, {'action': 'sniff'});
+    });
+
+    test('sing-box check accepts chained configs', () {
+      final tmp = Directory.systemTemp.createTempSync('melsi-chain-check');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final hasNaive =
+          Process.runSync(bin!, ['version']).stdout.toString().contains('with_naive_outbound');
+      final nodes = allNodes(includeNaive: hasNaive);
+      var i = 0;
+      for (final entry in nodes.where((n) => !n.protocol.isEndpoint)) {
+        for (final platform in [PlatformKind.windows, PlatformKind.android]) {
+          final b = ConfigBuilder.build(
+            nodes: nodes,
+            selectedNodeId: entry.id,
+            routing: RoutingSettings(preset: RoutingPreset.global),
+            game: GameSettings(enabled: i.isEven, gameIds: {'cs2'}),
+            settings: AppSettings(antiDpi: true),
+            platform: platform,
+            endpoints: _endpoints,
+            cacheDir: tmp.path,
+            chain: ChainSettings(enabled: true, entryNodeId: entry.id),
+          );
+          if (!b.chainActive) continue;
+          final f = File('${tmp.path}/c${i++}.json')..writeAsStringSync(b.singBox);
+          final r = Process.runSync(bin, ['check', '-c', f.path],
+              environment: {'ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS': ''});
+          final err = '${r.stdout}${r.stderr}';
+          expect(r.exitCode, 0, reason: 'entry ${entry.name} ${platform.name}\n$err');
+        }
+      }
+      expect(i, greaterThan(0));
+    }, skip: bin == null ? 'SING_BOX_BIN not set' : false);
+  });
 }
