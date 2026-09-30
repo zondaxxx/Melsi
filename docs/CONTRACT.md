@@ -30,7 +30,7 @@ If you change a seam, change this file in the same commit.
 | iOS/macOS app bundle id | `app.melsi` |
 | iOS Packet Tunnel extension bundle id | `app.melsi.PacketTunnel` |
 | App Group (iOS) | `group.app.melsi` |
-| Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.25` |
+| Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.25.5` |
 | sing-box | `github.com/sagernet/sing-box v1.14.2` |
 | Clash API default | `127.0.0.1:9790` |
 | Engine API default | `127.0.0.1:9791` |
@@ -215,7 +215,7 @@ then `Melsicore.startEngine(engineJson)`; on stop call `Melsicore.stopEngine()` 
 `libbox` + `melsicore` are bound together into one library:
 
 ```
-gomobile bind -target android -androidapi 21 -javapkg=io.nekohasekai -libname=box \
+gomobile bind -target android -androidapi 24 -javapkg=io.nekohasekai -libname=box \
   -trimpath -buildvcs=false -ldflags "-X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0 -s -w -buildid=" \
   -tags with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_naive_outbound,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0 \
   github.com/sagernet/sing-box/experimental/libbox github.com/zondaxxx/melsi/core/melsicore

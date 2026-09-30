@@ -63,6 +63,16 @@ class ConfigBuilder {
   /// sing-box types that were removed from 1.14 at runtime.
   static const unsupportedTypes = {'shadowsocksr'};
 
+  /// Rule-sets shipped in `assets/rulesets/` (see [build]'s
+  /// `bundledRuleSetDir`).
+  static const bundledRuleSets = {
+    'geosite-category-ads-all', 'geosite-category-ru', 'geoip-ru',
+    'geosite-ru-blocked', 'geoip-ru-blocked',
+  };
+
+  /// Not compiled into the desktop `melsi-core` (naive needs cronet/cgo).
+  static const desktopUnsupportedTypes = {'naive'};
+
   static const _tcpTypes = {
     'shadowsocks', 'vmess', 'vless', 'trojan', 'anytls', 'shadowtls',
     'http', 'socks', 'ssh', 'snell',
@@ -77,6 +87,7 @@ class ConfigBuilder {
     required PlatformKind platform,
     required RuntimeEndpoints endpoints,
     required String cacheDir,
+    String? bundledRuleSetDir,
   }) {
     final isDesktop = platform == PlatformKind.windows ||
         platform == PlatformKind.macos ||
@@ -87,7 +98,10 @@ class ConfigBuilder {
 
     // ---------------------------------------------------------- nodes
     final usable = nodes
-        .where((n) => !unsupportedTypes.contains(n.type) && n.type != 'unknown')
+        .where((n) =>
+            !unsupportedTypes.contains(n.type) &&
+            !(isDesktop && desktopUnsupportedTypes.contains(n.type)) &&
+            n.type != 'unknown')
         .toList();
     final nodeTags = <String, String>{};
     final usedTags = <String>{..._reservedTags};
@@ -203,6 +217,10 @@ class ConfigBuilder {
         'format': 'binary',
         'url': _ruleSetUrl(tag),
         'http_client': httpClientTag,
+        // Used when nothing is cached yet, so the first start doesn't depend
+        // on reaching GitHub.
+        if (bundledRuleSetDir != null && bundledRuleSets.contains(tag))
+          'initial_path': '$bundledRuleSetDir/$tag.srs',
       };
       return tag;
     }

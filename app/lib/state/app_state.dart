@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 import '../core/config_builder.dart';
 import '../core/country.dart';
@@ -125,6 +126,7 @@ class AppState extends ChangeNotifier {
     if (j != null) _fromJson(j);
     loaded = true;
     notifyListeners();
+    unawaited(_prepareBundledRuleSets());
 
     _vpnSub = vpn.states.listen(_onVpnState, onError: (Object _) {});
     unawaited(_attach());
@@ -710,7 +712,30 @@ class AppState extends ChangeNotifier {
       platform: currentPlatformKind(),
       endpoints: endpoints,
       cacheDir: await store.cacheDir(),
+      bundledRuleSetDir: _ruleSetDir,
     );
+  }
+
+  /// Directory holding copies of the bundled rule-sets, used by sing-box as
+  /// `initial_path`. Stays null on iOS: the extension can't read the app's
+  /// container, so it relies on downloads there.
+  String? _ruleSetDir;
+
+  Future<void> _prepareBundledRuleSets() async {
+    if (Platform.isIOS) return;
+    try {
+      final dir = Directory('${await store.cacheDir()}/rulesets');
+      await dir.create(recursive: true);
+      for (final tag in ConfigBuilder.bundledRuleSets) {
+        final file = File('${dir.path}/$tag.srs');
+        if (await file.exists()) continue;
+        final data = await rootBundle.load('assets/rulesets/$tag.srs');
+        await file.writeAsBytes(data.buffer.asUint8List(), flush: true);
+      }
+      _ruleSetDir = dir.path;
+    } catch (e) {
+      debugPrint('bundled rule-sets unavailable: $e');
+    }
   }
 
   /// Builds the config that *would* be used (for export).

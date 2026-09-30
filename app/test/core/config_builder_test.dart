@@ -71,8 +71,9 @@ void main() {
       for (final n in ssr) {
         expect(built.nodeTags.containsKey(n.id), isFalse);
       }
+      // Naive is not compiled into the desktop core (default platform here).
       expect(built.nodeTags.length,
-          nodes.where((n) => n.type != 'shadowsocksr').length);
+          nodes.where((n) => n.type != 'shadowsocksr' && n.type != 'naive').length);
       final proxy = outboundByTag(c, 'proxy');
       expect(proxy['type'], 'selector');
       expect(proxy['interrupt_exist_connections'], false);
