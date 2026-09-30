@@ -10,6 +10,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ref="${GITHUB_REF:-}"
+# A manual release run names its tag via MELSI_RELEASE_TAG (see build.yml).
+if [[ -n "${MELSI_RELEASE_TAG:-}" ]]; then
+  ref="refs/tags/${MELSI_RELEASE_TAG}"
+fi
 if [[ -z "$ref" ]]; then
   ref="$(git -C "$root" describe --tags --exact-match 2>/dev/null | sed 's|^|refs/tags/|' || true)"
 fi
