@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vpn_channel_name">VPN connection</string>
+    <string name="vpn_status_connecting">Connecting…</string>
+    <string name="vpn_status_connected">Melsi connected</string>
+    <string name="vpn_status_stopping">Disconnecting…</string>
+    <string name="vpn_action_disconnect">Disconnect</string>
+    <string name="vpn_tile_on">On</string>
+    <string name="vpn_tile_off">Off</string>
+</resources>

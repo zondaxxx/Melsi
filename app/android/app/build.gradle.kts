@@ -1,11 +1,32 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing: android/key.properties (storeFile, storePassword, keyAlias, keyPassword)
+// or env MELSI_KEYSTORE / MELSI_KEYSTORE_PASSWORD / MELSI_KEY_ALIAS / MELSI_KEY_PASSWORD.
+// Falls back to the debug key so `flutter build apk --release` always works.
+val keyProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) FileInputStream(file).use { load(it) }
+}
+
+fun signingValue(prop: String, env: String): String? =
+    keyProperties.getProperty(prop)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(env)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("storeFile", "MELSI_KEYSTORE")
+val hasReleaseSigning = releaseStoreFile != null && rootProject.file(releaseStoreFile).exists()
+
+// libbox.aar (sing-box libbox + melsicore) is produced by scripts/build-libbox.sh.
+val libboxAar = file("libs/libbox.aar")
+
 android {
-    namespace = "app.melsi.melsi"
+    namespace = "app.melsi"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,26 +36,45 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "app.melsi.melsi"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        applicationId = "app.melsi"
+        // Flutter 3.47 minimum; sing-box-for-android also uses 24 for its main flavor.
+        minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
+        // Uses the version code from pubspec.yaml. With --split-per-abi Flutter adds 1000 * ABI.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = signingValue("storePassword", "MELSI_KEYSTORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "MELSI_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "MELSI_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+
+    packaging {
+        jniLibs {
+            // Same as sing-box-for-android: extract the (large) Go .so on install.
+            useLegacyPackaging = true
+        }
+    }
+
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 }
 
@@ -46,4 +86,23 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation(files("libs/libbox.aar"))
+    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.annotation:annotation:1.9.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+}
+
+tasks.named("preBuild") {
+    doFirst {
+        if (!libboxAar.exists()) {
+            throw GradleException(
+                "Missing ${libboxAar.path}.\n" +
+                    "Build it first: scripts/build-libbox.sh android " +
+                    "(gomobile bind of sing-box libbox + melsicore, see docs/CONTRACT.md §5).",
+            )
+        }
+    }
 }

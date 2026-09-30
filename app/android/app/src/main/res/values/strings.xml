@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Melsi</string>
+    <string name="vpn_channel_name">VPN-подключение</string>
+    <string name="vpn_status_connecting">Подключение…</string>
+    <string name="vpn_status_connected">Melsi подключен</string>
+    <string name="vpn_status_stopping">Отключение…</string>
+    <string name="vpn_action_disconnect">Отключить</string>
+    <string name="vpn_tile_on">Включено</string>
+    <string name="vpn_tile_off">Выключено</string>
+</resources>

@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# libbox (gomobile) build artifact — scripts/build-libbox.sh
+/app/libs/*.aar
+/app/libs/*.jar
