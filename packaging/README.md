@@ -1,0 +1,38 @@
+# Packaging
+
+CI lives in `.github/workflows/build.yml`; it calls the scripts below. Every
+artifact is named `Melsi-<version>-<platform>-<arch>.<ext>`, where `<version>`
+comes from `scripts/version.sh` (tag `v1.2.3` gives `1.2.3`; otherwise the
+pubspec version plus `-<short sha>`).
+
+| Platform | Script | Output |
+|---|---|---|
+| Linux | `linux/build-deb.sh <bundle> <ver> amd64 dist` | `.deb`: `/opt/melsi`, `/usr/bin/melsi`, desktop entry, URL handlers |
+| Linux | `linux/build-appimage.sh <bundle> <ver> x86_64 dist` | `.AppImage` |
+| macOS | `macos/codesign.sh <App.app> [identity]` | ad-hoc (`-`) or Developer ID + hardened runtime |
+| macOS | `macos/build-dmg.sh <App.app> <out.dmg>` | DMG from create-dmg, or from hdiutil if create-dmg fails |
+| macOS | `macos/notarize.sh <out.dmg>` | notarytool + staple |
+| Windows | `windows/melsi.iss` (`iscc /DAppVersion=… /DSourceDir=… /DOutputDir=…`) | `-setup.exe` |
+
+## Linux: TUN without a password prompt
+
+sing-box TUN needs `CAP_NET_ADMIN`. The `.deb` `postinst` runs
+
+    setcap cap_net_admin,cap_net_bind_service,cap_net_raw+ep /opt/melsi/melsi-core
+
+so `melsi-core` can create the TUN device without `pkexec`. The tar.gz and
+AppImage builds cannot carry file capabilities. With those builds the app falls
+back to `pkexec`, or you can run the `setcap` command above on the extracted
+`melsi-core` yourself.
+
+## CI secrets (all optional)
+
+| Secret | Used for |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Android release signing. Without them, APKs use the debug key. |
+| `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD` | Developer ID Application signing. Without them, the app is ad-hoc signed. |
+| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Notarization of the DMG. This also requires the certificate secrets. |
+
+The iOS IPA is always unsigned. The Packet Tunnel extension needs a team that
+has the Network Extension entitlement, so re-sign the IPA with one.
+Windows arm64 is not built because Flutter needs an arm64 host for it.

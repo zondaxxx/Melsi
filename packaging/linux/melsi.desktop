@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Melsi
+GenericName=VPN Client
+Comment=Fast VPN client powered by sing-box
+Exec=/opt/melsi/melsi %u
+Icon=melsi
+Terminal=false
+Categories=Network;
+Keywords=vpn;proxy;sing-box;
+StartupWMClass=melsi
+MimeType=x-scheme-handler/melsi;x-scheme-handler/sing-box;x-scheme-handler/clash;x-scheme-handler/hiddify;
