@@ -146,7 +146,7 @@ ext.build_configurations.each do |config|
   s['SDKROOT'] = 'iphoneos'
   # Go runtime / sing-box (static libbox) needs libresolv; SystemConfiguration
   # and Security are referenced by Go's darwin net / crypto/x509 code.
-  s['OTHER_LDFLAGS'] = ['$(inherited)', '-lresolv', '-framework', 'SystemConfiguration', '-framework', 'Security']
+  s['OTHER_LDFLAGS'] = ['$(inherited)', '-lresolv', '-framework', 'SystemConfiguration', '-framework', 'Security', '-framework', 'UIKit']
   s['LD_RUNPATH_SEARCH_PATHS'] = ['$(inherited)', '@executable_path/Frameworks', '@executable_path/../../Frameworks']
   s['SKIP_INSTALL'] = 'YES'
   s['APPLICATION_EXTENSION_API_ONLY'] = 'YES'
