@@ -1,0 +1,130 @@
+// Strings owned by the doctor feature. Keys start with doctor.;
+// Russian first, English mirrors every key.
+
+import 'strings.dart';
+
+const StringTable kDoctorStrings = StringTable(
+  prefixes: ['doctor.'],
+  ru: <String, String>{
+    // entry
+    'doctor.title': 'Диагностика сети',
+    'doctor.subtitle': 'Пошаговая проверка соединения',
+
+    // steps (ids double as titles)
+    'doctor.internet': 'Интернет',
+    'doctor.server': 'Сервер',
+    'doctor.core': 'Ядро',
+    'doctor.tunnel': 'Туннель',
+    'doctor.dns': 'DNS через туннель',
+    'doctor.leak': 'Утечка IP',
+    'doctor.rulesets': 'Наборы правил',
+    'doctor.clock': 'Время',
+
+    // step details
+    'doctor.pending': 'ожидание',
+    'doctor.checking': 'проверяем…',
+    'doctor.skipped': 'пропущено: не подключено',
+    'doctor.skippedIos': 'пропущено: недоступно на iOS',
+    'doctor.notRun': 'не проверялось',
+    'doctor.noServer': 'сервер не выбран',
+    'doctor.timeout': 'нет ответа',
+    'doctor.error': 'ошибка проверки',
+    'doctor.dnsBroken': 'сеть есть, DNS не отвечает',
+    'doctor.tcpBlocked': 'DNS работает, соединения блокируются',
+    'doctor.noCore': 'ядро не найдено',
+    'doctor.coreOk': 'отвечает',
+    'doctor.noApi': 'API ядра недоступен',
+    'doctor.leakUnknown': 'не удалось определить IP',
+    'doctor.leakSame': 'IP не изменился',
+    'doctor.leakOk': 'IP отличается от реального',
+    'doctor.rulesetsNone': 'файлы не найдены',
+    'doctor.rulesetsN': '{n} .srs',
+    'doctor.clockUnknown': 'не удалось сверить',
+
+    // status glyph semantics
+    'doctor.st.ok': 'в порядке',
+    'doctor.st.warn': 'замечание',
+    'doctor.st.fail': 'сбой',
+    'doctor.st.skipped': 'пропущено',
+
+    // verdict
+    'doctor.verdict': 'Диагноз',
+    'doctor.running': 'Проверяем…',
+    'doctor.v.offline': 'Нет сети',
+    'doctor.v.port': 'Порт сервера не отвечает: попробуйте другой сервер или анти-DPI',
+    'doctor.v.core': 'Ядро недоступно: переустановите приложение',
+    'doctor.v.tunnel': 'Сервер принимает соединение, но не пропускает трафик: проверьте подписку или квоту',
+    'doctor.v.dns': 'DNS через туннель не отвечает: проверьте удалённый DNS в настройках',
+    'doctor.v.clock': 'Проверьте время на устройстве',
+    'doctor.v.leak': 'Трафик идёт мимо туннеля',
+    'doctor.v.warn': 'Всё работает, но есть замечания',
+    'doctor.v.ok': 'Всё в порядке',
+    'doctor.v.partial': 'Проверка не завершена',
+    'doctor.fix.antiDpi': 'Включить анти-DPI',
+    'doctor.fix.switch': 'Сменить сервер',
+    'doctor.antiDpiOn': 'Анти-DPI включён',
+
+    // actions
+    'doctor.copy': 'Скопировать отчёт',
+    'doctor.again': 'Повторить',
+    'doctor.report.title': 'Отчёт диагностики',
+  },
+  en: <String, String>{
+    'doctor.title': 'Network diagnostics',
+    'doctor.subtitle': 'Step-by-step connection check',
+
+    'doctor.internet': 'Internet',
+    'doctor.server': 'Server',
+    'doctor.core': 'Core',
+    'doctor.tunnel': 'Tunnel',
+    'doctor.dns': 'DNS via tunnel',
+    'doctor.leak': 'IP leak',
+    'doctor.rulesets': 'Rule-sets',
+    'doctor.clock': 'Clock',
+
+    'doctor.pending': 'waiting',
+    'doctor.checking': 'checking…',
+    'doctor.skipped': 'skipped: not connected',
+    'doctor.skippedIos': 'skipped: unavailable on iOS',
+    'doctor.notRun': 'not checked',
+    'doctor.noServer': 'no server selected',
+    'doctor.timeout': 'no response',
+    'doctor.error': 'check failed',
+    'doctor.dnsBroken': 'network up, DNS does not answer',
+    'doctor.tcpBlocked': 'DNS works, connections are blocked',
+    'doctor.noCore': 'core not found',
+    'doctor.coreOk': 'responds',
+    'doctor.noApi': 'core API unavailable',
+    'doctor.leakUnknown': 'could not determine the IP',
+    'doctor.leakSame': 'the IP did not change',
+    'doctor.leakOk': 'differs from the real IP',
+    'doctor.rulesetsNone': 'no files found',
+    'doctor.rulesetsN': '{n} .srs',
+    'doctor.clockUnknown': 'could not compare',
+
+    'doctor.st.ok': 'ok',
+    'doctor.st.warn': 'warning',
+    'doctor.st.fail': 'failed',
+    'doctor.st.skipped': 'skipped',
+
+    'doctor.verdict': 'Verdict',
+    'doctor.running': 'Checking…',
+    'doctor.v.offline': 'No network',
+    'doctor.v.port': 'The server port does not answer: try another server or anti-DPI',
+    'doctor.v.core': 'The core is unavailable: reinstall the app',
+    'doctor.v.tunnel': 'The server accepts connections but passes no traffic: check the subscription or quota',
+    'doctor.v.dns': 'DNS through the tunnel does not answer: check the remote DNS in settings',
+    'doctor.v.clock': 'Check the device clock',
+    'doctor.v.leak': 'Traffic bypasses the tunnel',
+    'doctor.v.warn': 'Working, with remarks',
+    'doctor.v.ok': 'All good',
+    'doctor.v.partial': 'Check incomplete',
+    'doctor.fix.antiDpi': 'Enable anti-DPI',
+    'doctor.fix.switch': 'Switch server',
+    'doctor.antiDpiOn': 'Anti-DPI enabled',
+
+    'doctor.copy': 'Copy report',
+    'doctor.again': 'Run again',
+    'doctor.report.title': 'Diagnostics report',
+  },
+);

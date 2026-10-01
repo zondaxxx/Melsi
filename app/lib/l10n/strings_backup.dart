@@ -1,0 +1,85 @@
+// Strings owned by the backup feature. Keys start with backup. / update. / alert.;
+// Russian first, English mirrors every key.
+
+import 'strings.dart';
+
+const StringTable kBackupStrings = StringTable(
+  prefixes: ['backup.', 'update.', 'alert.'],
+  ru: <String, String>{
+    // backup
+    'backup.save': 'Сохранить резервную копию',
+    'backup.saveHint': 'Подписки, серверы, маршруты, настройки',
+    'backup.restore': 'Восстановить из файла',
+    'backup.restoreTitle': 'Восстановление',
+    'backup.summary': '{subs} подписок · {nodes} серверов · {favs} избранных',
+    'backup.replace': 'Заменить',
+    'backup.merge': 'Объединить',
+    'backup.replaceWarn': 'Текущие данные будут удалены',
+    'backup.mergeHint': 'Новые подписки и серверы добавятся к текущим, настройки не изменятся',
+    'backup.secrets': 'Копия содержит ключи серверов в открытом виде',
+    'backup.doRestore': 'Восстановить',
+    'backup.copyText': 'Скопировать как текст',
+    'backup.pasteText': 'Вставить из текста',
+    'backup.done': 'Восстановлено',
+    'backup.invalid': 'Это не резервная копия Melsi',
+    'backup.saved': 'Резервная копия сохранена',
+    'backup.copied': 'Резервная копия скопирована в буфер',
+
+    // updates
+    'update.check': 'Проверить обновления',
+    'update.available': '{v} доступна',
+    'update.latest': 'Актуальная версия',
+    'update.checked': 'Проверено {t}',
+    'update.setting': 'Проверять обновления',
+    'update.settingHint': 'Раз в сутки, через GitHub',
+
+    // alerts
+    'alert.title': 'Внимание',
+    'alert.none': 'Всё в порядке',
+    'alert.subExpiring': 'Подписка «{name}» истекает через {n} дн.',
+    'alert.subExpiringToday': 'Подписка «{name}» истекает сегодня',
+    'alert.subExpired': 'Подписка «{name}» истекла',
+    'alert.subQuota': 'Использовано {p}% трафика «{name}»',
+    'alert.subExhausted': 'Трафик «{name}» исчерпан',
+    'alert.update': 'Доступна версия {v}',
+    'alert.dismiss': 'Скрыть',
+    'alert.skipVersion': 'Пропустить эту версию',
+  },
+  en: <String, String>{
+    'backup.save': 'Save a backup',
+    'backup.saveHint': 'Subscriptions, servers, routes, settings',
+    'backup.restore': 'Restore from file',
+    'backup.restoreTitle': 'Restore',
+    'backup.summary': '{subs} subscriptions · {nodes} servers · {favs} favourites',
+    'backup.replace': 'Replace',
+    'backup.merge': 'Merge',
+    'backup.replaceWarn': 'Current data will be deleted',
+    'backup.mergeHint': 'New subscriptions and servers are added to the current ones; settings stay',
+    'backup.secrets': 'The backup holds server keys in plain text',
+    'backup.doRestore': 'Restore',
+    'backup.copyText': 'Copy as text',
+    'backup.pasteText': 'Paste from text',
+    'backup.done': 'Restored',
+    'backup.invalid': 'Not a Melsi backup',
+    'backup.saved': 'Backup saved',
+    'backup.copied': 'Backup copied to clipboard',
+
+    'update.check': 'Check for updates',
+    'update.available': '{v} available',
+    'update.latest': 'Up to date',
+    'update.checked': 'Checked {t}',
+    'update.setting': 'Check for updates',
+    'update.settingHint': 'Once a day, via GitHub',
+
+    'alert.title': 'Attention',
+    'alert.none': 'All good',
+    'alert.subExpiring': 'Subscription “{name}” expires in {n} d.',
+    'alert.subExpiringToday': 'Subscription “{name}” expires today',
+    'alert.subExpired': 'Subscription “{name}” has expired',
+    'alert.subQuota': '{p}% of “{name}” traffic used',
+    'alert.subExhausted': '“{name}” traffic exhausted',
+    'alert.update': 'Version {v} available',
+    'alert.dismiss': 'Dismiss',
+    'alert.skipVersion': 'Skip this version',
+  },
+);

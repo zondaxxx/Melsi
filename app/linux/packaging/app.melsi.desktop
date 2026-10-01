@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Melsi
+GenericName=VPN Client
+GenericName[ru]=VPN-клиент
+Comment=Fast and beautiful VPN client powered by sing-box
+Comment[ru]=Быстрый и красивый VPN-клиент на sing-box
+Exec=melsi %u
+TryExec=melsi
+Icon=app.melsi
+Terminal=false
+StartupNotify=true
+StartupWMClass=app.melsi
+Categories=Network;Utility;
+Keywords=VPN;Proxy;sing-box;Xray;V2Ray;Clash;Hysteria;VLESS;
+MimeType=x-scheme-handler/melsi;x-scheme-handler/sing-box;x-scheme-handler/clash;x-scheme-handler/hiddify;

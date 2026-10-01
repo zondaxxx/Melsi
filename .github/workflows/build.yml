@@ -1,0 +1,558 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Create a GitHub Release with this tag (e.g. v1.0.0-alpha.1) from the selected branch. Leave empty for a plain build."
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.47.5"
+  RETENTION_DAYS: 14
+  # Manual releases: the tag the release job creates (empty on normal runs).
+  MELSI_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
+
+jobs:
+  # ---------------------------------------------------------------- tests ---
+  core-test:
+    name: Tests (Go + Flutter)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: go vet
+        working-directory: core
+        run: go vet ./...
+
+      - name: go test
+        working-directory: core
+        run: go test ./...
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      - name: flutter analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: flutter test
+        working-directory: app
+        run: flutter test
+
+  # -------------------------------------------------------------- android ---
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        run: bash scripts/version.sh --github
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Android NDK (Flutter default)
+        run: |
+          flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
+          pattern='ndkVersion[^"]*"[0-9]+\.[0-9]+\.[0-9]+"'
+          # 1) an explicit literal in the app's Gradle file wins,
+          # 2) otherwise flutter.ndkVersion from the Flutter Gradle plugin sources.
+          ndk="$(grep -hoE "$pattern" app/android/app/build.gradle* 2>/dev/null \
+                 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+          if [ -z "$ndk" ]; then
+            ndk="$(grep -rhoE "$pattern" \
+                     "$flutter_root/packages/flutter_tools/gradle/src/main" 2>/dev/null \
+                   | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+          fi
+          if [ -z "$ndk" ]; then
+            echo "::warning::could not detect flutter.ndkVersion, using fallback"
+            ndk="27.0.12077973"
+          fi
+          echo "NDK version: $ndk"
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "ndk;$ndk" > /dev/null
+          {
+            echo "ANDROID_NDK_HOME=$sdk/ndk/$ndk"
+            echo "ANDROID_NDK_ROOT=$sdk/ndk/$ndk"
+            echo "ANDROID_NDK_VERSION=$ndk"
+          } >> "$GITHUB_ENV"
+
+      - name: Build libbox.aar
+        run: bash scripts/build-libbox.sh android
+
+      - name: Configure release signing
+        if: env.HAS_ANDROID_KEYSTORE == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/android/app/release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > app/android/key.properties
+
+      - name: Signing mode
+        if: env.HAS_ANDROID_KEYSTORE != 'true'
+        run: echo "::warning::ANDROID_KEYSTORE_BASE64 not set - APKs are signed with the debug key"
+
+      - name: flutter build apk (split per ABI)
+        working-directory: app
+        run: |
+          # shellcheck disable=SC2086
+          flutter build apk --release --split-per-abi $MELSI_BUILD_ARGS
+
+      - name: Collect split APKs
+        run: |
+          mkdir -p dist
+          out=app/build/app/outputs/flutter-apk
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if [ -f "$out/app-$abi-release.apk" ]; then
+              cp "$out/app-$abi-release.apk" "dist/Melsi-$MELSI_VERSION-android-$abi.apk"
+            fi
+          done
+
+      - name: flutter build apk (universal)
+        working-directory: app
+        run: |
+          # shellcheck disable=SC2086
+          flutter build apk --release $MELSI_BUILD_ARGS
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             "../dist/Melsi-$MELSI_VERSION-android-universal.apk"
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/android/app/release.jks app/android/key.properties
+
+      - run: ls -la dist
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: melsi-android
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ------------------------------------------------------------------ iOS ---
+  ios:
+    name: iOS (unsigned)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        run: bash scripts/version.sh --github
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build Libbox.xcframework
+        run: bash scripts/build-libbox.sh apple
+
+      - name: flutter build ios
+        working-directory: app
+        run: |
+          # shellcheck disable=SC2086
+          flutter build ios --release --no-codesign $MELSI_BUILD_ARGS
+
+      - name: Package unsigned IPA
+        run: |
+          app="$(find app/build/ios/iphoneos -maxdepth 1 -name '*.app' | head -n1)"
+          [ -n "$app" ] || { echo "::error::no .app in app/build/ios/iphoneos"; exit 1; }
+          mkdir -p dist ipa/Payload
+          ditto "$app" "ipa/Payload/$(basename "$app")"
+          (cd ipa && zip -qry "../dist/Melsi-$MELSI_VERSION-ios-unsigned.ipa" Payload)
+          ls -la dist
+
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### iOS build is unsigned
+          `Melsi-*-ios-unsigned.ipa` must be re-signed before installing.
+          The VPN runs in the `app.melsi.PacketTunnel` Network Extension, so the
+          signing team needs the **Network Extension (packet-tunnel-provider)**
+          entitlement and the App Group `group.app.melsi`. Free/sideload
+          certificates (AltStore, Sideloadly with a free Apple ID) cannot grant it.
+          EOF
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: melsi-ios
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ---------------------------------------------------------------- macOS ---
+  macos:
+    name: macOS (universal)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      HAS_MACOS_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        run: bash scripts/version.sh --github
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build melsi-core (darwin universal)
+        run: |
+          bash scripts/build-core.sh darwin universal
+          file core/dist/melsi-core-darwin-universal
+
+      - name: flutter build macos
+        working-directory: app
+        run: |
+          # shellcheck disable=SC2086
+          flutter build macos --release $MELSI_BUILD_ARGS
+
+      - name: Stage Melsi.app (ensure melsi-core is bundled)
+        run: |
+          built="$(find app/build/macos/Build/Products/Release -maxdepth 1 -name '*.app' | head -n1)"
+          [ -n "$built" ] || { echo "::error::no .app in Build/Products/Release"; exit 1; }
+          mkdir -p stage
+          ditto "$built" stage/Melsi.app
+          core=stage/Melsi.app/Contents/Resources/melsi-core
+          if [ ! -f "$core" ]; then
+            echo "::warning::melsi-core missing from the .app (Xcode phase did not copy it) - copying"
+            cp core/dist/melsi-core-darwin-universal "$core"
+          fi
+          chmod 0755 "$core"
+          lipo -info "$core"
+          echo "APP_PATH=$PWD/stage/Melsi.app" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        if: env.HAS_MACOS_CERT == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/melsi-signing.keychain-db"
+          kc_pass="$(openssl rand -hex 16)"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$kc_pass" "$keychain" > /dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+                      | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)"$/\1/')"
+          [ -n "$identity" ] || { echo "::error::no Developer ID Application identity in the p12"; exit 1; }
+          echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$keychain" >> "$GITHUB_ENV"
+
+      - name: Codesign
+        run: bash packaging/macos/codesign.sh "$APP_PATH" "${SIGN_IDENTITY:--}"
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg || echo "::warning::create-dmg install failed, will use hdiutil"
+          dmg="dist/Melsi-$MELSI_VERSION-macos-universal.dmg"
+          bash packaging/macos/build-dmg.sh "$APP_PATH" "$dmg"
+          if [ -n "${SIGN_IDENTITY:-}" ]; then
+            codesign --force --timestamp --sign "$SIGN_IDENTITY" "$dmg"
+          fi
+          echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
+          ls -la dist
+
+      - name: Notarize
+        if: env.HAS_MACOS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: bash packaging/macos/notarize.sh "$DMG_PATH"
+
+      - name: Summary
+        if: env.HAS_MACOS_CERT != 'true'
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### macOS build is ad-hoc signed
+          Not notarized: on first launch right-click Melsi.app > Open, or run
+          `xattr -dr com.apple.quarantine /Applications/Melsi.app`.
+          EOF
+
+      - name: Remove signing keychain
+        if: always() && env.KEYCHAIN_PATH != ''
+        run: security delete-keychain "$KEYCHAIN_PATH" || true
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: melsi-macos
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # -------------------------------------------------------------- Windows ---
+  # x64 only: Flutter Windows arm64 builds need an arm64 host runner.
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        run: bash scripts/version.sh --github
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build melsi-core (windows amd64)
+        run: bash scripts/build-core.sh windows amd64
+
+      - name: flutter build windows
+        working-directory: app
+        run: |
+          # shellcheck disable=SC2086
+          flutter build windows --release $MELSI_BUILD_ARGS
+
+      - name: Complete bundle (melsi-core.exe, VC++ runtime)
+        run: |
+          rel=app/build/windows/x64/runner/Release
+          [ -f "$rel/melsi.exe" ] || { echo "::error::$rel/melsi.exe not found"; exit 1; }
+          if [ ! -f "$rel/melsi-core.exe" ]; then
+            echo "::warning::melsi-core.exe missing from Release (CMake install did not copy it) - copying"
+            cp core/dist/melsi-core-windows-amd64.exe "$rel/melsi-core.exe"
+          fi
+          # App-local VC++ runtime so the app starts on machines without the redist.
+          for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+            [ -f "$rel/$dll" ] || cp "/c/Windows/System32/$dll" "$rel/" || true
+          done
+          ls -la "$rel"
+
+      - name: Portable zip
+        run: |
+          mkdir -p dist portable
+          cp -r app/build/windows/x64/runner/Release portable/Melsi
+          (cd portable && 7z a -tzip -mx=9 "../dist/Melsi-$MELSI_VERSION-windows-x64-portable.zip" Melsi > /dev/null)
+
+      - name: Ensure Inno Setup
+        run: |
+          if command -v iscc > /dev/null 2>&1; then
+            iscc_path="$(command -v iscc)"
+          elif [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then
+            iscc_path="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          else
+            choco install innosetup -y --no-progress
+            iscc_path="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          fi
+          echo "ISCC=$(cygpath -w "$iscc_path")" >> "$GITHUB_ENV"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & $env:ISCC "/DAppVersion=$env:MELSI_VERSION" `
+            "/DSourceDir=app\build\windows\x64\runner\Release" `
+            "/DOutputDir=dist" `
+            "packaging\windows\melsi.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: melsi-windows
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ---------------------------------------------------------------- Linux ---
+  linux:
+    name: Linux (x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        run: bash scripts/version.sh --github
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libstdc++-12-dev libayatana-appindicator3-dev file
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build melsi-core (linux amd64)
+        run: bash scripts/build-core.sh linux amd64
+
+      - name: flutter build linux
+        working-directory: app
+        run: |
+          # shellcheck disable=SC2086
+          flutter build linux --release $MELSI_BUILD_ARGS
+
+      - name: Complete bundle (melsi-core)
+        run: |
+          bundle=app/build/linux/x64/release/bundle
+          [ -x "$bundle/melsi" ] || { echo "::error::$bundle/melsi not found"; exit 1; }
+          if [ ! -f "$bundle/melsi-core" ]; then
+            echo "::warning::melsi-core missing from bundle (CMake did not copy it) - copying"
+            cp core/dist/melsi-core-linux-amd64 "$bundle/melsi-core"
+          fi
+          chmod 0755 "$bundle/melsi-core"
+          echo "BUNDLE=$bundle" >> "$GITHUB_ENV"
+
+      - name: tar.gz
+        run: |
+          mkdir -p dist tarball
+          cp -a "$BUNDLE" tarball/melsi
+          tar -C tarball -czf "dist/Melsi-$MELSI_VERSION-linux-x64.tar.gz" melsi
+
+      - name: .deb
+        run: bash packaging/linux/build-deb.sh "$BUNDLE" "$MELSI_VERSION" amd64 dist
+
+      - name: AppImage
+        continue-on-error: true
+        run: bash packaging/linux/build-appimage.sh "$BUNDLE" "$MELSI_VERSION" x86_64 dist
+
+      - run: |
+          ls -la dist
+          dpkg-deb --info dist/*.deb
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: melsi-linux
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # -------------------------------------------------------------- release ---
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    needs: [core-test, android, ios, macos, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: melsi-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          # On a manual run the action creates the tag at this commit.
+          tag_name: ${{ env.MELSI_RELEASE_TAG || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(env.MELSI_RELEASE_TAG || github.ref_name, '-') }}
+          fail_on_unmatched_files: true

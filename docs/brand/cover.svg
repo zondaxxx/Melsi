@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">Melsi — Your connection. Your rules.</title>
+  <desc id="description">Melsi VPN: smart routing, Double VPN and game mode. A warm dark background, violet shield monogram and restrained route lines.</desc>
+  <rect width="1280" height="640" rx="28" fill="#141310"/>
+  <path d="M792 0V640M64 526H1216" stroke="#33312D"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif">
+    <circle cx="72" cy="68" r="5" fill="#A592FF"/>
+    <text x="92" y="74" fill="#AFAAA3" font-size="14" letter-spacing="3">CONNECTION, CONSIDERED.</text>
+    <text x="64" y="220" fill="#F1EEE8" font-size="112" font-weight="700" letter-spacing="-6">Melsi</text>
+    <text x="69" y="301" fill="#F1EEE8" font-size="38" font-weight="500" letter-spacing="-1">Your connection.</text>
+    <text x="69" y="352" fill="#AFAAA3" font-size="38" font-weight="500" letter-spacing="-1">Your rules.</text>
+    <text x="69" y="430" fill="#AFAAA3" font-size="19">A cross-platform VPN client. Powered by sing-box.</text>
+    <text x="66" y="567" fill="#F1EEE8" font-size="13" font-weight="600" letter-spacing="1.8">SMART ROUTING</text>
+    <text x="278" y="567" fill="#F1EEE8" font-size="13" font-weight="600" letter-spacing="1.8">DOUBLE VPN</text>
+    <text x="461" y="567" fill="#F1EEE8" font-size="13" font-weight="600" letter-spacing="1.8">GAME MODE</text>
+    <text x="1216" y="567" text-anchor="end" fill="#AFAAA3" font-size="14">Android · iOS · macOS · Windows · Linux</text>
+    <text x="66" y="607" fill="#77736D" font-size="12" letter-spacing="1.2">MELSI / OPEN REPOSITORY</text>
+    <text x="1216" y="607" text-anchor="end" fill="#77736D" font-size="12">github.com/zondaxxx/Melsi</text>
+  </g>
+  <path d="M861 103H948Q1008 103 1008 163V390Q1008 450 1068 450H1200" stroke="#39352F" stroke-width="2"/>
+  <circle cx="861" cy="103" r="5" fill="#141310" stroke="#827A91" stroke-width="2"/>
+  <circle cx="1200" cy="450" r="5" fill="#A592FF"/>
+  <rect x="883" y="157" width="264" height="264" rx="65" fill="#7053E8"/>
+  <path d="M1015 203C983 208 951 215 938 221C935 309 960 365 1015 391C1070 365 1095 309 1092 221C1079 215 1047 208 1015 203Z" fill="#F4F0FF"/>
+  <path d="M978 344V255L1015 299L1052 255V344" stroke="#7053E8" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

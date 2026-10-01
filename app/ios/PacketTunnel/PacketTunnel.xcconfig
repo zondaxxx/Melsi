@@ -1,0 +1,7 @@
+// Build settings shared by all PacketTunnel configurations.
+// Pulls FLUTTER_BUILD_NAME / FLUTTER_BUILD_NUMBER so the extension version
+// always matches the app (App Store requirement). Deliberately does NOT include
+// Flutter/Debug.xcconfig / Release.xcconfig: those may include CocoaPods
+// settings for Runner which must not leak into the extension.
+#include? "../Flutter/Generated.xcconfig"
+
