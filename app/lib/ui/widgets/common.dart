@@ -101,6 +101,7 @@ class RowTile extends StatelessWidget {
   const RowTile({
     super.key,
     required this.title,
+    this.titleMaxLines = 1,
     this.subtitle,
     this.subtitleWidget,
     this.leading,
@@ -112,6 +113,7 @@ class RowTile extends StatelessWidget {
   });
 
   final String title;
+  final int titleMaxLines;
   final String? subtitle;
   final Widget? subtitleWidget;
   final Widget? leading;
@@ -137,7 +139,7 @@ class RowTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(title,
-                    maxLines: 1,
+                    maxLines: titleMaxLines,
                     overflow: TextOverflow.ellipsis,
                     style: t.body.copyWith(color: destructive ? c.danger : c.label)),
                 if (subtitle != null) ...[

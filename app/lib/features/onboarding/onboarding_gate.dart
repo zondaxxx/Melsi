@@ -32,11 +32,16 @@ class OnboardingGate extends StatefulWidget {
 
 class _OnboardingGateState extends State<OnboardingGate> {
   late bool _onboarding;
+  late final AppState _app;
+  late int _revision;
 
   @override
   void initState() {
     super.initState();
     final app = context.appRead;
+    _app = app;
+    _revision = app.onboardingRevision;
+    app.addListener(_onAppChanged);
     final done = app.settings.onboardingDone;
     _onboarding = !done && app.nodes.isEmpty;
     if (!done && !_onboarding) {
@@ -46,6 +51,18 @@ class _OnboardingGateState extends State<OnboardingGate> {
         if (mounted) _markDone(app);
       });
     }
+  }
+
+  void _onAppChanged() {
+    if (_revision == _app.onboardingRevision) return;
+    _revision = _app.onboardingRevision;
+    if (_onboarding) setState(() => _onboarding = false);
+  }
+
+  @override
+  void dispose() {
+    _app.removeListener(_onAppChanged);
+    super.dispose();
   }
 
   void _markDone(AppState app) {

@@ -1,10 +1,67 @@
-# Melsi
+<p align="center">
+  <img src="docs/brand/cover.svg" alt="Melsi — Your connection. Your rules. Cross-platform VPN on sing-box." width="100%">
+</p>
 
-Кроссплатформенный VPN-клиент на ядре [sing-box](https://github.com/SagerNet/sing-box) 1.14 — в духе Karing, с упором на умный автовыбор сервера, игровой режим и раздельную маршрутизацию по приложениям.
+<p align="center">
+  <a href="https://github.com/zondaxxx/Melsi/releases"><img src="https://img.shields.io/github/v/release/zondaxxx/Melsi?include_prereleases&style=flat-square&color=7053E8&label=release" alt="Latest release"></a>
+  <a href="https://github.com/zondaxxx/Melsi/actions/workflows/build.yml"><img src="https://github.com/zondaxxx/Melsi/actions/workflows/build.yml/badge.svg?branch=main" alt="Build status"></a>
+  <img src="https://img.shields.io/badge/Flutter-3.47-2C2926?style=flat-square" alt="Flutter 3.47">
+  <img src="https://img.shields.io/badge/sing--box-1.14-2C2926?style=flat-square" alt="sing-box 1.14">
+</p>
 
-Платформы: **Android** (APK), **iOS** (IPA), **macOS** (DMG, universal), **Windows** (установщик и portable), **Linux** (deb, tar.gz, AppImage).
+<p align="center">
+  <a href="https://github.com/zondaxxx/Melsi/releases"><strong>Скачать</strong></a> ·
+  <a href="#возможности">Возможности</a> ·
+  <a href="CHANGELOG.md">Что нового</a> ·
+  <a href="https://github.com/zondaxxx/Melsi/issues">Сообщить об ошибке</a>
+</p>
+
+# Melsi — подключение по вашим правилам
+
+Кроссплатформенный VPN-клиент на ядре [sing-box](https://github.com/SagerNet/sing-box) 1.14. Умный выбор сервера, игровой режим и раздельная маршрутизация — в спокойном интерфейсе без лишнего шума.
+
+**Melsi — клиент, а не VPN-провайдер.** Для подключения нужна собственная ссылка на сервер или подписка. Публичные предварительные сборки предназначены для тестирования; проверка соединений на реальных устройствах ещё продолжается.
+
+## Скачать и подключиться
+
+Выберите файл в [GitHub Releases](https://github.com/zondaxxx/Melsi/releases). Контрольные суммы находятся рядом, в `SHA256SUMS.txt`.
+
+| Платформа | Что скачать | Перед установкой |
+| --- | --- | --- |
+| Android | `android-arm64-v8a.apk` или `android-universal.apk` | При отсутствии релизного ключа сборки подписаны отладочным ключом |
+| macOS | `macos-universal.dmg` | Apple Silicon и Intel; без Developer ID подпись ad-hoc, возможен запрос Gatekeeper |
+| Windows | `windows-x64-setup.exe` или `portable.zip` | x64; для TUN нужны права администратора |
+| Linux | `.deb`, `.tar.gz` или `.AppImage` | x64; AppImage публикуется при успешной упаковке |
+| iOS | `ios-unsigned.ipa` | Только для переподписи командой с правом Network Extension; напрямую не устанавливается |
+
+1. Установите клиент и пройдите короткое приветствие.
+2. Добавьте ссылку или подписку: из буфера, QR-кода либо файла.
+3. Оставьте умный выбор сервера или выберите сервер вручную и нажмите **«Подключить»**.
+
+## Внутри приложения
+
+<table>
+  <tr><th>Быстрый старт</th><th>Серверы под рукой</th><th>Игровой маршрут</th></tr>
+  <tr>
+    <td><img src="docs/screenshots/onboarding.png" alt="Приветствие Melsi с тремя основными возможностями" width="240"></td>
+    <td><img src="docs/screenshots/servers.png" alt="Избранные серверы, поиск и подписки в Melsi" width="240"></td>
+    <td><img src="docs/screenshots/game.png" alt="Игровой режим Melsi с пингом, джиттером и пресетами игр" width="240"></td>
+  </tr>
+</table>
+
+Скриншоты используют демонстрационные серверы и показатели. Светлая и тёмная темы, русский и английский языки, адаптация к телефону и широкому окну.
 
 ## Возможности
+
+| Меньше ручной работы | Больше контроля |
+| --- | --- |
+| Автовыбор по пингу, джиттеру и потерям | Double VPN: фиксированный вход и сменяемый выход |
+| Избранные, недавние серверы и поиск команд | Раздельные маршруты приложений и доменов |
+| Импорт ссылок, подписок, QR и файлов | Проверка IP, скорости и диагностика сети |
+| Предупреждения о подписках и обновлениях | История сессий, статистика и резервные копии |
+
+<details>
+<summary><strong>Протоколы, маршрутизация и подробности</strong></summary>
 
 **Протоколы.** VLESS (Reality, Vision), VMess, Trojan, Shadowsocks (SIP002, SS2022, obfs / v2ray-plugin / shadow-tls), Hysteria, Hysteria2 (obfs, port hopping), TUIC v5, AnyTLS, Snell, WireGuard, SSH, SOCKS, HTTP, Naive (Android и iOS).
 
@@ -32,6 +89,21 @@
 
 **Интерфейс.** Дизайн в стиле Apple: пружинные анимации, полупрозрачные материалы, светлая и тёмная темы, русский и английский языки. На Android есть плитка в шторке уведомлений, автоподключение после загрузки и поддержка постоянного VPN (Always-on).
 
+</details>
+
+### Новое в клиенте 1.1
+
+- **Первый запуск.** Приветствие, знакомство с возможностями, импорт сервера и настройка автоподключения. Любой шаг можно пропустить; приветствие можно повторить из настроек. Короткая заставка не ждёт сеть.
+- **Живой интерфейс.** Плавные переходы, линия подключения, анимированные показатели и итог завершённой сессии. Поддерживается системное уменьшение анимации; раскладка адаптируется к телефону и широкому окну.
+- **Быстрый доступ.** Избранные и недавние серверы, предложение импортировать ссылку из буфера только после подтверждения. На широком экране — поиск команд и серверов по `⌘K` / `Ctrl+K`.
+- **Double VPN.** Фиксированный вход и выбираемый вручную или автоматически выход. Нужны минимум два пригодных сервера; WireGuard не может быть входным узлом.
+- **Проверка сети.** IP и география выхода, сравнение с исходным IP, замер скорости и пошаговая диагностика подключения. Проверки используют внешние сервисы; автоматическую проверку IP можно отключить, на iOS она запускается вручную. Один тест скорости расходует примерно до 60 МБ трафика.
+- **Статистика.** Трафик за сегодня, история сессий и графики за 7 / 30 / 90 дней. Это локальные показания клиента, а не биллинг провайдера.
+- **Резервные копии.** Предпросмотр содержимого, объединение или замена настроек. JSON-копия **не зашифрована** и содержит серверные ключи и ссылки подписок — храните её как пароль.
+- **Предупреждения.** Истечение подписки, остаток трафика и доступная версия клиента. Проверка обновлений не устанавливает ничего автоматически.
+
+Сравнение IP и диагностические пробы не являются полной проверкой отсутствия DNS, IPv6 или иных утечек. Проверки IP обращаются к ipwho.is, ip.sb или ipinfo.io, тест скорости — к Cloudflare, проверка обновлений — к GitHub; соответствующий сервис видит адрес, с которого приходит запрос.
+
 ## Архитектура
 
 ```
@@ -50,28 +122,36 @@ packaging/ установщики (deb, AppImage, DMG, Inno Setup)
 
 ## Сборка
 
-Нужны Flutter 3.47, Go 1.25.5+ и JDK 17. Для Android также нужен NDK, для iOS и macOS — Xcode.
+Нужны Flutter 3.47.5, Go 1.25.5+ и JDK 17. Для Android также нужен NDK, для iOS и macOS — Xcode. Команды каждого варианта запускаются из корня репозитория.
 
 ```bash
 # Android
 scripts/build-libbox.sh android          # → app/android/app/libs/libbox.aar
-cd app && flutter build apk --split-per-abi
+(cd app && flutter build apk --split-per-abi)
 
 # iOS (только macOS)
 scripts/build-libbox.sh apple            # → app/ios/Frameworks/Libbox.xcframework
-cd app && flutter build ios --no-codesign
+(cd app && flutter build ios --no-codesign)
 
 # Десктоп: сначала ядро, затем приложение
 scripts/build-core.sh darwin universal   # или: windows amd64 / linux amd64
-cd app && flutter build macos            # или: windows / linux
+(cd app && flutter build macos)          # или: windows / linux
 ```
 
 Тесты:
 
 ```bash
-cd core && go test ./...
-cd app && flutter test    # с SING_BOX_BIN=<путь к sing-box> конфиги проверяются через sing-box check
+(cd core && go test ./...)
+(cd app && flutter test)  # с SING_BOX_BIN=<путь к sing-box> конфиги проверяются через sing-box check
 ```
+
+Визуальная проверка светлой и тёмной тем, мобильных и широких экранов (из `app/`):
+
+```bash
+MELSI_SHOTS=/tmp/melsi-shots flutter test test/ui/screenshots_test.dart
+```
+
+Скриншоты и Flutter-тесты используют подставные VPN и HTTP-ответы. Они не заменяют проверку настоящего туннеля на каждой целевой платформе.
 
 Всё это собирает CI (`.github/workflows/build.yml`) и выкладывает в релиз при пуше тега `v*`. Секреты для подписи описаны в [packaging/README.md](packaging/README.md).
 
@@ -82,3 +162,9 @@ cd app && flutter test    # с SING_BOX_BIN=<путь к sing-box> конфиг�
 - **macOS.** DMG подписан ad-hoc, при первом запуске откройте его через ПКМ → «Открыть».
 - **Naive** работает только на мобильных: на десктопе ядро собрано без cronet.
 - **Нет в sing-box**, поэтому пропускаются: ShadowsocksR, транспорт xhttp, AmneziaWG.
+
+## Обратная связь
+
+Нашли проблему? [Создайте issue](https://github.com/zondaxxx/Melsi/issues/new/choose): укажите платформу, версию клиента и шаги воспроизведения. Не публикуйте ссылки подписок, UUID, пароли, полные резервные копии или логи с секретами.
+
+Melsi построен на Flutter и sing-box. Знак, палитра и обложка репозитория — в [наборе оформления](docs/brand/README.md).

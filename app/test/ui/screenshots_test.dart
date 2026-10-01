@@ -9,6 +9,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:melsi/core/models.dart';
+import 'package:melsi/features/chain/chain_picker.dart';
+import 'package:melsi/features/doctor/doctor_widgets.dart';
+import 'package:melsi/features/netcheck/speed_test_sheet.dart';
+import 'package:melsi/features/palette/palette_shell.dart';
+import 'package:melsi/features/stats/stats_screen.dart';
 import 'package:melsi/main.dart';
 import 'package:melsi/services/engine_api.dart';
 import 'package:melsi/state/app_state.dart';
@@ -78,6 +83,16 @@ Map<String, dynamic> _demo(String theme) {
         'expire': DateTime.now().add(const Duration(days: 92)).toIso8601String(),
       },
       {'id': 's2', 'name': 'Друзья', 'updatedAt': DateTime.now().toIso8601String()},
+      {
+        'id': 's3',
+        'name': 'Старый тариф',
+        'url': 'https://old.example.net/sub/xyz',
+        'updatedAt': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+        'upload': 900000000,
+        'download': 48000000000,
+        'total': 53687091200,
+        'expire': DateTime.now().add(const Duration(days: 2)).toIso8601String(),
+      },
     ],
     'nodes': [
       node(1, '🇩🇪 Frankfurt · Reality', 'vless', 'DE', 's1'),
@@ -87,10 +102,32 @@ Map<String, dynamic> _demo(String theme) {
       node(5, '🇯🇵 Tokyo · VMess', 'vmess', 'JP', 's1'),
       node(6, '🇹🇷 Istanbul · Shadowsocks', 'shadowsocks', 'TR', 's2'),
       node(7, '🇰🇿 Almaty · AnyTLS', 'anytls', 'KZ', 's2'),
+      node(8, '🇸🇪 Stockholm · VLESS', 'vless', 'SE', 's3'),
     ],
     'selectedNodeId': 'n1',
     'game': {'enabled': true, 'gameIds': ['cs2', 'valorant', 'dota2', 'pubg_mobile']},
     'settings': {'themeMode': theme, 'locale': 'ru'},
+    'favourites': ['n2', 'n3'],
+    'recents': ['n3', 'n1'],
+    'chain': {'enabled': true, 'entryNodeId': 'n2'},
+    'sections': {
+      'netcheck': {
+        'realIp': {
+          'ip': '95.24.118.7',
+          'countryCode': 'RU',
+          'city': 'Москва',
+          'org': 'PJSC MTS',
+          'at': DateTime.now().subtract(const Duration(minutes: 20)).toIso8601String(),
+        },
+        'exitIp': {
+          'ip': '185.199.110.42',
+          'countryCode': 'DE',
+          'city': 'Frankfurt am Main',
+          'org': 'Hetzner Online',
+          'at': DateTime.now().subtract(const Duration(minutes: 1)).toIso8601String(),
+        },
+      },
+    },
   };
 }
 
@@ -110,6 +147,7 @@ void main() {
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       Directory(out).createSync(recursive: true);
       File('$out/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+      image.dispose();
     });
   }
 
@@ -132,7 +170,7 @@ void main() {
     pos.jumpTo(pos.maxScrollExtent);
     await pumpFrames(tester, 4);
     await shoot(tester, name);
-    pos.jumpTo(0);
+    pagePosition(tester).jumpTo(0);
     await pumpFrames(tester, 2);
   }
 
@@ -158,14 +196,24 @@ void main() {
         final vpn = FakeVpn();
         final state = testState(data: _demo(theme), vpn: vpn);
         await state.load();
+        final features = testFeatures(state);
+        await features.init();
+        addTearDown(features.dispose);
         await tester.pumpWidget(RepaintBoundary(
-            key: key, child: MelsiApp(state: state, features: testFeatures(state), launchMoment: false)));
+            key: key, child: MelsiApp(state: state, features: features, launchMoment: false)));
         await pumpFrames(tester);
         await shoot(tester, '${tag}_home');
         if (phone) await shootBottom(tester, '${tag}_home_bottom');
 
-        // Connected, with live data.
+        // Connecting: the route line is mid-sweep.
+        vpn.delay = const Duration(milliseconds: 900);
         state.connect();
+        await tester.pump(const Duration(milliseconds: 350));
+        await shoot(tester, '${tag}_home_connecting');
+        await pumpFrames(tester, 8);
+        vpn.delay = const Duration(milliseconds: 10);
+
+        // Connected, with live data.
         await pumpFrames(tester, 3);
         state.latencies['n1'] = Latency(48, viaUrl: true, at: DateTime.now());
         state.latencies['n2'] = Latency(37, viaUrl: true, at: DateTime.now());
@@ -181,8 +229,8 @@ void main() {
         state.engineGroups['game'] = GroupStatus(
           selector: 'game',
           auto: true,
-          current: state.tagOf('n2'),
-          nodes: [NodeStat(tag: state.tagOf('n2') ?? '', latencyMs: 37, jitterMs: 2, loss: 0.004, score: 41.2, alive: true)],
+          current: state.tagOf('n3'),
+          nodes: [NodeStat(tag: state.tagOf('n3') ?? '', latencyMs: 37, jitterMs: 2, loss: 0.004, score: 41.2, alive: true)],
         );
         for (var i = 0; i < 60; i++) {
           state.gameLatencyHistory.add(34 + (i * 7 % 11) + (i % 13 == 0 ? 20 : 0));
@@ -197,6 +245,37 @@ void main() {
         await pumpFrames(tester);
         await shoot(tester, '${tag}_home_connected');
         if (phone) await shootBottom(tester, '${tag}_home_connected_bottom');
+
+        // Feature sheets and screens, opened from Home's context.
+        final home = tester.element(find.byType(HomeScreen));
+        openStatsScreen(home);
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${tag}_stats');
+        await closeSheet(tester);
+
+        showDoctorSheet(home);
+        await pumpFrames(tester, 12);
+        await shoot(tester, '${tag}_doctor');
+        await closeSheet(tester);
+
+        showChainPicker(home);
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${tag}_chain_picker');
+        await closeSheet(tester);
+
+        showSpeedTestSheet(home);
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${tag}_speedtest');
+        await closeSheet(tester);
+
+        if (!phone) {
+          showCommandPalette(home);
+          await pumpFrames(tester, 6);
+          await tester.enterText(find.byType(TextField).last, 'kill');
+          await pumpFrames(tester, 3);
+          await shoot(tester, '${tag}_palette');
+          await closeSheet(tester);
+        }
 
         // Quick server switcher.
         await tester.tap(find.descendant(of: find.byType(HomeScreen), matching: find.text('Frankfurt · Reality')).first);
@@ -228,14 +307,51 @@ void main() {
       }, skip: _out == null);
     }
 
+    for (final (kind, size) in [('phone', const Size(390, 844)), ('desktop', const Size(1280, 820))]) {
+      testWidgets('onboarding $kind $theme', (tester) async {
+        tester.view.physicalSize = size * 2;
+        tester.view.devicePixelRatio = 2;
+        addTearDown(tester.view.reset);
+        final state = testState(
+            data: {'settings': {'themeMode': theme, 'locale': 'ru', 'onboardingDone': false}});
+        await state.load();
+        final features = testFeatures(state);
+        await features.init();
+        addTearDown(features.dispose);
+        await tester.pumpWidget(RepaintBoundary(
+            key: key, child: MelsiApp(state: state, features: features, launchMoment: true)));
+        await tester.pump(const Duration(milliseconds: 200));
+        await shoot(tester, '${kind}_${theme}_launch');
+        await pumpFrames(tester, 16);
+        await shoot(tester, '${kind}_${theme}_onboarding_1');
+        await tester.tap(find.byKey(const ValueKey('onboarding-next')));
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${kind}_${theme}_onboarding_2');
+        await tester.enterText(find.byKey(const ValueKey('onboarding-link-field')), kSampleVless);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.byKey(const ValueKey('onboarding-submit')));
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${kind}_${theme}_onboarding_2_added');
+        await tester.tap(find.byKey(const ValueKey('onboarding-next-2')));
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${kind}_${theme}_onboarding_3');
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(seconds: 3));
+      }, skip: _out == null);
+    }
+
     testWidgets('empty $theme', (tester) async {
       tester.view.physicalSize = const Size(390, 844) * 2;
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
       final state = testState(data: {'settings': {'themeMode': theme, 'locale': 'ru'}});
       await state.load();
+      final features = testFeatures(state);
+      await features.init();
+      addTearDown(features.dispose);
       await tester.pumpWidget(RepaintBoundary(
-            key: key, child: MelsiApp(state: state, features: testFeatures(state), launchMoment: false)));
+            key: key, child: MelsiApp(state: state, features: features, launchMoment: false)));
       await pumpFrames(tester);
       await shoot(tester, 'phone_${theme}_home_empty');
       await tester.tap(find.text('Серверы').last);

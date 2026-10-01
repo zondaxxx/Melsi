@@ -28,6 +28,15 @@ Map<String, dynamic> _upgrade() => {
 Finder _key(String k) => find.byKey(ValueKey(k));
 
 void main() {
+  testWidgets('external import can dismiss onboarding after it mounted', (tester) async {
+    final (state, features) = await bootApp(tester, data: _fresh);
+    state.finishOnboarding();
+    await settle(tester);
+    expect(find.text('Не подключено'), findsOneWidget);
+    expect(_key('onboarding-skip'), findsNothing);
+    await shutdownApp(tester, state, features: features);
+  });
+
   testWidgets('fresh install: brand moment, features, add a server, open', (tester) async {
     stubPlatformChannels(tester);
     final (state, f) = await bootApp(tester, data: _fresh);

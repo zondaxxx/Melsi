@@ -22,7 +22,7 @@ import 'servers_screen.dart' show promptText;
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  static const appVersion = '1.0.0';
+  static const appVersion = String.fromEnvironment('MELSI_VERSION', defaultValue: '1.1.0');
 
   @override
   Widget build(BuildContext context) {

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Melsi shield monogram</title>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="#7053E8"/>
+  <path d="M128 53C98 58 69 64 59 69C56 148 79 195 128 219C177 195 200 148 197 69C187 64 158 58 128 53Z" fill="#F4F0FF"/>
+  <path d="M95 177V99L128 139L161 99V177" stroke="#7053E8" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

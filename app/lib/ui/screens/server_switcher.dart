@@ -7,6 +7,7 @@ import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../shell.dart';
 import '../slots/servers_slots.dart';
+import '../theme/entrance.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/page.dart';
@@ -14,6 +15,8 @@ import '../widgets/page.dart';
 /// Quick server switcher: search, live latency, one tap to switch.
 Future<void> showServerSwitcher(BuildContext context) {
   final nav = ShellNav.maybeOf(context);
+  // Rows enter every time the sheet opens, not only the first.
+  StaggeredEntrance.reset('switcher');
   return showMelsiSheet(context,
       expand: true, builder: (_) => ServerSwitcher(onManage: nav == null ? null : () => nav.go(AppTab.servers)));
 }
@@ -58,6 +61,7 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
     // In the desktop dialog the sheet sizes to its content instead of
     // filling the dialog's maximum height.
     final wide = context.isWide;
+    final topBlocks = _search.text.isEmpty ? SwitcherSlots.top(context, app) : const <Widget>[];
 
     return Column(mainAxisSize: MainAxisSize.min, children: [
       SheetHeader(
@@ -111,7 +115,12 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
                 ),
               ]),
               const SizedBox(height: Space.m),
-              ...SwitcherSlots.top(context, app),
+              ...topBlocks,
+              if (topBlocks.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(Space.xs, 0, Space.xs, Space.s + 2),
+                  child: Overline(l('switcher.all')),
+                ),
             ],
             if (nodes.isEmpty)
               Padding(
@@ -120,7 +129,12 @@ class _ServerSwitcherState extends State<ServerSwitcher> {
               )
             else
               GroupCard(children: [
-                for (final n in nodes) _Row(node: n, app: app, onTap: () => _pick(app, n.id)),
+                for (final (i, n) in nodes.indexed)
+                  StaggeredEntrance(
+                    group: 'switcher',
+                    index: i,
+                    child: _Row(node: n, app: app, onTap: () => _pick(app, n.id)),
+                  ),
               ]),
             if (widget.onManage != null) ...[
               const SizedBox(height: Space.m),

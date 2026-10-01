@@ -97,10 +97,12 @@ class NetCheckService extends FeatureService {
   DateTime? _lastRefresh;
   DateTime? _connectedAt;
   DateTime? _switchSeen;
+  String? _nodeSeen;
   Timer? _connectTimer;
   bool _queued = false;
   bool _listening = false;
   bool _disposed = false;
+  int _lookupGeneration = 0;
 
   // ---------------------------------------------------------------- speed
 
@@ -152,6 +154,8 @@ class NetCheckService extends FeatureService {
 
   @override
   Future<void> load() async {
+    _lookupGeneration++;
+    _nodeSeen = app.activeNode?.id;
     _restore(app.sectionOf(sectionName));
     if (!_listening) {
       _listening = true;
@@ -162,6 +166,10 @@ class NetCheckService extends FeatureService {
   }
 
   void _restore(Map<String, dynamic>? j) {
+    realIp = null;
+    exitIp = null;
+    result = null;
+    _speedResults.clear();
     if (j == null) return;
     final r = j['realIp'], e = j['exitIp'];
     realIp = r is Map ? IpInfo.fromJson(r.cast<String, dynamic>()) : null;
@@ -222,6 +230,8 @@ class NetCheckService extends FeatureService {
 
   @override
   void onVpn(VpnStatus prev, VpnStatus next) {
+    _lookupGeneration++;
+    if (next != VpnStatus.connected && speedRunning) cancelSpeedTest();
     _connectTimer?.cancel();
     _connectTimer = null;
     if (next == VpnStatus.connected) {
@@ -230,6 +240,7 @@ class NetCheckService extends FeatureService {
       error = false;
       _connectedAt = now();
       _switchSeen = null;
+      _nodeSeen = app.activeNode?.id;
       _notify();
       if (autoAllowed) _connectTimer = Timer(connectDelay, () => refresh());
       return;
@@ -256,17 +267,33 @@ class NetCheckService extends FeatureService {
   /// The engine switched nodes: the exit moved with it.
   void _onApp() {
     if (_disposed || !app.connected) return;
+    final nodeId = app.activeNode?.id;
+    final nodeChanged = nodeId != _nodeSeen;
     final at = app.proxyGroup?.lastSwitch?.at;
-    if (at == null || at == _switchSeen) return;
+    if (!nodeChanged && (at == null || at == _switchSeen)) return;
     final first = _switchSeen == null;
     _switchSeen = at;
+    _nodeSeen = nodeId;
+    if (nodeChanged) {
+      _lookupGeneration++;
+      exitIp = null;
+      error = false;
+      cancelSpeedTest();
+      _notify();
+    }
     // The first status poll after connect reports a switch that the
     // connect lookup already covers.
     final since = _connectedAt == null ? null : now().difference(_connectedAt!);
-    if (first && since != null && since < connectDelay * 2) return;
+    if (!nodeChanged && first && since != null && since < connectDelay * 2) return;
     final last = _lastRefresh;
-    if (last != null && now().difference(last) < switchMinGap) return;
-    if (autoAllowed) unawaited(refresh());
+    if (!autoAllowed) return;
+    _connectTimer?.cancel();
+    final remaining = last == null ? Duration.zero : switchMinGap - now().difference(last);
+    if (remaining > Duration.zero) {
+      _connectTimer = Timer(remaining, () => refresh());
+    } else {
+      unawaited(refresh());
+    }
   }
 
   @override
@@ -307,6 +334,8 @@ class NetCheckService extends FeatureService {
       return;
     }
     final exit = app.connected;
+    final generation = _lookupGeneration;
+    final nodeId = app.activeNode?.id;
     checking = true;
     checkingExit = exit;
     _notify();
@@ -317,6 +346,15 @@ class NetCheckService extends FeatureService {
       info = null;
     }
     if (_disposed) return;
+    if (generation != _lookupGeneration || exit != app.connected ||
+        (exit && nodeId != app.activeNode?.id)) {
+      checking = false;
+      final retry = _queued;
+      _queued = false;
+      _notify();
+      if (retry) unawaited(refresh(manual: manual));
+      return;
+    }
     _lastRefresh = now();
     if (info != null) {
       if (exit) {
@@ -354,7 +392,7 @@ class NetCheckService extends FeatureService {
   Future<void> runSpeedTest() async {
     if (speedRunning || _disposed) return;
     final key = speedKey;
-    final test = _speed = SpeedTest(client: features.httpClient);
+    final test = _speed = SpeedTest(client: _lookupClient);
     samples.clear();
     currentBps = 0;
     result = null;

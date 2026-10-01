@@ -20,7 +20,7 @@ Future<void> main() async {
   final links = DeepLinks((url, name) {
     state.addSubscription(url, name: name);
     // A deep link is a complete first step: never trap it behind onboarding.
-    state.updateSettings((s) => s.onboardingDone = true, affectsConfig: false);
+    state.finishOnboarding();
   });
   await links.start();
   runApp(MelsiApp(state: state, features: features));

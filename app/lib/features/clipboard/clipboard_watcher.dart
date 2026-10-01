@@ -38,6 +38,8 @@ class ClipboardWatcher extends FeatureService {
   late final FavoritesService favorites = FavoritesService(app, features);
 
   ClipboardOffer? offer;
+  bool _disposed = false;
+  int _generation = 0;
 
   /// Off on iOS by default: reading the pasteboard there shows a system
   /// "pasted from …" banner on every resume.
@@ -49,6 +51,7 @@ class ClipboardWatcher extends FeatureService {
 
   @override
   Future<void> load() async {
+    _generation++;
     await favorites.load();
     // During onboarding the import panel is on screen already; an offer on
     // top of it would only compete with it.
@@ -67,7 +70,8 @@ class ClipboardWatcher extends FeatureService {
   /// Reads the clipboard and, when it holds something importable that we
   /// have not offered (or already have), publishes an [offer].
   Future<void> check() async {
-    if (!enabled) return;
+    if (_disposed || !enabled) return;
+    final generation = ++_generation;
     String? raw;
     try {
       raw = await _read();
@@ -75,6 +79,7 @@ class ClipboardWatcher extends FeatureService {
       // Linux without a clipboard manager, sandboxed hosts: no clipboard.
       return;
     }
+    if (_disposed || !enabled || generation != _generation) return;
     final text = raw?.trim() ?? '';
     if (text.isEmpty) return;
     final hash = fingerprint(text);
@@ -137,6 +142,8 @@ class ClipboardWatcher extends FeatureService {
 
   @override
   void dispose() {
+    _disposed = true;
+    offer = null;
     favorites.dispose();
     super.dispose();
   }

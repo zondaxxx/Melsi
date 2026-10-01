@@ -86,7 +86,7 @@ class StatsService extends FeatureService {
     features.commands.register(AppCommand(
       id: commandId,
       titleKey: 'stats.openCmd',
-      group: 'settings.tools',
+      group: 'palette.g.tools',
       icon: Icons.bar_chart_rounded,
       run: (context) async => openStatsScreen(context),
     ));

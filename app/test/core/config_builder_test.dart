@@ -421,6 +421,18 @@ void main() {
   // with with_naive_outbound.
   final bin = Platform.environment['SING_BOX_BIN'];
   group('probe hosts', () {
+    test('explicit blocks take precedence over measurement exceptions', () {
+      final config = buildJson(routing: RoutingSettings(blockDomains: ['ipwho.is']));
+      for (final rules in [rulesOf(config), (config['dns']['rules'] as List).cast<Map<String, dynamic>>()]) {
+        final block = rules.indexWhere((rule) => rule['action'] == 'reject' &&
+            (rule['domain_suffix'] as List?)?.contains('ipwho.is') == true);
+        final probe = rules.indexWhere((rule) =>
+            (rule['domain_suffix'] as List?)?.contains('speed.cloudflare.com') == true);
+        expect(block, greaterThanOrEqualTo(0));
+        expect(block, lessThan(probe));
+      }
+    });
+
     test('measurement hosts are proxied before any preset rule, under every preset', () {
       for (final preset in RoutingPreset.values) {
         final c = buildJson(routing: RoutingSettings(preset: preset));

@@ -10,8 +10,9 @@ import '../../state/app_state.dart';
 
 abstract final class ServersSlots {
   /// Slivers right after the search bar, before the subscription groups.
-  static List<Widget> beforeGroups(BuildContext context, AppState app) =>
-      favoritesSlivers(context, app);
+  /// [filtering]: the user is searching / filtering, so pinned blocks hide.
+  static List<Widget> beforeGroups(BuildContext context, AppState app, {bool filtering = false}) =>
+      favoritesSlivers(context, app, filtering: filtering);
 
   /// Trailing widget in a node row, before the latency chip.
   static Widget nodeTrailing(BuildContext context, ProxyNode node) => FavoriteStar(node: node);

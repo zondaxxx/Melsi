@@ -94,6 +94,7 @@ class _AlertCard extends StatelessWidget {
               color: first.isDanger ? c.danger : c.warning,
             ),
             title: l(first.textKey, first.args),
+            titleMaxLines: 2,
             trailing: more > 0 ? Tag('+$more') : null,
             chevron: true,
             onTap: () {
@@ -160,6 +161,7 @@ class _AlertsSheet extends StatelessWidget {
                         RowTile(
                           leading: StatusDot(a.isDanger ? c.danger : c.warning, size: 6),
                           title: l(a.textKey, a.args),
+                          titleMaxLines: 2,
                           trailing: _AlertMenu(alert: a, updates: updates, app: app),
                           onTap: () {
                             Navigator.of(context).pop();

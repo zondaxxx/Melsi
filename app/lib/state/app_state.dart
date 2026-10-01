@@ -111,6 +111,7 @@ class AppState extends ChangeNotifier {
 
   // ----------------------------------------------------------- runtime
   bool loaded = false;
+  int onboardingRevision = 0;
   VpnState vpnState = VpnState.stopped;
   DateTime? connectedAt;
   final Map<String, Latency> latencies = {};
@@ -305,6 +306,7 @@ class AppState extends ChangeNotifier {
     game = tryParse(() => GameSettings.fromJson(m(j['game']))) ?? GameSettings();
     settings = tryParse(() => AppSettings.fromJson(m(j['settings']))) ?? AppSettings();
     chain = tryParse(() => ChainSettings.fromJson(m(j['chain']))) ?? ChainSettings();
+    _lastSecret = j['lastSecret'] as String?;
     favouriteIds
       ..clear()
       ..addAll((j['favourites'] as List? ?? const []).map((e) => e.toString()));
@@ -321,7 +323,9 @@ class AppState extends ChangeNotifier {
   /// Replaces the whole persisted state (backup restore). Config-affecting,
   /// so a running tunnel re-applies.
   void replaceFromJson(Map<String, dynamic> j) {
-    _fromJson(j);
+    final snapshot = (jsonDecode(jsonEncode(j)) as Map).cast<String, dynamic>();
+    snapshot['lastSecret'] = _lastSecret;
+    _fromJson(snapshot);
     _markConfigChanged();
     _changed();
   }
@@ -329,6 +333,8 @@ class AppState extends ChangeNotifier {
   /// Drops favourites / recents / chain entry that point at removed nodes.
   void _pruneRefs() {
     final ids = nodes.map((n) => n.id).toSet();
+    if (!ids.contains(selectedNodeId)) selectedNodeId = nodes.firstOrNull?.id;
+    if (!ids.contains(game.gameNodeId)) game.gameNodeId = null;
     favouriteIds.removeWhere((id) => !ids.contains(id));
     recentIds.removeWhere((id) => !ids.contains(id));
     if (chain.entryNodeId != null && !ids.contains(chain.entryNodeId)) {
@@ -377,6 +383,12 @@ class AppState extends ChangeNotifier {
   void updateChain(void Function(ChainSettings c) f) {
     f(chain);
     _markConfigChanged();
+    _changed();
+  }
+
+  void finishOnboarding() {
+    settings.onboardingDone = true;
+    onboardingRevision++;
     _changed();
   }
 

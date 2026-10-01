@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/models.dart';
+import '../../features/doctor/doctor_widgets.dart';
 import '../../features/motion/rolling_number.dart';
 import '../../features/motion/status_pulse.dart';
 import '../../l10n/l10n.dart';
@@ -80,7 +81,8 @@ class HomeScreen extends StatelessWidget {
                     : () => app.nodes.isEmpty ? showAddSheet(context) : showServerSwitcher(context),
               ),
               HomeSlots.underButton(context, app),
-              SectionHeader(l('home.server')),
+              SectionHeader(l('home.server'),
+                  padding: const EdgeInsets.fromLTRB(Space.xs, Space.m, Space.xs, Space.s + 2)),
               _NodePanel(app: app),
               HomeSlots.afterNodePanel(context, app),
               // Telemetry appears with the session (dashes while the tunnel
@@ -252,10 +254,30 @@ class _Status extends StatelessWidget {
               )
             : Padding(
                 padding: const EdgeInsets.only(top: Space.xs, left: _dot + _gap),
-                child: Text(note,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.footnote.copyWith(color: s == VpnStatus.error ? c.danger : null)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(note,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.footnote.copyWith(color: s == VpnStatus.error ? c.danger : null)),
+                  // An error is a question; the diagnostics answer it.
+                  if (s == VpnStatus.error)
+                    PressableScale(
+                      scale: 0.97,
+                      behavior: HitTestBehavior.deferToChild,
+                      semanticLabel: l('home.diagnose'),
+                      onTap: () => showDoctorSheet(context),
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: Space.xs),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.troubleshoot_rounded, size: 15, color: c.label),
+                          const SizedBox(width: Space.xs + 1),
+                          Text(l('home.diagnose'),
+                              style: t.footnote.copyWith(
+                                  color: c.label, fontWeight: FontWeight.w600)),
+                        ]),
+                      ),
+                    ),
+                ]),
               ),
       ),
     ]);

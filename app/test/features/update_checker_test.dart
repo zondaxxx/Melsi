@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +71,19 @@ void main() {
   });
 
   group('UpdateChecker', () {
+    test('a response after disposal does not mutate the app', () async {
+      final response = Completer<http.Response>();
+      final state = _onlineState();
+      final features = testFeatures(state, client: MockClient((_) => response.future));
+      final request = features.updates.checkNow();
+      await pumpEventQueue();
+      features.dispose();
+      response.complete(http.Response(jsonEncode({'tag_name': 'v9.9.9'}), 200));
+      await request;
+      expect(state.sectionOf('updates'), isNull);
+      expect(state.settings.lastUpdateCheck, isNull);
+    });
+
     test('a newer tag makes an update available and is persisted', () async {
       final state = _onlineState();
       final gh = _GitHub();

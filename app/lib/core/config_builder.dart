@@ -306,14 +306,14 @@ class ConfigBuilder {
     if (routing.bypassLan) {
       rules.add({'ip_is_private': true, 'outbound': tagDirect});
     }
-    // Measurement hosts always go through the tunnel (see [probeHosts]);
-    // placed before every preset so "direct" presets still measure the
-    // proxy — the user asked for the tunnel's numbers, not the ISP's.
-    rules.add({'domain_suffix': probeHosts, 'outbound': tagProxy});
     final block = _domains(routing.blockDomains);
     if (block.isNotEmpty) {
       rules.add({'domain_suffix': block, 'action': 'reject'});
     }
+    // Measurement hosts always go through the tunnel (see [probeHosts]);
+    // placed before every preset so "direct" presets still measure the
+    // proxy — the user asked for the tunnel's numbers, not the ISP's.
+    rules.add({'domain_suffix': probeHosts, 'outbound': tagProxy});
     if (routing.blockAds) {
       rules.add({
         'rule_set': [rs('geosite-category-ads-all')],

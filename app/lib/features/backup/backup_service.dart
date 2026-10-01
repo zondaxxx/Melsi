@@ -8,9 +8,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../core/models.dart';
 import '../../state/app_state.dart';
 import '../../state/features.dart';
 import '../../ui/screens/settings_screen.dart' show SettingsScreen;
+import '../stats/stats_models.dart';
 import 'backup_sheet.dart';
 
 /// What a backup file holds, read without applying it.
@@ -98,9 +100,10 @@ class BackupService extends FeatureService {
     }
     if (doc is! Map) throw const FormatException('not an object');
     final marker = doc['melsi_backup'];
-    if (marker is! num) throw const FormatException('not a Melsi backup');
+    if (marker is! int || marker != format) throw const FormatException('unsupported backup');
     final state = doc['state'];
     if (state is! Map) throw const FormatException('no state');
+    _validateState(state);
     int count(Object? v) => v is List ? v.length : 0;
     return BackupSummary(
       format: marker.toInt(),
@@ -112,6 +115,81 @@ class BackupService extends FeatureService {
       favourites: count(state['favourites']),
       state: state.cast<String, dynamic>(),
     );
+  }
+
+  static void _validateState(Map state) {
+    try {
+      if (state['nodes'] is! List || state['subscriptions'] is! List) {
+        throw const FormatException('missing server lists');
+      }
+      for (final key in ['favourites', 'recents']) {
+        final values = state[key];
+        if (values != null && (values is! List || values.any((value) => value is! String))) {
+          throw const FormatException('invalid server references');
+        }
+      }
+      for (final key in ['routing', 'game', 'settings', 'chain', 'sections']) {
+        if (state[key] != null && state[key] is! Map) {
+          throw const FormatException('invalid settings');
+        }
+      }
+      if (state['selectedNodeId'] != null && state['selectedNodeId'] is! String) {
+        throw const FormatException('invalid selection');
+      }
+      for (final value in state['nodes'] as List) {
+        final node = ProxyNode.fromJson((value as Map).cast<String, dynamic>());
+        if (node.id.isEmpty || node.outbound.isEmpty) throw const FormatException('invalid node');
+      }
+      for (final value in state['subscriptions'] as List) {
+        Subscription.fromJson((value as Map).cast<String, dynamic>());
+      }
+      Map<String, dynamic> section(String key) =>
+          (state[key] as Map? ?? const {}).cast<String, dynamic>();
+      RoutingSettings.fromJson(section('routing'));
+      GameSettings.fromJson(section('game'));
+      AppSettings.fromJson(section('settings'));
+      ChainSettings.fromJson(section('chain'));
+      for (final value in section('sections').values) {
+        if (value is! Map) throw const FormatException('invalid feature section');
+      }
+      _validateSections(section('sections'));
+    } catch (_) {
+      throw const FormatException('invalid backup state');
+    }
+  }
+
+  static void _validateSections(Map<String, dynamic> sections) {
+    Map<String, dynamic> feature(String key) =>
+        (sections[key] as Map? ?? const {}).cast<String, dynamic>();
+    final netcheck = feature('netcheck');
+    for (final key in ['realIp', 'exitIp']) {
+      final value = netcheck[key];
+      if (value != null) IpInfo.fromJson((value as Map).cast<String, dynamic>());
+    }
+    void speed(Object? value) {
+      if (value != null) SpeedResult.fromJson(value as Map);
+    }
+    speed(netcheck['lastSpeed']);
+    for (final results in (netcheck['speedResults'] as Map? ?? const {}).values) {
+      for (final value in results as List) {
+        speed(value);
+      }
+    }
+    final stats = feature('stats');
+    for (final value in stats['sessions'] as List? ?? const []) {
+      final record = SessionRecord.fromJson((value as Map).cast<String, dynamic>());
+      if (record == null) throw const FormatException('invalid session');
+    }
+    for (final value in stats['days'] as List? ?? const []) {
+      final day = DayTotal.fromJson((value as Map).cast<String, dynamic>());
+      if (day == null) throw const FormatException('invalid day');
+    }
+    final updates = feature('updates');
+    for (final key in ['latestTag', 'latestUrl', 'checkedAt']) {
+      if (updates[key] != null && updates[key] is! String) {
+        throw const FormatException('invalid update cache');
+      }
+    }
   }
 
   /// Applies [json]. Replace swaps the whole state; merge folds the backup

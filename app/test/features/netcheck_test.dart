@@ -85,6 +85,35 @@ Future<(AppState, Features)> _boot(
 Finder _rich(String s) => find.textContaining(s, findRichText: true);
 
 void main() {
+  testWidgets('late lookup from an old session cannot replace the exit', (tester) async {
+    final response = Completer<http.Response>();
+    final state = testState();
+    state.settings.ipCheck = false;
+    state.vpnState = const VpnState(VpnStatus.connected);
+    final features = testFeatures(state, client: MockClient((_) => response.future));
+    final request = features.netcheck.refresh(manual: true);
+    await tester.pump();
+    features.netcheck.onVpn(VpnStatus.connected, VpnStatus.stopping);
+    features.netcheck.onVpn(VpnStatus.stopping, VpnStatus.connected);
+    response.complete(_json(_ipwho(_nl, 'NL')));
+    await request;
+    expect(features.netcheck.exitIp, isNull);
+    expect(features.netcheck.checking, isFalse);
+    features.dispose();
+  });
+
+  test('restoring a backup without IP history clears old cached values', () async {
+    final state = testState();
+    state.settings.ipCheck = false;
+    final features = testFeatures(state);
+    features.netcheck.realIp = IpInfo(ip: _ru, at: DateTime(2026));
+    features.netcheck.exitIp = IpInfo(ip: _nl, at: DateTime(2026));
+    await features.netcheck.load();
+    expect(features.netcheck.realIp, isNull);
+    expect(features.netcheck.exitIp, isNull);
+    features.dispose();
+  });
+
   group('IpGeoClient', () {
     test('falls through the providers in order and stops at the first answer', () async {
       final hosts = <String>[];
@@ -216,6 +245,29 @@ void main() {
   });
 
   group('NetCheckService', () {
+    testWidgets('switching servers clears the old verdict before the throttled lookup', (tester) async {
+      final vpn = FakeVpn();
+      final net = _Net(vpn);
+      final (state, features) = await _boot(tester, client: net.client, vpn: vpn);
+      await state.importText('$kSampleVless\n${kSampleVless.replaceAll('nl1.example.com', 'de1.example.com')}');
+      state.connect();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 1600));
+      await tester.pump();
+      expect(features.netcheck.exitIp?.ip, _nl);
+      final previous = state.activeNode!.id;
+      final next = state.nodes.firstWhere((node) => node.id != previous);
+      await state.selectNode(next.id);
+      expect(features.netcheck.exitIp, isNull);
+      expect(features.netcheck.verdict, LeakVerdict.unknown);
+      expect(net.geoRequests, 2);
+      await tester.pump(NetCheckService.switchMinGap);
+      await tester.pump();
+      expect(net.geoRequests, 3);
+      expect(features.netcheck.exitIp?.ip, _nl);
+      await shutdownApp(tester, state, features: features);
+    });
+
     testWidgets('lookup on load, then the exit after connect (+1.5 s); disconnect re-reads', (tester) async {
       final vpn = FakeVpn();
       final net = _Net(vpn);

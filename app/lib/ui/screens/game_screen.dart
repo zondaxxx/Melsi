@@ -6,6 +6,7 @@ import '../../l10n/l10n.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
+import '../theme/entrance.dart';
 import '../theme/pressable.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
@@ -48,22 +49,26 @@ class _GameScreenState extends State<GameScreen> {
     final launchers = presets.where((p) => _kLauncherIds.contains(p.id)).toList();
     final gameNode = app.nodeById(g.gameNodeId);
 
-    Widget chips(List<GamePreset> list) => Wrap(
+    Widget chips(List<GamePreset> list, {int offset = 0}) => Wrap(
           spacing: Space.s,
           runSpacing: Space.s,
           children: [
-            for (final p in list)
-              _GameChip(
-                preset: p,
-                platforms: _filter == _GameFilter.all,
-                selected: g.gameIds.contains(p.id),
-                onTap: () => app.updateGame((x) {
-                  final ids = {...x.gameIds};
-                  final sel = ids.contains(p.id);
-                  sel ? ids.remove(p.id) : ids.add(p.id);
-                  x.gameIds = ids;
-                  if (!sel && !x.enabled) x.enabled = true;
-                }),
+            for (final (i, p) in list.indexed)
+              StaggeredEntrance(
+                group: 'games',
+                index: offset + i,
+                child: _GameChip(
+                  preset: p,
+                  platforms: _filter == _GameFilter.all,
+                  selected: g.gameIds.contains(p.id),
+                  onTap: () => app.updateGame((x) {
+                    final ids = {...x.gameIds};
+                    final sel = ids.contains(p.id);
+                    sel ? ids.remove(p.id) : ids.add(p.id);
+                    x.gameIds = ids;
+                    if (!sel && !x.enabled) x.enabled = true;
+                  }),
+                ),
               ),
           ],
         );
@@ -125,7 +130,7 @@ class _GameScreenState extends State<GameScreen> {
               child: Overline(l('game.launchers')),
             ),
           ),
-          SliverToBoxAdapter(child: chips(launchers)),
+          SliverToBoxAdapter(child: chips(launchers, offset: games.length)),
         ],
         SliverToBoxAdapter(child: SectionHeader(l('game.custom'))),
         SliverToBoxAdapter(

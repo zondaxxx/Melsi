@@ -11,6 +11,7 @@ import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
 import '../slots/servers_slots.dart';
+import '../theme/entrance.dart';
 import '../theme/pressable.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
@@ -58,6 +59,16 @@ class _ServersScreenState extends State<ServersScreen> {
     if (app.hasManualNodes) groups.add((null, _nodes(app, null)));
 
     final empty = app.nodes.isEmpty && app.subscriptions.isEmpty;
+    // An emptied list enters again the next time it fills.
+    if (app.nodes.isEmpty) StaggeredEntrance.reset('servers');
+    final entranceOffsets = <String?, int>{};
+    var entranceOffset = 0;
+    for (final (subscription, groupNodes) in groups) {
+      entranceOffsets[subscription?.id] = entranceOffset;
+      if (!_collapsed.contains(subscription?.id ?? '_')) {
+        entranceOffset += groupNodes.length;
+      }
+    }
     final viaUrl = app.connected;
     final subs = app.subscriptions.length;
     return PageScaffold(
@@ -102,7 +113,7 @@ class _ServersScreenState extends State<ServersScreen> {
           )
         else ...[
           SliverToBoxAdapter(child: _searchBar(app, l, c)),
-          ...ServersSlots.beforeGroups(context, app),
+          ...ServersSlots.beforeGroups(context, app, filtering: _filtering),
           for (final (i, (sub, nodes)) in groups.indexed)
             if (!_filtering || nodes.isNotEmpty) ...[
               SliverToBoxAdapter(child: SizedBox(height: i == 0 ? Space.l : Space.m)),
@@ -137,9 +148,13 @@ class _ServersScreenState extends State<ServersScreen> {
                     else
                       SliverList.builder(
                         itemCount: nodes.length,
-                        itemBuilder: (context, i) => NodeRow(
-                          node: nodes[i],
-                          last: i == nodes.length - 1,
+                        itemBuilder: (context, i) => StaggeredEntrance(
+                          group: 'servers',
+                          index: entranceOffsets[sub?.id]! + i,
+                          child: NodeRow(
+                            node: nodes[i],
+                            last: i == nodes.length - 1,
+                          ),
                         ),
                       ),
                 ]),
@@ -873,8 +888,10 @@ Future<void> showNodeActions(BuildContext context, ProxyNode node) {
               const SizedBox(height: Space.m),
               Padding(
                 padding: const EdgeInsets.only(left: Space.xs),
+                // The sheet outlives the row that opened it: read the theme
+                // from the sheet's own context.
                 child: Text('${node.server}:${node.port}',
-                    style: context.t.monoSmall),
+                    style: ctx.t.monoSmall),
               ),
             ]),
           ),

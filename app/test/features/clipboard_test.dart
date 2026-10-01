@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
@@ -45,6 +46,44 @@ Future<void> _settleOut(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('late clipboard replies are ignored after disable or disposal', (tester) async {
+    for (final dispose in [false, true]) {
+      final reply = Completer<String?>();
+      final state = testState(data: {'settings': {'clipboardWatch': true}});
+      await state.load();
+      final features = testFeatures(state, readClipboard: () => reply.future);
+      await features.init();
+      final check = features.clipboard.check();
+      if (dispose) {
+        features.dispose();
+      } else {
+        state.updateSettings((settings) => settings.clipboardWatch = false, affectsConfig: false);
+      }
+      reply.complete(kSampleVless);
+      await check;
+      expect(features.clipboard.offer, isNull);
+      if (!dispose) features.dispose();
+      state.dispose();
+    }
+  });
+
+  testWidgets('a slow clipboard read cannot replace a newer offer', (tester) async {
+    final stale = Completer<String?>();
+    final state = testState(data: {'settings': {'clipboardWatch': true}});
+    await state.load();
+    var read = 0;
+    final features = testFeatures(state, readClipboard: () {
+      return read++ == 0 ? stale.future : Future.value(kSampleVless);
+    });
+    await features.init();
+    await features.clipboard.check();
+    stale.complete('https://older.example.com/subscription');
+    await tester.pump();
+    expect(features.clipboard.offer?.text, kSampleVless);
+    features.dispose();
+    state.dispose();
+  });
+
   testWidgets('offers a link found on the clipboard; Add imports it; then stays quiet',
       (tester) async {
     stubPlatformChannels(tester);

@@ -324,7 +324,8 @@ class Diagnostics extends FeatureService {
 
   Future<StepResult> _leakDefault() async {
     final n = features.netcheck;
-    await n.refresh();
+    await n.refresh(manual: true);
+    if (n.error || n.checking) return const StepResult(StepStatus.skipped, 'doctor.skipped');
     return leakResult(n.realIp?.ip, n.exitIp?.ip);
   }
 

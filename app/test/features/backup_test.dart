@@ -39,6 +39,56 @@ Future<AppState> _populated() async {
 
 void main() {
   group('BackupService', () {
+    test('invalid backup structure cannot partially replace existing data', () async {
+      final state = await _populated();
+      final features = testFeatures(state);
+      final before = jsonEncode(state.toJson());
+      for (final invalid in [
+        {'melsi_backup': 2, 'state': state.toJson()},
+        {'melsi_backup': 1, 'state': <String, dynamic>{}},
+        {'melsi_backup': 1, 'state': {...state.toJson(), 'nodes': 'invalid'}},
+        {'melsi_backup': 1, 'state': {...state.toJson(), 'settings': {'ipCheck': 'yes'}}},
+        for (final sections in [
+          {'updates': {'checkedAt': 10}},
+          {'stats': {'sessions': 'invalid'}},
+          {'stats': {'sessions': [{'id': 'bad', 'start': 1, 'nodeName': 7}]}},
+          {'netcheck': {'exitIp': {'ip': 42}}},
+          {'netcheck': {'speedResults': {'node': [{'down': 'fast'}]}}},
+        ])
+          {'melsi_backup': 1, 'state': {...state.toJson(), 'sections': sections}},
+      ]) {
+        await expectLater(features.backup.restore(jsonEncode(invalid), merge: false),
+            throwsFormatException);
+        expect(jsonEncode(state.toJson()), before);
+      }
+      features.dispose();
+    });
+
+    test('merge preserves feature sections and normalizes a removed selection', () async {
+      final state = await _populated();
+      state.setSection('custom', {'value': 42});
+      final merged = BackupService.merge(state.toJson(), {
+        'nodes': <Map<String, dynamic>>[],
+        'subscriptions': <Map<String, dynamic>>[],
+        'sections': {'imported': {'value': 24}},
+      });
+      state.replaceFromJson({...merged, 'selectedNodeId': 'removed'});
+      expect(state.sectionOf('custom'), {'value': 42});
+      expect(state.sectionOf('imported'), {'value': 24});
+      expect(state.selectedNode, isNotNull);
+    });
+
+    testWidgets('load restores runtime authentication and restore retains it', (tester) async {
+      final state = testState(data: {'lastSecret': 'local-test-secret'});
+      await state.load();
+      await tester.pump();
+      expect(state.toJson()['lastSecret'], 'local-test-secret');
+      state.replaceFromJson({...state.toJson(), 'lastSecret': 'foreign-secret'});
+      expect(state.toJson()['lastSecret'], 'local-test-secret');
+      await tester.pump(const Duration(seconds: 1));
+      state.dispose();
+    });
+
     test('export wraps the state and drops the runtime secret', () async {
       final src = await _populated();
       final f = testFeatures(src, clock: FakeClock().call);

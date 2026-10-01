@@ -31,9 +31,9 @@ fi
 # Extra `flutter build` args: a plain x.y.z tag becomes the build name
 # (Windows/Android need numeric versions); CI run number becomes the build
 # number so Android versionCode keeps increasing.
-build_args=""
+build_args="--dart-define=MELSI_VERSION=$version"
 if [[ "$ref" == refs/tags/v* && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  build_args="--build-name=$version"
+  build_args="$build_args --build-name=$version"
 fi
 if [[ -n "${GITHUB_RUN_NUMBER:-}" ]]; then
   build_args="${build_args:+$build_args }--build-number=$GITHUB_RUN_NUMBER"

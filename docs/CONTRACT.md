@@ -82,6 +82,7 @@ class ConfigBuilder {
     required RoutingSettings routing,
     required GameSettings game,
     required AppSettings settings,
+    ChainSettings? chain,                  // fixed entry, selectable exit
     required PlatformKind platform,
     required RuntimeEndpoints endpoints,
     required String cacheDir,              // for cache_file path
@@ -93,11 +94,17 @@ class ConfigBuilder {
 
 - Node outbound tags: sanitized unique display names; mapping returned in
   `BuiltConfig.nodeTags`.
-- Selector `proxy`: all node tags, `default` = selected (or first),
+- Selector `proxy`: all selectable node tags, `default` = selected (or first),
   `interrupt_exist_connections: false`. The engine drives it when
   auto-select is on.
-- Selector `game` (only when Game Mode on): all node tags (UDP-native first),
+- Selector `game` (only when Game Mode on): all selectable node tags (UDP-native first),
   engine drives it with `mode: game`.
+- When Double VPN is active, both selectors and engine candidate lists exclude
+  the entry. Each exit's outermost dial (including dependency helpers) detours
+  through the entry; the entry itself stays unchanged. WireGuard endpoints
+  can be exits, not entries. A missing entry or fewer than two usable nodes
+  disables the chain. `BuiltConfig.entryTag` / `chainActive` report the built
+  topology, not just the requested setting.
 - Outbound `direct` (type `direct`). Blocking uses rule action `reject`.
 - `experimental.clash_api`: `external_controller` = `endpoints.clashApi`,
   `secret` = `endpoints.secret`. `experimental.cache_file` enabled at
@@ -109,7 +116,12 @@ class ConfigBuilder {
 - Desktop `captureMode == systemProxy`: inbound `mixed` tag `mixed-in` on
   `127.0.0.1:<mixedPort>` (`0.0.0.0` if allowLan) with `set_system_proxy: true`, no tun.
   A mixed inbound is always added on desktop (so other apps can use it).
-- Game Mode rules come first: game processes / packages / domains → `game`;
+- After DNS handling, LAN bypass and explicit blocks, measurement hosts from
+  `ConfigBuilder.probeHosts` route through `proxy` and resolve through
+  `dns-remote`, before presets and application rules. Explicit custom domain
+  blocks still take precedence. These probes measure the tunnel even with a
+  direct-routing preset; they are not an all-traffic leak test.
+- Game Mode rules precede ordinary per-app and preset rules: game processes / packages / domains → `game`;
   download domains → `direct` (if `directDownloads`).
 - Rule-sets are remote binary `.srs`, downloaded direct via a top-level
   `http_clients: [{tag: "direct-http", domain_resolver: "dns-direct"}]`,
@@ -122,6 +134,24 @@ class ConfigBuilder {
     `https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-ru-blocked.srs`
     `https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked.srs`
   - private IPs: use rule item `ip_is_private: true` (there is no geoip-private).
+
+### Feature lifecycle and persistence
+
+- `Features` owns feature services, the command registry and injected HTTP,
+  clock and clipboard dependencies. `init()` loads services once and hooks VPN
+  status / resume events; `dispose()` removes hooks and releases resources.
+- Feature data lives under `AppState.sections`, keyed by service name. Backup
+  restore calls `replaceFromJson()` then `Features.reloadAll()`; readers must
+  reset absent sections and ignore asynchronous results from earlier loads.
+- Backup format 1 contains JSON state and metadata, without the local runtime
+  API secret. Restore validates state before replacement and retains the local
+  secret for an existing native tunnel. Backups are not encrypted.
+- `finishOnboarding()` both persists completion and signals an already mounted
+  welcome screen. Ordinary imports can finish the import step without skipping
+  the user's final onboarding choices.
+- IP lookups are tied to the connection generation and active node. Switching
+  servers clears the old exit verdict immediately; refreshes are throttled.
+  Desktop system-proxy probes and speed tests use the local mixed proxy.
 
 ## 2. Engine config JSON (Dart → Go)
 

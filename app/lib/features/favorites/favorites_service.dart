@@ -8,7 +8,7 @@ import '../../state/feature_service.dart';
 import '../../ui/widgets/common.dart' show nodeTitle;
 
 /// Palette group the server commands live in (owned by the palette table).
-const String kServersCommandGroup = 'palette.group.servers';
+const String kServersCommandGroup = 'palette.g.servers';
 
 /// Keeps the command palette in sync with the pinned servers: one
 /// "pin / unpin current" toggle and one "switch to …" command per

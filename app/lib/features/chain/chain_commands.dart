@@ -18,7 +18,7 @@ void registerChainCommands(Features f) {
   f.commands.register(AppCommand(
     id: kChainToggleCommand,
     titleKey: 'chain.toggleCmd',
-    group: 'palette.group.settings',
+    group: 'palette.g.settings',
     icon: Icons.route_rounded,
     keywords: const ['double vpn', 'chain', 'двойной', 'цепочка', 'entry', 'входной'],
     isOn: () => f.app.chain.enabled,

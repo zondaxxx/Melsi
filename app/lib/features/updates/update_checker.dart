@@ -32,6 +32,8 @@ class UpdateChecker extends FeatureService {
 
   /// A request is in flight (the About row shows a spinner).
   bool checking = false;
+  bool _disposed = false;
+  int _generation = 0;
 
   /// Alerts hidden for this session ([AppAlert.id]s). In memory on
   /// purpose: an expiring subscription deserves a reminder on the next
@@ -47,6 +49,7 @@ class UpdateChecker extends FeatureService {
 
   @override
   Future<void> load() async {
+    _generation++;
     _readSection();
     features.commands.register(AppCommand(
       id: 'update.check',
@@ -83,7 +86,8 @@ class UpdateChecker extends FeatureService {
   /// Unconditional check (the About row / the palette command). Gated only
   /// by [networkAllowed] and by a check already running.
   Future<void> checkNow() async {
-    if (!networkAllowed || checking) return;
+    if (_disposed || !networkAllowed || checking) return;
+    final generation = _generation;
     checking = true;
     notifyListeners();
     final client = features.httpClient();
@@ -94,6 +98,7 @@ class UpdateChecker extends FeatureService {
             'User-Agent': 'melsi/${SettingsScreen.appVersion}',
           })
           .timeout(requestTimeout);
+      if (_disposed || generation != _generation) return;
       if (r.statusCode == 200) {
         final j = jsonDecode(utf8.decode(r.bodyBytes));
         if (j is! Map) throw const FormatException('release');
@@ -119,7 +124,7 @@ class UpdateChecker extends FeatureService {
     } finally {
       client.close();
       checking = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -146,5 +151,11 @@ class UpdateChecker extends FeatureService {
   /// Hides one alert until the next launch.
   void dismiss(String alertId) {
     if (dismissedAlerts.add(alertId)) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }
