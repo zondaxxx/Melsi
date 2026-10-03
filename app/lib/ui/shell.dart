@@ -18,9 +18,12 @@ import 'theme/pressable.dart';
 import 'theme/surfaces.dart';
 import 'theme/theme.dart';
 import 'widgets/apply_toast.dart';
+import 'widgets/brand_wordmark.dart';
 import 'widgets/common.dart';
 import 'widgets/fade_stack.dart';
 import 'widgets/page.dart';
+
+export 'widgets/brand_wordmark.dart' show Wordmark;
 
 enum AppTab { home, servers, routing, game, settings }
 
@@ -425,15 +428,4 @@ class _SidebarStatus extends StatelessWidget {
       ]),
     );
   }
-}
-
-/// Brand: a plain wordmark. No tile, no gradient.
-class Wordmark extends StatelessWidget {
-  const Wordmark({super.key, this.size = 19});
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => Text('Melsi',
-      style: context.t.title3.copyWith(
-          fontSize: size, fontWeight: FontWeight.w700, letterSpacing: -0.6));
 }

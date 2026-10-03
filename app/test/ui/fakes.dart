@@ -70,7 +70,7 @@ class FakeClock {
 /// App state for tests: in-memory store, fake VPN, no network. Unless the
 /// data says otherwise, onboarding counts as done so tests boot straight
 /// into the shell (onboarding tests pass `onboardingDone: false`).
-AppState testState({Map<String, dynamic>? data, FakeVpn? vpn}) {
+AppState testState({Map<String, dynamic>? data, FakeVpn? vpn, PlatformKind? platform}) {
   final merged = <String, dynamic>{...?data};
   final settings = <String, dynamic>{...?(merged['settings'] as Map?)?.cast<String, dynamic>()};
   settings.putIfAbsent('onboardingDone', () => true);
@@ -79,6 +79,7 @@ AppState testState({Map<String, dynamic>? data, FakeVpn? vpn}) {
     store: MemoryStateStore(merged),
     vpn: vpn ?? FakeVpn(),
     apps: FakeApps(),
+    platform: platform,
     enableNetwork: false,
   );
 }

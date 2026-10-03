@@ -54,6 +54,7 @@ func newFlagSet(name string) *flag.FlagSet {
 func cmdCheck(args []string) error {
 	fs := newFlagSet("check")
 	configPath := fs.String("config", "", "sing-box config path")
+	fs.StringVar(configPath, "c", "", "sing-box config path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

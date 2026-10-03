@@ -63,7 +63,7 @@
 <details>
 <summary><strong>Протоколы, маршрутизация и подробности</strong></summary>
 
-**Протоколы.** VLESS (Reality, Vision), VMess, Trojan, Shadowsocks (SIP002, SS2022, obfs / v2ray-plugin / shadow-tls), Hysteria, Hysteria2 (obfs, port hopping), TUIC v5, AnyTLS, Snell, WireGuard, SSH, SOCKS, HTTP, Naive (Android и iOS).
+**Протоколы.** VLESS (Reality, Vision, XHTTP), VMess, Trojan, Shadowsocks (SIP002, SS2022, obfs / v2ray-plugin / shadow-tls), ShadowsocksR, Hysteria, Hysteria2 (obfs, port hopping), TUIC v5, AnyTLS, Snell, WireGuard, AmneziaWG, SSH, SOCKS, HTTP, Naive (Android и iOS).
 
 **Подписки.** base64 и обычные списки ссылок, Clash/Mihomo YAML, JSON sing-box и Xray, WireGuard `.conf`. Приложение показывает трафик и срок действия из заголовков провайдера и само обновляет подписки. Импорт: ссылка, буфер обмена, QR-код, файл и deep link (`melsi://`, `sing-box://`, `clash://`, `hiddify://`).
 
@@ -142,7 +142,7 @@ scripts/build-core.sh darwin universal   # или: windows amd64 / linux amd64
 
 ```bash
 (cd core && go test ./...)
-(cd app && flutter test)  # с SING_BOX_BIN=<путь к sing-box> конфиги проверяются через sing-box check
+(cd app && flutter test)  # с MELSI_CORE_BIN=<путь к melsi-core> конфиги проверяются настоящим ядром
 ```
 
 Визуальная проверка светлой и тёмной тем, мобильных и широких экранов (из `app/`):
@@ -161,10 +161,11 @@ MELSI_SHOTS=/tmp/melsi-shots flutter test test/ui/screenshots_test.dart
 - **Windows.** Приложение запускается от имени администратора: это нужно для TUN.
 - **macOS.** DMG подписан ad-hoc, при первом запуске откройте его через ПКМ → «Открыть».
 - **Naive** работает только на мобильных: на десктопе ядро собрано без cronet.
-- **Нет в sing-box**, поэтому пропускаются: ShadowsocksR, транспорт xhttp, AmneziaWG.
+- **ShadowsocksR, VLESS XHTTP и AmneziaWG** используют встроенные адаптеры Mihomo 1.19.32. Ядро выбирается автоматически для каждого сервера; маршрутизация, DNS и системный VPN остаются в sing-box.
+- **XHTTP:** поддерживаются `auto`, `packet-up`, `stream-up`, `stream-one` и XMUX. Отдельный сервер загрузки (`downloadSettings` / `download-settings`) пока не поддерживается; такие настройки отклоняются при импорте.
 
 ## Обратная связь
 
 Нашли проблему? [Создайте issue](https://github.com/zondaxxx/Melsi/issues/new/choose): укажите платформу, версию клиента и шаги воспроизведения. Не публикуйте ссылки подписок, UUID, пароли, полные резервные копии или логи с секретами.
 
-Melsi построен на Flutter и sing-box. Знак, палитра и обложка репозитория — в [наборе оформления](docs/brand/README.md).
+Melsi построен на Flutter, sing-box и адаптерах Mihomo. Знак, палитра и обложка репозитория — в [наборе оформления](docs/brand/README.md).

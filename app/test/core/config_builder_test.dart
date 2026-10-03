@@ -67,15 +67,14 @@ void main() {
       expect(tags.toSet().length, tags.length, reason: 'unique tags');
       expect(tags, containsAll(['direct', 'proxy']));
       expect(tags, isNot(contains('game')));
-      // SSR is dropped (removed from sing-box).
       final ssr = nodes.where((n) => n.type == 'shadowsocksr');
       expect(ssr, isNotEmpty);
       for (final n in ssr) {
-        expect(built.nodeTags.containsKey(n.id), isFalse);
+        expect(outboundByTag(c, built.nodeTags[n.id]!)['type'], 'mihomo');
       }
       // Naive is not compiled into the desktop core (default platform here).
       expect(built.nodeTags.length,
-          nodes.where((n) => n.type != 'shadowsocksr' && n.type != 'naive').length);
+          nodes.where((n) => n.type != 'naive').length);
       final proxy = outboundByTag(c, 'proxy');
       expect(proxy['type'], 'selector');
       expect(proxy['interrupt_exist_connections'], false);
@@ -286,6 +285,22 @@ void main() {
       expect(rules.any((r) => r['outbound'] == 'game'), isTrue);
     });
 
+    test('mobile ignores restored PC game domain and download rules', () {
+      for (final platform in [PlatformKind.android, PlatformKind.ios]) {
+        final config = buildJson(
+          platform: platform,
+          game: GameSettings(enabled: true, gameIds: {'cs2', 'steam', 'pubg_mobile'}),
+        );
+        final domains = rulesOf(config)
+            .expand((rule) => (rule['domain_suffix'] as List?) ?? const [])
+            .toSet();
+        expect(domains, isNot(contains('steamserver.net')));
+        expect(domains, isNot(contains('steamcontent.com')));
+        expect(domains, isNot(contains('steampowered.com')));
+        expect(rulesOf(config).any((rule) => rule['outbound'] == 'game'), isTrue);
+      }
+    });
+
     test('per-app android include/exclude', () {
       var c = buildJson(
         platform: PlatformKind.android,
@@ -415,11 +430,10 @@ void main() {
   });
 
   // ------------------------------------------------------------------------
-  // Real validation with `sing-box check`. Set SING_BOX_BIN to a sing-box
-  // 1.14 binary built with with_quic,with_wireguard,with_utls,with_clash_api
-  // (+ with_gvisor). Naive nodes are included only if the binary was built
+  // Real validation with `melsi-core check`. Set MELSI_CORE_BIN to the
+  // binary produced by scripts/build-core.sh. Naive nodes are included only if the binary was built
   // with with_naive_outbound.
-  final bin = Platform.environment['SING_BOX_BIN'];
+  final bin = Platform.environment['MELSI_CORE_BIN'];
   group('probe hosts', () {
     test('explicit blocks take precedence over measurement exceptions', () {
       final config = buildJson(routing: RoutingSettings(blockDomains: ['ipwho.is']));
@@ -456,7 +470,7 @@ void main() {
     });
   });
 
-  group('sing-box check', () {
+  group('melsi-core check', () {
     late bool hasNaive;
     late Directory tmp;
     setUpAll(() {
@@ -596,7 +610,7 @@ void main() {
             ));
       }
     });
-  }, skip: bin == null ? 'SING_BOX_BIN not set' : false);
+  }, skip: bin == null ? 'MELSI_CORE_BIN not set' : false);
 
   // ------------------------------------------------------------------------
   group('chain', () {
@@ -745,9 +759,8 @@ void main() {
       same('disabled', nodes, ChainSettings(enabled: false, entryNodeId: vless.id));
       same('no entry', nodes, ChainSettings(enabled: true));
       same('unknown entry', nodes, ChainSettings(enabled: true, entryNodeId: 'nope'));
-      // The entry is a dropped (unsupported) node.
-      final ssr = nodes.firstWhere((n) => n.type == 'shadowsocksr');
-      same('unsupported entry', nodes, ChainSettings(enabled: true, entryNodeId: ssr.id));
+      final naive = nodes.firstWhere((node) => node.type == 'naive');
+      same('unsupported entry', nodes, ChainSettings(enabled: true, entryNodeId: naive.id));
     });
 
     test('an active chain still passes every existing structural check', () {
@@ -802,6 +815,6 @@ void main() {
         }
       }
       expect(i, greaterThan(0));
-    }, skip: bin == null ? 'SING_BOX_BIN not set' : false);
+    }, skip: bin == null ? 'MELSI_CORE_BIN not set' : false);
   });
 }

@@ -40,7 +40,9 @@ class _GameScreenState extends State<GameScreen> {
     final l = context.l;
     final c = context.c;
     final g = app.game;
-    final presets = kGamePresets.where((p) => switch (_filter) {
+    final available = kGamePresets.where((preset) =>
+        !app.isMobilePlatform || preset.supportsPlatform(app.platform));
+    final presets = available.where((p) => switch (_filter) {
           _GameFilter.all => true,
           _GameFilter.pc => p.desktopProcesses.isNotEmpty,
           _GameFilter.mobile => p.androidPackages.isNotEmpty,
@@ -59,7 +61,7 @@ class _GameScreenState extends State<GameScreen> {
                 index: offset + i,
                 child: _GameChip(
                   preset: p,
-                  platforms: _filter == _GameFilter.all,
+                  platforms: !app.isMobilePlatform && _filter == _GameFilter.all,
                   selected: g.gameIds.contains(p.id),
                   onTap: () => app.updateGame((x) {
                     final ids = {...x.gameIds};
@@ -100,12 +102,14 @@ class _GameScreenState extends State<GameScreen> {
           child: SectionHeader(
             l('game.games'),
             trailing: Overline(
-              l('game.selectedN', {'n': '${g.gameIds.length + g.customApps.length}'}),
+              l('game.selectedN', {
+                'n': '${available.where((preset) => g.gameIds.contains(preset.id)).length + g.customApps.length}',
+              }),
               color: c.tertiaryLabel,
             ),
           ),
         ),
-        SliverToBoxAdapter(
+        if (!app.isMobilePlatform) SliverToBoxAdapter(
           child: Segmented<_GameFilter>(
             value: _filter,
             onChanged: (f) => setState(() => _filter = f),

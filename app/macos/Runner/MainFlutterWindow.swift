@@ -6,13 +6,10 @@ class MainFlutterWindow: NSWindow {
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
 
-    // Modern look: transparent title bar, content under it (Flutter draws
-    // its own header; traffic lights stay visible, the ~28pt top strip stays
-    // draggable and should be left free of interactive widgets).
     self.title = "Melsi"
     self.titleVisibility = .hidden
     self.titlebarAppearsTransparent = true
-    self.styleMask.insert(.fullSizeContentView)
+    self.styleMask.remove(.fullSizeContentView)
     self.minSize = NSSize(width: 880, height: 600)
 
     let size = NSSize(width: 1100, height: 720)

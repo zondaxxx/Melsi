@@ -1,6 +1,6 @@
 # Melsi core (Go)
 
-Go side of Melsi, built on sing-box 1.14.2. Seams are defined in
+Go side of Melsi, built on sing-box 1.14.2 with Mihomo 1.19.32 outbound adapters. Seams are defined in
 [`docs/CONTRACT.md`](../docs/CONTRACT.md) §2–§5.
 
 | Path | What |
@@ -9,6 +9,8 @@ Go side of Melsi, built on sing-box 1.14.2. Seams are defined in
 | `melsicore/` | gomobile-exported bridge: `StartEngine`, `StopEngine`, `EngineStatus`, `Version`. Bound together with `libbox`. |
 | `cmd/melsi-core/` | Desktop daemon (§4): sing-box in-process + engine. `run`, `check`, `version`. |
 | `version/` | Melsi and sing-box version strings. |
+| `compat/` | In-process Mihomo adapters for SSR, VLESS XHTTP and AmneziaWG, using the sing-box dialer and DNS router. Includes loopback TCP/UDP integration tests. |
+| `tools/prepare-mobile/` | Creates isolated mobile build sources with the compatibility outbound registered in libbox. Never edits the module cache or tracked Go module files. |
 | `tools/` | `//go:build tools` imports that keep `libbox` and the gomobile runtime in `go.mod`. |
 
 The engine talks to sing-box only over HTTP, so the same code runs in the
@@ -56,6 +58,23 @@ Desktop builds use `CGO_ENABLED=0` and the tags
 The naive outbound is **not** in desktop builds (it needs cronet via cgo;
 on Windows `MELSI_NAIVE=1` adds it via purego, but `libcronet.dll` must then
 ship next to `melsi-core.exe`).
+
+`scripts/build-libbox.sh` first prepares a copy of the pinned sing-box source
+under `core/dist/mobile-build-*` and patches its libbox registry in that copy.
+It then binds from a temporary Melsi module whose local replacement points to
+the copy. This also carries the replacement into gomobile's generated modules.
+The integration generator fails if the upstream registry entry point changes.
+
+To verify the mobile registry without an Android SDK or Xcode:
+
+```bash
+mobile_source="$(go run ./tools/prepare-mobile)"
+(cd "$mobile_source" && MELSI_MOBILE_REGISTRY_TEST=1 go test ./compat -run TestMobileRegistry -v)
+```
+
+Separate XHTTP download servers are rejected. sing-box TLS record fragmentation
+does not apply to Mihomo's XHTTP TLS transport. Compatibility nodes use the
+same route selectors and detours as native sing-box nodes.
 
 ## Daemon smoke test
 

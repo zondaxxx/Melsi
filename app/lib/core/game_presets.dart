@@ -135,7 +135,6 @@ const List<GamePreset> kGamePresets = [
   GamePreset(
     id: 'wot',
     name: 'World of Tanks / Мир танков',
-    androidPackages: ['net.wargaming.wot.blitz'],
     desktopProcesses: ['WorldOfTanks.exe', 'wgc.exe', 'lgc.exe'],
     domainSuffixes: [
       'wargaming.net',
@@ -296,6 +295,13 @@ const List<GamePreset> kGamePresets = [
     name: 'Arena Breakout',
     androidPackages: ['com.proximabeta.mf.uamo'],
     domainSuffixes: ['arenabreakout.com', 'levelinfinite.com'],
+  ),
+
+  GamePreset(
+    id: 'wot_blitz',
+    name: 'World of Tanks Blitz',
+    androidPackages: ['net.wargaming.wot.blitz'],
+    domainSuffixes: ['wotblitz.com', 'wotblitz.eu', 'wargaming.net'],
   ),
 
   // -------------------------------------------------------------- launchers

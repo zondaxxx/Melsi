@@ -99,11 +99,11 @@ void main() {
           'AT');
     });
 
-    test('vless xhttp and legacy xtls are skipped', () {
+    test('vless xhttp is retained, KCP and legacy XTLS are skipped', () {
       expect(
           LinkParser.parseLink(
               'vless://$kUuid@x.example.com:443?security=tls&type=xhttp&path=%2Fx#xhttp'),
-          isNull);
+          isNotNull);
       expect(
           LinkParser.parseLink(
               'vless://$kUuid@x.example.com:443?security=tls&type=kcp#kcp'),
@@ -375,11 +375,10 @@ void main() {
       expect(n.outbound['mtu'], 1420);
       expect(n.outbound['peers'][0]['address'], '203.0.113.10');
       expect(n.outbound['peers'][0]['persistent_keepalive_interval'], 25);
-      // AmneziaWG is not supported.
       expect(
           LinkParser.parseContent(kWireGuardConf.replaceFirst(
               'MTU = 1420', 'MTU = 1420\nJc = 4\nH1 = 1234')),
-          isEmpty);
+          hasLength(1));
     });
 
     test('xray json', () {

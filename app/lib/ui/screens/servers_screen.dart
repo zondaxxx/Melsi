@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models.dart';
+import '../../core/compatibility_core.dart';
 import '../../l10n/l10n.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
@@ -740,15 +741,18 @@ class NodeRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: t.body.copyWith(fontWeight: FontWeight.w500)),
                       const SizedBox(height: 3),
-                      Row(children: [
+                      Wrap(spacing: Space.s, runSpacing: 3, crossAxisAlignment: WrapCrossAlignment.center, children: [
                         ProtocolBadge(node.protocol),
-                        if (active) ...[
-                          const SizedBox(width: Space.s + 2),
-                          StatusDot(c.success, size: 6),
-                          const SizedBox(width: 5),
-                          Text(l('servers.active'),
-                              style: t.caption.copyWith(color: c.success)),
+                        if (CompatibilityCore.needsMihomo(node.outbound)) ...[
+                          Text(CompatibilityCore.nameFor(node), style: t.caption),
                         ],
+                        if (active)
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            StatusDot(c.success, size: 6),
+                            const SizedBox(width: 5),
+                            Text(l('servers.active'),
+                                style: t.caption.copyWith(color: c.success)),
+                          ]),
                       ]),
                     ]),
                   ),

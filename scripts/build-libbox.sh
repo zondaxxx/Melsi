@@ -45,6 +45,9 @@ go install "github.com/sagernet/gomobile/cmd/gomobile@${GOMOBILE_VERSION}"
 go install "github.com/sagernet/gomobile/cmd/gobind@${GOMOBILE_VERSION}"
 go mod download
 
+MELSI_MOBILE_SOURCE="$(go run ./tools/prepare-mobile)"
+cd "$MELSI_MOBILE_SOURCE"
+
 if [[ -z "${MELSI_VERSION:-}" ]]; then
   MELSI_VERSION="$(bash "$ROOT/scripts/version.sh" 2>/dev/null || true)"
   MELSI_VERSION="${MELSI_VERSION:-0.0.0-dev}"

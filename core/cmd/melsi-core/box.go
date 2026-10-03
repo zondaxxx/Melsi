@@ -14,12 +14,14 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/service"
+	"github.com/zondaxxx/melsi/core/compat"
 )
 
 // baseContext mirrors sing-box's cmd: registries for every compiled-in
 // protocol plus a deprecation reporter.
 func baseContext() context.Context {
-	return include.Context(service.ContextWith(context.Background(), deprecated.NewStderrManager(log.StdLogger())))
+	ctx := service.ContextWith(context.Background(), deprecated.NewStderrManager(log.StdLogger()))
+	return box.Context(ctx, include.InboundRegistry(), compat.OutboundRegistry(), include.EndpointRegistry(), include.DNSTransportRegistry(), include.ServiceRegistry(), include.CertificateProviderRegistry())
 }
 
 func readOptions(ctx context.Context, path string) (option.Options, error) {

@@ -24,6 +24,9 @@ import 'fakes.dart';
 final _out = Platform.environment['MELSI_SHOTS'];
 
 Future<void> _loadFonts() async {
+  final interLoader = FontLoader('Inter')
+    ..addFont(rootBundle.load('assets/fonts/InterVariable.ttf'));
+  await interLoader.load();
   Future<void> family(String name, List<String> files) async {
     final loader = FontLoader(name);
     for (final f in files) {
@@ -194,7 +197,11 @@ void main() {
         tester.view.devicePixelRatio = 2;
         addTearDown(tester.view.reset);
         final vpn = FakeVpn();
-        final state = testState(data: _demo(theme), vpn: vpn);
+        final state = testState(
+          data: _demo(theme),
+          vpn: vpn,
+          platform: phone ? PlatformKind.android : PlatformKind.macos,
+        );
         await state.load();
         final features = testFeatures(state);
         await features.init();

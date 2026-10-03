@@ -47,6 +47,13 @@ jobs:
         working-directory: core
         run: go test ./...
 
+      - name: Mobile compatibility registry
+        working-directory: core
+        run: |
+          mobile_source="$(go run ./tools/prepare-mobile)"
+          cd "$mobile_source"
+          MELSI_MOBILE_REGISTRY_TEST=1 go test ./compat -run TestMobileRegistry -v
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}

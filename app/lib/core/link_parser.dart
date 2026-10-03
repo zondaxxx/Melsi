@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:yaml/yaml.dart';
 
 import 'country.dart';
+import 'compatibility_core.dart';
 import 'models.dart';
 
 class LinkParser {
@@ -92,6 +93,7 @@ List<_Parsed> _parseContentRaw(String content, int depth) {
   if (text.startsWith('{') || text.startsWith('[')) {
     try {
       final j = jsonDecode(text);
+      if (j is Map && j['proxies'] is List) return _parseClash(text);
       final r = _parseJsonConfig(j);
       if (r.isNotEmpty) return r;
     } catch (_) {}
@@ -328,6 +330,8 @@ class _V2 {
   int? maxEarlyData;
   String? earlyDataHeader;
   Map<String, String> headers = {};
+  Map<String, dynamic> xhttpOptions = {};
+  String? xhttpMode;
   String security = 'none'; // none | tls | reality
   String? sni;
   bool insecure = false;
@@ -440,8 +444,23 @@ class _V2 {
         };
       case 'quic':
         transport = {'type': 'quic'};
+      case 'xhttp':
+      case 'splithttp':
+        CompatibilityCore.validateXhttpOptions(xhttpOptions);
+        if (type != 'vless') return null;
+        if (!const {'auto', 'packet-up', 'stream-up', 'stream-one'}
+            .contains(xhttpMode ?? 'auto')) {
+          return null;
+        }
+        transport = {
+          'type': 'xhttp',
+          'path': path ?? '/',
+          if (host != null) 'host': host,
+          'mode': xhttpMode ?? 'auto',
+          if (headers.isNotEmpty) 'headers': headers,
+          if (xhttpOptions.isNotEmpty) 'options': xhttpOptions,
+        };
       default:
-        // xhttp / splithttp / kcp / mkcp / domainsocket: not in sing-box.
         return null;
     }
     if (transport != null) ob['transport'] = transport;
@@ -586,6 +605,8 @@ _Parsed? _parseLinkRaw(String link) {
       return _naive(link);
     case 'wireguard':
     case 'wg':
+    case 'awg':
+    case 'amneziawg':
       return _wireguardUrl(link);
     case 'ssh':
       return _ssh(link);
@@ -662,6 +683,7 @@ _Parsed? _v2Url(String link, String type) {
         ? (u.pass == null ? (u.user ?? '') : '${u.user}:${u.pass}')
         : (u.user ?? '')
     ..network = u.q('type', ['network', 'net']) ?? 'tcp'
+    ..xhttpMode = u.q('mode')
     ..headerType = u.q('headerType')
     ..host = u.q('host')
     ..path = u.q('path')
@@ -687,6 +709,9 @@ _Parsed? _v2Url(String link, String type) {
     v.cipher = u.q('encryption', ['security_cipher']) ?? 'auto';
   }
   final ed = u.q('ed');
+  if (u.q('extra') case final String extra) {
+    v.xhttpOptions = _xhttpExtra(Map<String, dynamic>.from(jsonDecode(extra) as Map));
+  }
   if (ed != null) v.maxEarlyData = _int(ed);
   if (v.network == 'grpc' && v.serviceName == null) v.serviceName = v.path;
   final ob = v.build();
@@ -1172,6 +1197,7 @@ _Parsed? _wireguardUrl(String link) {
     peers: [peer],
     mtu: _int(u.q('mtu')),
   );
+  if (ep != null) _applyAmnezia(ep, u.query, force: u.scheme == 'awg' || u.scheme == 'amneziawg');
   return ep == null ? null : _Parsed(u.fragment, ep);
 }
 
@@ -1249,6 +1275,86 @@ _Parsed? _http(String link) {
 
 // ------------------------------------------------------------------ WG conf
 
+const _amneziaNumbers = {'version', 'jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4', 'itime'};
+const _amneziaStrings = {
+  'h1', 'h2', 'h3', 'h4', 'i1', 'i2', 'i3', 'i4', 'i5', 'j1', 'j2', 'j3',
+  'header-protection-key', 'content-padding-addition', 'rekey-after-time',
+  'rekey-timeout', 'reject-after-time', 'keepalive-timeout', 'max-handshake-attempts',
+};
+
+void _applyAmnezia(Map<String, dynamic> endpoint, Map<String, dynamic> input, {bool force = false}) {
+  final options = <String, dynamic>{};
+  final aliases = {
+    for (final name in {..._amneziaNumbers, ..._amneziaStrings, 'random-trailers', 'disable-cookies'})
+      name.replaceAll('-', ''): name,
+  };
+  for (final entry in input.entries) {
+    final rawKey = entry.key.toLowerCase().replaceAll('_', '-');
+    final key = aliases[rawKey.replaceAll('-', '')] ?? rawKey;
+    if (_amneziaNumbers.contains(key)) {
+      final value = _int(entry.value);
+      if (value == null || value < 0) throw const FormatException('Invalid AmneziaWG number');
+      options[key] = value;
+    } else if (_amneziaStrings.contains(key)) {
+      options[key] = entry.value.toString();
+    } else if (key == 'random-trailers' || key == 'disable-cookies') {
+      options[key] = _truthy(entry.value);
+    }
+  }
+  if (options.isNotEmpty || force) {
+    if (options.isEmpty) throw const FormatException('AmneziaWG parameters missing');
+    endpoint['type'] = 'amneziawg';
+    endpoint['amnezia'] = options;
+  }
+}
+
+Map<String, dynamic> _xhttpExtra(Map<String, dynamic> extra) {
+  const names = {
+    'noGRPCHeader': 'no-grpc-header',
+    'xPaddingBytes': 'x-padding-bytes',
+    'xPaddingObfsMode': 'x-padding-obfs-mode',
+    'xPaddingKey': 'x-padding-key',
+    'xPaddingHeader': 'x-padding-header',
+    'xPaddingPlacement': 'x-padding-placement',
+    'xPaddingMethod': 'x-padding-method',
+    'uplinkHTTPMethod': 'uplink-http-method',
+    'sessionPlacement': 'session-placement',
+    'sessionKey': 'session-key',
+    'sessionTable': 'session-table',
+    'sessionLength': 'session-length',
+    'seqPlacement': 'seq-placement',
+    'seqKey': 'seq-key',
+    'uplinkDataPlacement': 'uplink-data-placement',
+    'uplinkDataKey': 'uplink-data-key',
+    'uplinkChunkSize': 'uplink-chunk-size',
+    'scMaxEachPostBytes': 'sc-max-each-post-bytes',
+    'scMinPostsIntervalMs': 'sc-min-posts-interval-ms',
+    'headers': 'headers',
+  };
+  final result = <String, dynamic>{};
+  for (final entry in extra.entries) {
+    if (entry.key == 'xmux') {
+      const reuseNames = {
+        'maxConcurrency': 'max-concurrency', 'maxConnections': 'max-connections',
+        'cMaxReuseTimes': 'c-max-reuse-times', 'hMaxRequestTimes': 'h-max-request-times',
+        'hMaxReusableSecs': 'h-max-reusable-secs', 'hKeepAlivePeriod': 'h-keep-alive-period',
+      };
+      final reuse = <String, dynamic>{};
+      for (final setting in (entry.value as Map).entries) {
+        final key = reuseNames[setting.key];
+        if (key == null) throw FormatException('Unsupported XMUX option: ${setting.key}');
+        reuse[key] = key == 'h-keep-alive-period' ? _int(setting.value) : setting.value.toString();
+      }
+      result['reuse-settings'] = reuse;
+      continue;
+    }
+    final key = names[entry.key];
+    if (key == null) throw FormatException('Unsupported XHTTP extra: ${entry.key}');
+    result[key] = entry.value;
+  }
+  return result;
+}
+
 List<_Parsed> _parseWireGuardConf(String text) {
   final sections = <(String, Map<String, String>)>[];
   String? current;
@@ -1273,10 +1379,6 @@ List<_Parsed> _parseWireGuardConf(String text) {
   if (current != null) sections.add((current, kv));
   final iface = sections.where((s) => s.$1 == 'interface').firstOrNull?.$2;
   if (iface == null) return const [];
-  // AmneziaWG obfuscation parameters are not supported by sing-box.
-  for (final k in ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4']) {
-    if (iface.containsKey(k)) return const [];
-  }
   final peers = <Map<String, dynamic>>[];
   for (final s in sections.where((s) => s.$1 == 'peer')) {
     final p = s.$2;
@@ -1310,12 +1412,13 @@ List<_Parsed> _parseWireGuardConf(String text) {
     mtu: _int(iface['mtu']),
   );
   if (ep == null) return const [];
+  _applyAmnezia(ep, iface);
   final nameLine = RegExp(r'^\s*#\s*Name\s*=\s*(.+)$', multiLine: true)
       .firstMatch(text)
       ?.group(1);
   final first = peers.first;
   return [
-    _Parsed(nameLine ?? 'WireGuard ${first['address']}', ep, raw: null)
+    _Parsed(nameLine ?? '${ep['type'] == 'amneziawg' ? 'AmneziaWG' : 'WireGuard'} ${first['address']}', ep, raw: null)
   ];
 }
 
@@ -1449,6 +1552,13 @@ _Parsed? _clashProxy(Map<String, dynamic> p) {
         v.security = 'tls';
       }
       switch (v.network) {
+        case 'xhttp':
+        case 'splithttp':
+          final options = Map<String, dynamic>.from((p['xhttp-opts'] as Map?) ?? {});
+          v.path = _str(options.remove('path'));
+          v.host = _str(options.remove('host'));
+          v.xhttpMode = _str(options.remove('mode'));
+          v.xhttpOptions = options;
         case 'ws':
           final o = Map<String, dynamic>.from((p['ws-opts'] as Map?) ?? {});
           v.path = _str(o['path']) ?? _str(p['ws-path']) ?? '/';
@@ -1594,7 +1704,6 @@ _Parsed? _clashProxy(Map<String, dynamic> p) {
         );
         if (peer != null) peers.add(peer);
       }
-      if (p['amnezia-wg-option'] != null) return null;
       ob = _wgEndpoint(
         privateKey: (p['private-key'] ?? '').toString(),
         address: _wgAddresses([
@@ -1604,6 +1713,9 @@ _Parsed? _clashProxy(Map<String, dynamic> p) {
         peers: peers,
         mtu: _int(p['mtu']),
       );
+      if (ob != null && p['amnezia-wg-option'] is Map) {
+        _applyAmnezia(ob, Map<String, dynamic>.from(p['amnezia-wg-option'] as Map), force: true);
+      }
     case 'socks5':
       if (server.isEmpty || !_validPort(port) || _truthy(p['tls'])) return null;
       ob = {
@@ -1891,6 +2003,13 @@ _Parsed? _xrayOutbound(Map<String, dynamic> o, String? remarks) {
       Map<String, dynamic> s(String k) =>
           Map<String, dynamic>.from((stream[k] as Map?) ?? {});
       switch (v.network) {
+        case 'xhttp':
+        case 'splithttp':
+          final options = s('xhttpSettings').isNotEmpty ? s('xhttpSettings') : s('splithttpSettings');
+          v.path = _str(options['path']);
+          v.host = _str(options['host']);
+          v.xhttpMode = _str(options['mode']);
+          v.xhttpOptions = _xhttpExtra(Map<String, dynamic>.from((options['extra'] as Map?) ?? {}));
         case 'ws':
           final w = s('wsSettings');
           v.path = _str(w['path']);

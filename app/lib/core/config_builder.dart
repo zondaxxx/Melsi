@@ -56,6 +56,7 @@ import 'dart:convert';
 
 import 'game_presets.dart';
 import 'models.dart';
+import 'compatibility_core.dart';
 
 class ConfigBuilder {
   ConfigBuilder._();
@@ -74,9 +75,6 @@ class ConfigBuilder {
     tagProxy, tagGame, tagDirect, tagTun, tagMixed, dnsLocal, dnsDirect,
     dnsRemote, 'block', 'dns', 'dns-out', 'GLOBAL', 'REJECT', 'DIRECT',
   };
-
-  /// sing-box types that were removed from 1.14 at runtime.
-  static const unsupportedTypes = {'shadowsocksr'};
 
   /// Rule-sets shipped in `assets/rulesets/` (see [build]'s
   /// `bundledRuleSetDir`).
@@ -126,7 +124,6 @@ class ConfigBuilder {
     // ---------------------------------------------------------- nodes
     final usable = nodes
         .where((n) =>
-            !unsupportedTypes.contains(n.type) &&
             !(isDesktop && desktopUnsupportedTypes.contains(n.type)) &&
             n.type != 'unknown')
         .toList();
@@ -183,10 +180,12 @@ class ConfigBuilder {
       // record fragmentation.
       for (final h in helpers) {
         _tune(h, settings, lowLatency && !isIos);
-        nodeOutbounds.add(h);
+        nodeOutbounds.add(CompatibilityCore.wrap(h));
       }
       _tune(ob, settings, lowLatency && !isIos);
-      if (n.protocol.isEndpoint) {
+      if (CompatibilityCore.needsMihomo(ob)) {
+        outbounds.add(CompatibilityCore.wrap(ob));
+      } else if (n.protocol.isEndpoint) {
         endpointsList.add(ob);
       } else {
         outbounds.add(ob);
@@ -249,7 +248,11 @@ class ConfigBuilder {
 
     // ---------------------------------------------------------- game data
     final presets = game.enabled
-        ? game.gameIds.map(gamePresetById).whereType<GamePreset>().toList()
+        ? game.gameIds
+            .map(gamePresetById)
+            .whereType<GamePreset>()
+            .where((preset) => preset.supportsPlatform(platform))
+            .toList()
         : <GamePreset>[];
     final gameProcesses = <String>{};
     final gamePackages = <String>{};

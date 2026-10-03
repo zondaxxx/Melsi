@@ -565,12 +565,15 @@ class _IntroStepState extends State<_IntroStep> with TickerProviderStateMixin {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Wordmark(size: narrow ? 30 : 34),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Wordmark(size: narrow ? 64 : 80, glow: true),
+                  ),
                   const SizedBox(height: Space.m),
                   DrawnHairline(
                     progress: _reduce ? 1 : line,
-                    width: 56,
-                    color: c.label.withValues(alpha: 0.3),
+                    width: 80,
+                    color: c.accent.withValues(alpha: 0.6),
                   ),
                 ],
               ),

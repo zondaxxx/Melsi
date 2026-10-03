@@ -65,15 +65,18 @@ class AppState extends ChangeNotifier {
     VpnController? vpn,
     PlatformApps? apps,
     SubscriptionFetcher? fetcher,
+    PlatformKind? platform,
     this.enableNetwork = true,
   })  : store = store ?? FileStateStore(),
         vpn = vpn ?? VpnController.forPlatform(),
         apps = apps ?? PlatformApps(),
+        platform = platform ?? currentPlatformKind(),
         _fetcher = fetcher; // ignore: prefer_initializing_formals
 
   final StateStore store;
   final VpnController vpn;
   final PlatformApps apps;
+  final PlatformKind platform;
   final SubscriptionFetcher? _fetcher;
 
   /// Tests turn this off: no auto-updates / pings on load.
@@ -956,7 +959,7 @@ class AppState extends ChangeNotifier {
       game: game,
       settings: settings,
       chain: chain,
-      platform: currentPlatformKind(),
+      platform: platform,
       endpoints: endpoints,
       cacheDir: await store.cacheDir(),
       bundledRuleSetDir: _ruleSetDir,
@@ -1165,8 +1168,8 @@ class AppState extends ChangeNotifier {
   }
 
   /// Platform helpers for the UI.
-  bool get isDesktopPlatform => isDesktop;
-  bool get isMobilePlatform => isMobile;
-  bool get isIOS => Platform.isIOS;
-  bool get isAndroid => Platform.isAndroid;
+  bool get isDesktopPlatform => !isMobilePlatform;
+  bool get isMobilePlatform => isAndroid || isIOS;
+  bool get isIOS => platform == PlatformKind.ios;
+  bool get isAndroid => platform == PlatformKind.android;
 }

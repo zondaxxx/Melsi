@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:melsi/main.dart';
+import 'package:melsi/core/models.dart';
 import 'package:melsi/services/vpn_controller.dart';
 import 'package:melsi/state/app_state.dart';
 import 'package:melsi/state/features.dart';
@@ -17,6 +18,7 @@ Future<(AppState, Features)> bootApp(
   WidgetTester tester, {
   Size size = const Size(390, 844),
   FakeVpn? vpn,
+  PlatformKind? platform,
   Map<String, dynamic>? data,
   Features? features,
   bool launchMoment = false,
@@ -25,7 +27,7 @@ Future<(AppState, Features)> bootApp(
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
-  final state = testState(data: data, vpn: vpn);
+  final state = testState(data: data, vpn: vpn, platform: platform);
   await state.load();
   // Russian unless the seed data chose a language (load() replaces settings).
   state.settings.locale ??= 'ru';

@@ -20,6 +20,7 @@ enum ProxyProtocol {
   shadowtls,
   naive,
   wireguard,
+  amneziawg,
   ssh,
   socks,
   http,
@@ -57,6 +58,8 @@ enum ProxyProtocol {
         return naive;
       case 'wireguard':
         return wireguard;
+      case 'amneziawg':
+        return amneziawg;
       case 'ssh':
         return ssh;
       case 'socks':
@@ -91,6 +94,7 @@ enum ProxyProtocol {
         shadowtls => 'ShadowTLS',
         naive => 'Naive',
         wireguard => 'WireGuard',
+        amneziawg => 'AmneziaWG',
         ssh => 'SSH',
         socks => 'SOCKS',
         http => 'HTTP',
@@ -103,14 +107,14 @@ enum ProxyProtocol {
 
   /// QUIC/UDP-native protocols — preferred by Game Mode.
   bool get udpNative => switch (this) {
-        hysteria || hysteria2 || tuic || wireguard || openvpn => true,
+        hysteria || hysteria2 || tuic || wireguard || amneziawg || openvpn => true,
         _ => false,
       };
 
   /// WireGuard / OpenVPN / OpenConnect / Tailscale are sing-box *endpoints*
   /// (top-level `endpoints` array), not outbounds.
   bool get isEndpoint => switch (this) {
-        wireguard || openvpn || openconnect || tailscale => true,
+        wireguard || amneziawg || openvpn || openconnect || tailscale => true,
         _ => false,
       };
 }
@@ -419,6 +423,11 @@ class GamePreset {
 
   /// Tags of SagerNet geosite rule-sets (e.g. `steam`), optional.
   final List<String> geositeRuleSets;
+
+  bool supportsPlatform(PlatformKind platform) => switch (platform) {
+        PlatformKind.android || PlatformKind.ios => androidPackages.isNotEmpty,
+        _ => true,
+      };
 }
 
 class GameSettings {

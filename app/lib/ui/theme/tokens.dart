@@ -1,7 +1,7 @@
 // Melsi design tokens: colour, spacing, radii, typography.
 //
 // The visual system is an instrument, not a landing page: a warm-neutral
-// monochrome base, one accent (burnt orange) reserved for the primary action
+// monochrome base, one accent (brand violet) reserved for the primary action
 // and selection, and colour otherwise carrying meaning only — green for
 // "connected / good", amber and red for "degraded / bad", always as small
 // indicators and text. Hierarchy comes from type and hairlines.
@@ -89,9 +89,6 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
   /// Hairline dividers and panel borders.
   final Color separator;
 
-  /// The one accent: primary action, selection, links. One pigment in both
-  /// themes — burnt orange — lifted only as far as white text on it needs
-  /// (light `#C2410C`, dark `#D4562A`); any lighter and it drifts to coral.
   final Color accent;
   final Color onAccent;
 
@@ -125,7 +122,7 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
     secondaryLabel: Color(0x9E1B1A17),
     tertiaryLabel: Color(0x661B1A17),
     separator: Color(0x1F1B1A17),
-    accent: Color(0xFFC2410C),
+    accent: Color(0xFF7053E8),
     onAccent: Color(0xFFFFFFFF),
     success: Color(0xFF1E8A4E),
     warning: Color(0xFF9A6B00),
@@ -143,7 +140,7 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
     secondaryLabel: Color(0xA3ECE8E1),
     tertiaryLabel: Color(0x66ECE8E1),
     separator: Color(0x1FECE8E1),
-    accent: Color(0xFFD4562A),
+    accent: Color(0xFF7053E8),
     onAccent: Color(0xFFFFFFFF),
     success: Color(0xFF4CC272),
     warning: Color(0xFFE0B23E),
@@ -205,6 +202,7 @@ class MelsiType extends ThemeExtension<MelsiType> {
 
   TextStyle _s(double size, FontWeight w, double tracking, double height) =>
       TextStyle(
+        fontFamily: 'Inter',
         fontSize: size,
         fontWeight: w,
         letterSpacing: tracking,
@@ -227,8 +225,8 @@ class MelsiType extends ThemeExtension<MelsiType> {
 
   /// Row titles that need emphasis, panel titles.
   TextStyle get headline => _s(16, FontWeight.w600, -0.2, 1.3);
-  TextStyle get body => _s(15, FontWeight.w400, -0.1, 1.4);
-  TextStyle get callout => _s(14, FontWeight.w400, -0.05, 1.36);
+  TextStyle get body => _s(15, FontWeight.w400, 0, 1.4);
+  TextStyle get callout => _s(14, FontWeight.w400, 0, 1.4);
   TextStyle get subhead => _s(14, FontWeight.w500, -0.05, 1.36);
   TextStyle get footnote =>
       _s(13, FontWeight.w400, 0, 1.38).copyWith(color: secondary);
@@ -243,11 +241,11 @@ class MelsiType extends ThemeExtension<MelsiType> {
   /// Metrics: monospaced, tabular. [mono] for inline values, [monoSmall]
   /// for codes and protocol tags, [monoLarge] for the headline number of a
   /// panel (latency, speed).
-  TextStyle get mono => _m(13, FontWeight.w500, 0, 1.3);
+  TextStyle get mono => _s(13, FontWeight.w500, 0, 1.3);
   TextStyle get monoSmall =>
       _m(11, FontWeight.w500, 0.4, 1.2).copyWith(color: secondary);
-  TextStyle get monoLarge => _m(22, FontWeight.w500, -0.6, 1.1);
-  TextStyle get monoDisplay => _m(34, FontWeight.w500, -1.2, 1.05);
+  TextStyle get monoLarge => _s(22, FontWeight.w500, -0.6, 1.1);
+  TextStyle get monoDisplay => _s(34, FontWeight.w500, -1.2, 1.05);
 
   @override
   MelsiType copyWith() => this;

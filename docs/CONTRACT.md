@@ -32,6 +32,7 @@ If you change a seam, change this file in the same commit.
 | App Group (iOS) | `group.app.melsi` |
 | Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.25.5` |
 | sing-box | `github.com/sagernet/sing-box v1.14.2` |
+| Compatibility adapters | `github.com/metacubex/mihomo v1.19.32` |
 | Clash API default | `127.0.0.1:9790` |
 | Engine API default | `127.0.0.1:9791` |
 | Deep links | `melsi://import?url=<urlencoded>&name=<name>`, also accept `sing-box://import-remote-profile?url=`, `clash://install-config?url=`, `hiddify://import/<url>` |
@@ -48,7 +49,7 @@ class LinkParser {
   /// One share link -> node, null if unsupported/invalid.
   /// Schemes: vmess:// vless:// trojan:// ss:// ssr:// snell:// hysteria://
   /// hy2:// hysteria2:// tuic:// anytls:// naive+https:// naive+quic://
-  /// wireguard:// wg:// ssh:// socks:// socks5:// http:// https:// shadowtls://
+  /// wireguard:// wg:// awg:// amneziawg:// ssh:// socks:// socks5:// http:// https:// shadowtls://
   static ProxyNode? parseLink(String link, {String? subscriptionId});
 
   /// Whole subscription body: base64 list, plain list, Clash/Mihomo YAML,
@@ -92,6 +93,18 @@ class ConfigBuilder {
 
 ### sing-box config conventions (produced by `ConfigBuilder`)
 
+- SSR, VLESS XHTTP and AmneziaWG are emitted as `type: "mihomo"` outbounds
+  with a `proxy` object in Mihomo format. Core choice is automatic per node.
+  Plain WireGuard remains a sing-box endpoint. AmneziaWG remains ineligible
+  as a chain entry but can be a selectable exit.
+- Compatibility sockets use the injected sing-box dialer, including platform
+  socket protection and detours. Server names resolve through `dns-direct`;
+  UDP/WireGuard destinations use the sing-box DNS router. Missing resolvers
+  fail instead of falling back to a separate Mihomo resolver.
+- XHTTP modes are `auto`, `packet-up`, `stream-up`, `stream-one`; XMUX maps to
+  `reuse-settings`. Unknown extras and separate download settings are rejected.
+  sing-box-specific TLS record fragmentation is unavailable on XHTTP.
+
 - Node outbound tags: sanitized unique display names; mapping returned in
   `BuiltConfig.nodeTags`.
 - Selector `proxy`: all selectable node tags, `default` = selected (or first),
@@ -123,6 +136,9 @@ class ConfigBuilder {
   direct-routing preset; they are not an all-traffic leak test.
 - Game Mode rules precede ordinary per-app and preset rules: game processes / packages / domains → `game`;
   download domains → `direct` (if `directDownloads`).
+- Android/iOS game presets are filtered by mobile package support, regardless
+  of screen width. Saved PC selections are preserved but generate no mobile
+  game rules. World of Tanks Blitz has a separate mobile preset.
 - Rule-sets are remote binary `.srs`, downloaded direct via a top-level
   `http_clients: [{tag: "direct-http", domain_resolver: "dns-direct"}]`,
   `route.default_http_client` and `rule_set[].http_client` (`download_detour`
@@ -243,6 +259,13 @@ then `Melsicore.startEngine(engineJson)`; on stop call `Melsicore.stopEngine()` 
 ### gomobile
 
 `libbox` + `melsicore` are bound together into one library:
+
+Use `scripts/build-libbox.sh`: it runs `core/tools/prepare-mobile` to create
+isolated build sources in ignored `core/dist/mobile-build-*`. The pinned
+sing-box source is copied there and only libbox's outbound registry entry is
+patched to `compat.OutboundRegistry()`. A temporary Melsi `go.mod` supplies
+the local replacement, which gomobile carries into generated modules. CI
+checks `libbox.CheckConfig` with a compatibility outbound from these sources.
 
 ```
 gomobile bind -target android -androidapi 24 -javapkg=io.nekohasekai -libname=box \
