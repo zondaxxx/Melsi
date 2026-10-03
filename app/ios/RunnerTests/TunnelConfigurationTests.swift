@@ -1,7 +1,67 @@
 import Foundation
 import XCTest
+import Darwin
 
 final class TunnelConfigurationTests: XCTestCase {
+    func testResignedInstallationUsesShortCommandSocketPath() throws {
+        for prefix in ["/var", "/private/var"] {
+            let sandbox = URL(fileURLWithPath: "\(prefix)/mobile/Containers/Data/PluginKitPlugin/6BF1D1ED-E67B-4767-B49E-7C0E850F27F1")
+            let shared = sandbox.appendingPathComponent("Library/Application Support/Melsi")
+            XCTAssertGreaterThanOrEqual(shared.appendingPathComponent("command.sock").path.utf8.count,
+                                        TunnelConfiguration.commandSocketPathCapacity)
+            let directory = try TunnelConfiguration.commandBaseDirectory(sharedDirectory: shared, sandboxDirectory: sandbox)
+            XCTAssertEqual(directory, sandbox.appendingPathComponent("s", isDirectory: true))
+            XCTAssertLessThan(directory.appendingPathComponent("command.sock").path.utf8.count,
+                              TunnelConfiguration.commandSocketPathCapacity)
+        }
+    }
+
+    func testShortAppGroupCommandPathIsPreserved() throws {
+        let shared = URL(fileURLWithPath: "/private/var/mobile/Containers/Shared/AppGroup/6BF1D1ED-E67B-4767-B49E-7C0E850F27F1")
+        let directory = try TunnelConfiguration.commandBaseDirectory(sharedDirectory: shared,
+            sandboxDirectory: URL(fileURLWithPath: "/unused"))
+        XCTAssertEqual(directory, shared)
+    }
+
+    func testCommandPathLimitCountsUTF8Bytes() throws {
+        let shared = URL(fileURLWithPath: "/" + String(repeating: "я", count: 48))
+        let sandbox = URL(fileURLWithPath: "/sandbox")
+        XCTAssertLessThan(shared.appendingPathComponent("command.sock").path.count,
+                          TunnelConfiguration.commandSocketPathCapacity)
+        let directory = try TunnelConfiguration.commandBaseDirectory(sharedDirectory: shared, sandboxDirectory: sandbox)
+        XCTAssertEqual(directory, sandbox.appendingPathComponent("s", isDirectory: true))
+    }
+
+    func testOversizedCommandPathsFailBeforeStartingCore() {
+        let directory = URL(fileURLWithPath: "/" + String(repeating: "a", count: TunnelConfiguration.commandSocketPathCapacity))
+        XCTAssertThrowsError(try TunnelConfiguration.commandBaseDirectory(sharedDirectory: directory, sandboxDirectory: directory))
+    }
+
+    func testCommandSocketCanBindAfterLongPathFallback() throws {
+        let sandbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        let shared = sandbox.appendingPathComponent("Library/Application Support/Melsi")
+        let directory = try TunnelConfiguration.commandBaseDirectory(sharedDirectory: shared, sandboxDirectory: sandbox)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        guard descriptor >= 0 else { return }
+        defer { Darwin.close(descriptor) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bytes = Array(directory.appendingPathComponent("command.sock").path.utf8) + [0]
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            buffer.copyBytes(from: bytes)
+        }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(result, 0, "bind failed with errno \(errno)")
+    }
+
     func testBundledRulesAndCacheUseExtensionPaths() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

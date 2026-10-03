@@ -47,12 +47,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func startTunnel(options: [String: NSObject]?) async throws {
         let fileManager = FileManager.default
-        let basePath = Self.sharedDirectory.path
+        let commandDirectory = try TunnelConfiguration.commandBaseDirectory(
+            sharedDirectory: Self.sharedDirectory,
+            sandboxDirectory: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+        let basePath = commandDirectory.path
         let workingPath = Self.workingDirectory.path
         let tempPath = Self.cacheDirectory.path
-        try? fileManager.createDirectory(atPath: basePath, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(atPath: workingPath, withIntermediateDirectories: true)
-        try? fileManager.createDirectory(atPath: tempPath, withIntermediateDirectories: true)
+        for directory in [Self.sharedDirectory, commandDirectory, Self.workingDirectory, Self.cacheDirectory] {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
         clearLastError()
 
         let setupOptions = LibboxSetupOptions()

@@ -1,6 +1,19 @@
 import Foundation
+import Darwin
 
 enum TunnelConfiguration {
+    static let commandSocketPathCapacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+
+    static func commandBaseDirectory(sharedDirectory: URL, sandboxDirectory: URL) throws -> URL {
+        for directory in [sharedDirectory, sandboxDirectory.appendingPathComponent("s", isDirectory: true), sandboxDirectory] {
+            if directory.appendingPathComponent("command.sock").path.utf8.count < commandSocketPathCapacity {
+                return directory
+            }
+        }
+        throw NSError(domain: "app.melsi.PacketTunnel", code: 2,
+                      userInfo: [NSLocalizedDescriptionKey: "The VPN command socket path exceeds the system limit"])
+    }
+
     static let bundledSources = [
         "geoip-ru": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
         "geosite-category-ads-all": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",

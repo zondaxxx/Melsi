@@ -10,7 +10,7 @@ cat > "$TEMP/main.swift" <<'SWIFT'
 import XCTest
 let suite = TunnelConfigurationTests.defaultTestSuite
 suite.run()
-guard let run = suite.testRun, run.executionCount == 4, run.totalFailureCount == 0 else { exit(1) }
+guard let run = suite.testRun, run.executionCount == 9, run.totalFailureCount == 0 else { exit(1) }
 SWIFT
 xcrun swiftc -I "$DEVELOPER/usr/lib" -L "$DEVELOPER/usr/lib" -F "$FRAMEWORKS" \
   -Xlinker -rpath -Xlinker "$FRAMEWORKS" -Xlinker -rpath -Xlinker "$DEVELOPER/usr/lib" \
