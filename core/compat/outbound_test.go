@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"os"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/metacubex/mihomo/transport/xhttp"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-vmess/vless"
@@ -200,13 +198,4 @@ func TestAmneziaConstruction(test *testing.T) {
 		"ip":          "10.0.0.2", "udp": true,
 		"amnezia-wg-option": map[string]any{"jc": 4, "jmin": 40, "jmax": 70, "h1": "11-12", "h2": "21-22", "h3": "31-32", "h4": "41-42", "i1": "<r 32>"},
 	})
-}
-
-func TestMobileRegistry(test *testing.T) {
-	if os.Getenv("MELSI_MOBILE_REGISTRY_TEST") != "1" {
-		test.Skip("requires prepared mobile source")
-	}
-	if err := libbox.CheckConfig(string(configuration(ssr(1080)))); err != nil {
-		test.Fatal(err)
-	}
 }

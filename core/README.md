@@ -69,7 +69,7 @@ To verify the mobile registry without an Android SDK or Xcode:
 
 ```bash
 mobile_source="$(go run ./tools/prepare-mobile)"
-(cd "$mobile_source" && MELSI_MOBILE_REGISTRY_TEST=1 go test ./compat -run TestMobileRegistry -v)
+(cd "$mobile_source" && go test -tags melsi_mobile_registry -ldflags=-checklinkname=0 ./compat -run TestMobileRegistry -v)
 ```
 
 Separate XHTTP download servers are rejected. sing-box TLS record fragmentation
