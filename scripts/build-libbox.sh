@@ -60,7 +60,7 @@ if [[ "${LIBBOX_DEBUG:-0}" != "1" ]]; then
   LDFLAGS+=" -s -w -buildid="
 fi
 
-TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_naive_outbound,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0"
+TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_naive_outbound,with_openvpn,with_openconnect,no_tailscale,badlinkname,tfogo_checklinkname0"
 PACKAGES=(
   github.com/sagernet/sing-box/experimental/libbox
   github.com/zondaxxx/melsi/core/melsicore

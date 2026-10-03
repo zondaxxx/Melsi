@@ -52,7 +52,7 @@ jobs:
         run: |
           mobile_source="$(go run ./tools/prepare-mobile)"
           cd "$mobile_source"
-          go test -tags melsi_mobile_registry -ldflags=-checklinkname=0 ./compat -run TestMobileRegistry -v
+          go test -tags with_gvisor,no_tailscale,melsi_mobile_registry -ldflags=-checklinkname=0 ./compat -run TestMobileRegistry -v
 
       - uses: subosito/flutter-action@v2
         with:
