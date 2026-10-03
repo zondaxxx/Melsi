@@ -16,6 +16,7 @@ import '../../ui/screens/logs_screen.dart';
 import '../../ui/shell.dart' show AppTab;
 import '../../ui/widgets/common.dart' show nodeTitle;
 import '../../ui/widgets/format.dart';
+import '../../ui/widgets/dashboard_tools.dart' show showDisconnectTimer;
 import 'palette_shell.dart' show findShellNav;
 
 /// Group keys every command is filed under. Other features use the same
@@ -296,6 +297,23 @@ class PaletteService extends FeatureService {
       ];
 
   List<AppCommand> _toolCommands(L10n l) => [
+        AppCommand(
+          id: 'tools.disconnectTimer',
+          titleKey: 'dashboard.timer',
+          group: PaletteGroups.tools,
+          icon: Icons.timer_outlined,
+          keywords: const ['sleep', 'timer', 'disconnect', 'таймер', 'отключение'],
+          run: showDisconnectTimer,
+        ),
+        AppCommand(
+          id: 'tools.hideAddresses',
+          titleKey: 'dashboard.hide',
+          group: PaletteGroups.tools,
+          icon: Icons.visibility_off_outlined,
+          keywords: const ['privacy', 'ip', 'screen', 'приватность', 'экран'],
+          isOn: () => app.hideAddresses,
+          run: (_) async => app.setHideAddresses(!app.hideAddresses),
+        ),
         if (app.nodes.isNotEmpty)
           AppCommand(
             id: 'servers.pingAll',

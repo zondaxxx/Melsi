@@ -478,6 +478,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(seconds: 2));
       await settle(tester);
+      final details = find.byKey(const ValueKey('dashboard-details'));
+      await tester.ensureVisible(details);
+      await settle(tester);
+      await tester.tap(details);
+      await settle(tester);
       expect(find.text('СКОРОСТЬ'), findsOneWidget);
       expect(find.text('Ещё не измеряли'), findsOneWidget);
 

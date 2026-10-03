@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/models.dart';
+import '../../core/game_presets.dart';
 import '../../features/doctor/doctor_widgets.dart';
 import '../../features/motion/rolling_number.dart';
 import '../../features/motion/status_pulse.dart';
@@ -20,6 +21,7 @@ import '../theme/theme.dart';
 import '../widgets/charts.dart';
 import '../widgets/common.dart';
 import '../widgets/connect_button.dart';
+import '../widgets/dashboard_tools.dart';
 import '../widgets/format.dart';
 import '../widgets/page.dart';
 import '../widgets/segmented.dart';
@@ -34,7 +36,7 @@ const double _kRailWidth = 320;
 
 /// Two columns need the live column plus the rail; below this the rail
 /// stacks under the live column as on phones.
-const double _kTwoColumnMin = 700;
+const double _kTwoColumnMin = 840;
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -43,12 +45,14 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.app;
     final l = context.l;
+    final c = context.c;
     final wide = context.isWide;
     // Same content column as every other page, so the headline's left edge
     // is the other tabs' title edge; on desktop the live column and the rail
     // split that column between them.
     return PageScaffold(
       title: l('tab.home'),
+      maxContentWidth: 1040,
       compactLeading: wide ? const SizedBox.shrink() : const Wordmark(),
       slivers: [
         SliverToBoxAdapter(
@@ -67,28 +71,52 @@ class HomeScreen extends StatelessWidget {
             ]);
 
             final main = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              _Status(app: app),
-              const SizedBox(height: Space.xl),
-              // Without a server the button leads to the add flow (or the
-              // switcher when servers exist but none is chosen).
-              ConnectButton(
-                status: status,
-                height: wide ? 56 : 52,
-                hasServer: hasServer,
-                noServerLabel: app.nodes.isEmpty ? l('servers.add') : l('home.chooseServer'),
-                onTap: hasServer
-                    ? app.toggle
-                    : () => app.nodes.isEmpty ? showAddSheet(context) : showServerSwitcher(context),
+              AnimatedContainer(
+                duration: Duration(milliseconds: context.reduceMotion ? 0 : 320),
+                padding: const EdgeInsets.all(Space.xl),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: c.separator),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [c.accent.withValues(alpha: connected ? 0.16 : 0.09), c.surface],
+                  ),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Row(children: [
+                    Expanded(child: Overline(l('dashboard.eyebrow'))),
+                    Icon(connected ? Icons.shield_rounded : Icons.shield_outlined,
+                        color: c.accent, size: 26),
+                  ]),
+                  const SizedBox(height: Space.l),
+                  _Status(app: app),
+                  const SizedBox(height: Space.l),
+                  ConnectButton(
+                    status: status,
+                    height: wide ? 56 : 52,
+                    hasServer: hasServer,
+                    noServerLabel: app.nodes.isEmpty ? l('servers.add') : l('home.chooseServer'),
+                    onTap: hasServer
+                        ? app.toggle
+                        : () => app.nodes.isEmpty ? showAddSheet(context) : showServerSwitcher(context),
+                  ),
+                  HomeSlots.underButton(context, app),
+                  SectionHeader(l('home.server'),
+                      padding: const EdgeInsets.fromLTRB(Space.xs, Space.m, Space.xs, Space.s + 2)),
+                  _NodePanel(app: app),
+                  HomeSlots.connectionRoute(context, app),
+                ]),
               ),
-              HomeSlots.underButton(context, app),
-              SectionHeader(l('home.server'),
-                  padding: const EdgeInsets.fromLTRB(Space.xs, Space.m, Space.xs, Space.s + 2)),
-              _NodePanel(app: app),
-              HomeSlots.afterNodePanel(context, app),
+              const DashboardTools(),
+              const HomeFavorites(),
               // Telemetry appears with the session (dashes while the tunnel
               // comes up, live once connected). An empty chart is not
               // information, on a phone or a desktop.
-              _Reveal(visible: session, child: traffic),
+              if (twoColumn) ...[
+                HomeSlots.afterNodePanel(context, app),
+                _Reveal(visible: session, child: DashboardDetails(child: traffic)),
+              ],
             ]);
 
             Widget side({EdgeInsetsGeometry? firstHeaderPadding}) =>
@@ -110,7 +138,12 @@ class HomeScreen extends StatelessWidget {
             if (!twoColumn) {
               return Padding(
                 padding: const EdgeInsets.only(top: Space.m),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [main, side()]),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  main,
+                  HomeSlots.afterNodePanel(context, app),
+                  side(),
+                  _Reveal(visible: session, child: DashboardDetails(child: traffic)),
+                ]),
               );
             }
             // Wide: live column on the left (capped, left-aligned; button and
@@ -208,12 +241,10 @@ class _Status extends StatelessWidget {
       VpnStatus.stopped when app.nodes.isEmpty => l('home.addServerHint'),
       _ => null,
     };
-    final style = t.title2.copyWith(fontSize: 23);
+    final style = t.title1.copyWith(fontWeight: FontWeight.w700);
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(
-        height: lineHeight,
-        child: Row(children: [
+      Row(children: [
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: StatusPulse(
@@ -234,12 +265,12 @@ class _Status extends StatelessWidget {
                   style: style),
             ),
           ),
-          if (s == VpnStatus.connected) ...[
-            Text(' · ', style: style.copyWith(color: c.tertiaryLabel)),
-            _Timer(since: app.sessionSince ?? DateTime.now()),
-          ],
         ]),
-      ),
+      if (s == VpnStatus.connected)
+        Padding(
+          padding: const EdgeInsets.only(top: Space.xs, left: _dot + _gap),
+          child: _Timer(since: app.sessionSince ?? DateTime.now()),
+        ),
       AnimatedSize(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
@@ -307,7 +338,7 @@ class _TimerState extends State<_Timer> {
     final s = formatDuration(DateTime.now().difference(widget.since));
     return MonoNumber(s,
         semanticsLabel: s,
-        style: context.t.monoLarge.copyWith(fontSize: 23, color: context.c.secondaryLabel));
+        style: context.t.monoLarge.copyWith(fontSize: 16, color: context.c.secondaryLabel));
   }
 }
 
@@ -611,7 +642,8 @@ class _QuickToggles extends StatelessWidget {
       _QuickRow(
         title: l('quick.game'),
         value: app.game.enabled
-            ? l.plural(app.game.gameIds.length + app.game.customApps.length, 'n.games')
+            ? l.plural(kGamePresets.where((preset) => app.game.gameIds.contains(preset.id) &&
+                preset.supportsPlatform(app.platform)).length + app.game.customApps.length, 'n.games')
             : null,
         on: app.game.enabled,
         onChanged: (v) => app.updateGame((g) => g.enabled = v),
@@ -625,6 +657,11 @@ class _QuickToggles extends StatelessWidget {
         title: l('quick.antiDpi'),
         on: app.settings.antiDpi,
         onChanged: (v) => app.updateSettings((s) => s.antiDpi = v),
+      ),
+      _QuickRow(
+        title: l('dashboard.ads'),
+        on: app.routing.blockAds,
+        onChanged: (v) => app.updateRouting((r) => r.blockAds = v),
       ),
     ]);
   }

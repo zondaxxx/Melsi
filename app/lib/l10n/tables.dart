@@ -11,6 +11,7 @@ import 'strings_favorites.dart';
 import 'strings_palette.dart';
 import 'strings_backup.dart';
 import 'strings_doctor.dart';
+import 'strings_dashboard.dart';
 
 const List<StringTable> kStringTables = [
   kCoreStrings,
@@ -23,4 +24,5 @@ const List<StringTable> kStringTables = [
   kPaletteStrings,
   kBackupStrings,
   kDoctorStrings,
+  kDashboardStrings,
 ];

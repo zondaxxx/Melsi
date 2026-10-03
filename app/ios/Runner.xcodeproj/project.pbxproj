@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A117A0000000000000000005 /* TunnelConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000001 /* TunnelConfiguration.swift */; };
+		A117A0000000000000000007 /* TunnelConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000006 /* TunnelConfigurationTests.swift */; };
+		A117A0000000000000000002 /* TunnelConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000001 /* TunnelConfiguration.swift */; };
+		A117A0000000000000000004 /* rulesets in Resources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000003 /* rulesets */; };
 		03497A3CAAFBF043FD8E4A43 /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DA84263919B4F506E448AF42 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		126C0326A197C43F6D43D0D2 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7ACF9CFFE2E5BF14EC95041D /* NetworkExtension.framework */; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
@@ -67,6 +71,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A117A0000000000000000006 /* TunnelConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelConfigurationTests.swift; sourceTree = "<group>"; };
+		A117A0000000000000000001 /* TunnelConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelConfiguration.swift; sourceTree = "<group>"; };
+		A117A0000000000000000003 /* rulesets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = rulesets; path = "../../assets/rulesets"; sourceTree = "<group>"; };
 		1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
 		1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
 		275BAA9183875F614FC4CCD1 /* MelsiVpnBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MelsiVpnBridge.swift; sourceTree = "<group>"; };
@@ -121,6 +128,7 @@
 		331C8082294A63A400263BE5 /* RunnerTests */ = {
 			isa = PBXGroup;
 			children = (
+				A117A0000000000000000006 /* TunnelConfigurationTests.swift */,
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
 			);
 			path = RunnerTests;
@@ -129,6 +137,8 @@
 		43F60F0897870399EC0823B8 /* PacketTunnel */ = {
 			isa = PBXGroup;
 			children = (
+				A117A0000000000000000001 /* TunnelConfiguration.swift */,
+				A117A0000000000000000003 /* rulesets */,
 				37156A3F961D44261314DD71 /* PacketTunnelProvider.swift */,
 				57D7A6BDB132178425686EF9 /* MelsiPlatformInterface.swift */,
 				868E79170E70A48D3FE16EEC /* Info.plist */,
@@ -313,6 +323,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A117A0000000000000000004 /* rulesets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,6 +386,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A117A0000000000000000005 /* TunnelConfiguration.swift in Sources */,
+				A117A0000000000000000007 /* TunnelConfigurationTests.swift in Sources */,
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -383,6 +396,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A117A0000000000000000002 /* TunnelConfiguration.swift in Sources */,
 				1AB224497E223FB1E7C44392 /* PacketTunnelProvider.swift in Sources */,
 				6CDF912FFE2DECD1147AF17C /* MelsiPlatformInterface.swift in Sources */,
 			);

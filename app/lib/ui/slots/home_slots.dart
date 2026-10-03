@@ -21,8 +21,10 @@ abstract final class HomeSlots {
   /// Right after the server card.
   static Widget afterNodePanel(BuildContext context, AppState app) => const Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [ChainLine(), IpGeoPanel()],
+        children: [IpGeoPanel()],
       );
+
+  static Widget connectionRoute(BuildContext context, AppState app) => const ChainLine();
 
   /// After the traffic card (inside the session-only block).
   static Widget afterTraffic(BuildContext context, AppState app) => const Column(

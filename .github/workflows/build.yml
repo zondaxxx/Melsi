@@ -220,6 +220,12 @@ jobs:
       - name: Build Libbox.xcframework
         run: bash scripts/build-libbox.sh apple
 
+      - name: iOS configuration regression tests
+        run: bash scripts/test-ios-config.sh
+
+      - name: Verify iOS project
+        run: plutil -lint app/ios/Runner.xcodeproj/project.pbxproj
+
       - name: flutter build ios
         working-directory: app
         run: |

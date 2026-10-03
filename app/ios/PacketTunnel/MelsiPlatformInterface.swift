@@ -105,7 +105,7 @@ final class MelsiPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol, L
                 ipv6Address.append(ipv6Prefix.address())
                 ipv6Prefixes.append(NSNumber(value: ipv6Prefix.prefix()))
             }
-            do {
+            if !ipv6Address.isEmpty {
                 let ipv6Settings = NEIPv6Settings(addresses: ipv6Address, networkPrefixLengths: ipv6Prefixes)
                 var ipv6Routes: [NEIPv6Route] = []
                 var ipv6ExcludeRoutes: [NEIPv6Route] = []

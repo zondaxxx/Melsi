@@ -18,6 +18,7 @@ import 'package:melsi/main.dart';
 import 'package:melsi/services/engine_api.dart';
 import 'package:melsi/state/app_state.dart';
 import 'package:melsi/ui/screens/home_screen.dart';
+import 'package:melsi/ui/widgets/dashboard_tools.dart';
 
 import 'fakes.dart';
 
@@ -255,6 +256,23 @@ void main() {
 
         // Feature sheets and screens, opened from Home's context.
         final home = tester.element(find.byType(HomeScreen));
+        showDisconnectTimer(home);
+        await pumpFrames(tester, 8);
+        await shoot(tester, '${tag}_timer');
+        await closeSheet(tester);
+
+        state.setHideAddresses(true);
+        await pumpFrames(tester, 4);
+        await shootBottom(tester, '${tag}_home_private');
+        state.setHideAddresses(false);
+
+        final details = find.byKey(const ValueKey('dashboard-details'));
+        await tester.ensureVisible(details);
+        await pumpFrames(tester, 4);
+        await tester.tap(details);
+        await pumpFrames(tester, 8);
+        await shootBottom(tester, '${tag}_home_details');
+
         openStatsScreen(home);
         await pumpFrames(tester, 8);
         await shoot(tester, '${tag}_stats');

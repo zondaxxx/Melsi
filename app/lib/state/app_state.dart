@@ -137,6 +137,7 @@ class AppState extends ChangeNotifier {
   Timer? _applyResetTimer;
   DateTime? _applySince;
   bool _applyAborted = false;
+  int _connectAttempt = 0;
   BuiltConfig? lastBuilt;
   String? coreVersion;
   final TrafficMonitor traffic = TrafficMonitor();
@@ -149,6 +150,40 @@ class AppState extends ChangeNotifier {
   StreamSubscription<VpnState>? _vpnSub;
   Timer? _poll;
   Timer? _notifyTimer;
+  Timer? _disconnectTimer;
+  DateTime? disconnectAt;
+
+  bool get hideAddresses => sectionOf('dashboard')?['hideAddresses'] == true;
+
+  void setHideAddresses(bool value) =>
+      setSection('dashboard', {...?sectionOf('dashboard'), 'hideAddresses': value});
+
+  void scheduleDisconnect(Duration? duration) {
+    _disconnectTimer?.cancel();
+    _disconnectTimer = null;
+    disconnectAt = null;
+    if (duration != null && duration > Duration.zero && connected) {
+      disconnectAt = DateTime.now().add(duration);
+      _disconnectTimer = Timer(duration, () => unawaited(_finishScheduledDisconnect()));
+    }
+    notifyListeners();
+  }
+
+  bool _checkDisconnectDeadline() {
+    final deadline = disconnectAt;
+    if (deadline == null || DateTime.now().isBefore(deadline)) return false;
+    unawaited(_finishScheduledDisconnect());
+    return true;
+  }
+
+  Future<void> _finishScheduledDisconnect() async {
+    scheduleDisconnect(null);
+    if (connected || applying || busy) {
+      _applyAborted = true;
+      await disconnect();
+      if (vpnState.status == VpnStatus.stopped) notice('dashboard.timerFinished');
+    }
+  }
   RuntimeEndpoints? _endpoints;
 
   bool get connected => vpnState.status == VpnStatus.connected;
@@ -216,10 +251,13 @@ class AppState extends ChangeNotifier {
 
   /// Called by the UI when the app returns to the foreground.
   void onResume() {
+    final timerExpired = _checkDisconnectDeadline();
     if (enableNetwork) unawaited(updateDueSubscriptions());
-    unawaited(vpn.currentState().then((s) {
-      if (s.status != vpnState.status && s.status != VpnStatus.error) _onVpnState(s);
-    }));
+    if (!timerExpired) {
+      unawaited(vpn.currentState().then((s) {
+        if (s.status != vpnState.status && s.status != VpnStatus.error) _onVpnState(s);
+      }));
+    }
     for (final h in List.of(resumeHooks)) {
       h();
     }
@@ -227,6 +265,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disconnectTimer?.cancel();
     _vpnSub?.cancel();
     _poll?.cancel();
     _notifyTimer?.cancel();
@@ -860,7 +899,7 @@ class AppState extends ChangeNotifier {
       } else {
         _applyAborted = false;
         needsReconnect = false;
-        await disconnect();
+        await disconnect(preserveTimer: true);
         await _waitForStatus(
             (s) => s == VpnStatus.stopped || s == VpnStatus.error, const Duration(seconds: 8));
         if (!_applyAborted) await connect();
@@ -872,6 +911,7 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       notice('notice.applyFailed', kind: NoticeKind.error, detail: _short(e));
     }
+    if (!ok) scheduleDisconnect(null);
     if (ok && _applySince != null) connectedAt = _applySince;
     _applySince = null;
     applyPhase = ok
@@ -1018,9 +1058,11 @@ class AppState extends ChangeNotifier {
       notice('notice.addServerFirst', kind: NoticeKind.error);
       return;
     }
+    final attempt = ++_connectAttempt;
     _setVpn(const VpnState(VpnStatus.connecting));
     try {
       final ok = await vpn.prepare();
+      if (attempt != _connectAttempt) return;
       if (!ok) {
         _setVpn(const VpnState(VpnStatus.error, 'permission'));
         notice('notice.permissionDenied', kind: NoticeKind.error);
@@ -1031,16 +1073,23 @@ class AppState extends ChangeNotifier {
       _lastSecret = secret;
       _save();
       final built = await _build(_endpoints!);
+      if (attempt != _connectAttempt) return;
       lastBuilt = built;
       needsReconnect = false;
       await vpn.start(built, name: selectedNode?.name ?? 'Melsi');
     } catch (e) {
+      if (attempt != _connectAttempt) return;
       _setVpn(VpnState(VpnStatus.error, _short(e)));
       notice('notice.connectFailed', kind: NoticeKind.error, detail: _short(e));
     }
   }
 
-  Future<void> disconnect() async {
+  Future<void> disconnect({bool preserveTimer = false}) async {
+    _connectAttempt++;
+    if (!preserveTimer) {
+      scheduleDisconnect(null);
+      if (applying) _applyAborted = true;
+    }
     if (vpnState.status == VpnStatus.stopped) return;
     _setVpn(const VpnState(VpnStatus.stopping));
     try {
@@ -1073,6 +1122,7 @@ class AppState extends ChangeNotifier {
         if (prev != VpnStatus.connected) _startRuntime();
       case VpnStatus.stopped:
       case VpnStatus.error:
+        if (!applying && disconnectAt != null) scheduleDisconnect(null);
         connectedAt = null;
         if (!applying) {
           needsReconnect = false;

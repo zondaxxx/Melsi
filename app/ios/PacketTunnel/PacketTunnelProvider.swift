@@ -106,6 +106,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
+        if let object = (try? JSONSerialization.jsonObject(with: messageData)) as? [String: String],
+           object["action"] == "reload" {
+            do {
+                let options = object.mapValues { $0 as NSObject }
+                let payload = try loadPayload(options)
+                reasserting = true
+                defer { reasserting = false }
+                try startService(payload)
+                return nil
+            } catch {
+                return error.localizedDescription.data(using: .utf8)
+            }
+        }
         let message = String(data: messageData, encoding: .utf8) ?? ""
         switch message {
         case "reload":
@@ -154,28 +167,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         guard let config, !config.isEmpty else {
             throw fail("missing sing-box configuration")
         }
-        return Payload(config: patchConfig(config), engine: engine ?? "")
+        if options != nil {
+            try config.write(to: Self.sharedDirectory.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+            try (engine ?? "").write(to: Self.sharedDirectory.appendingPathComponent("engine.json"), atomically: true, encoding: .utf8)
+        }
+        return Payload(config: try patchConfig(config), engine: engine ?? "")
     }
 
     /// The Dart side cannot know the App Group path of the extension, so force
     /// `experimental.cache_file.path` into the shared working directory.
-    private func patchConfig(_ config: String) -> String {
-        guard let data = config.data(using: .utf8),
-              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              var experimental = root["experimental"] as? [String: Any],
-              var cacheFile = experimental["cache_file"] as? [String: Any]
-        else {
-            return config
-        }
-        cacheFile["path"] = Self.workingDirectory.appendingPathComponent("cache.db").path
-        experimental["cache_file"] = cacheFile
-        root["experimental"] = experimental
-        guard let patched = try? JSONSerialization.data(withJSONObject: root),
-              let string = String(data: patched, encoding: .utf8)
-        else {
-            return config
-        }
-        return string
+    private func patchConfig(_ config: String) throws -> String {
+        try TunnelConfiguration.patch(config, workingDirectory: Self.workingDirectory,
+            ruleSetDirectory: Bundle.main.resourceURL?.appendingPathComponent("rulesets"))
     }
 
     private func startService(_ payload: Payload) throws {

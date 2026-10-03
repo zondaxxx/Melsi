@@ -33,12 +33,20 @@ class IpGeoPanel extends StatelessWidget {
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           SectionHeader(
             l('geo.title'),
-            trailing: ToolButton(
-              key: const ValueKey('geo-refresh'),
-              icon: Icons.refresh_rounded,
-              tooltip: l('geo.refreshCmd'),
-              onTap: net.checking ? null : () => net.refresh(manual: true),
-            ),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              ToolButton(
+                key: const ValueKey('geo-privacy'),
+                icon: app.hideAddresses ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                tooltip: l(app.hideAddresses ? 'dashboard.show' : 'dashboard.hide'),
+                onTap: () => app.setHideAddresses(!app.hideAddresses),
+              ),
+              ToolButton(
+                key: const ValueKey('geo-refresh'),
+                icon: Icons.refresh_rounded,
+                tooltip: l('geo.refreshCmd'),
+                onTap: net.checking ? null : () => net.refresh(manual: true),
+              ),
+            ]),
           ),
           Panel(
             padding: EdgeInsets.zero,
@@ -49,6 +57,7 @@ class IpGeoPanel extends StatelessWidget {
                 info: net.realIp,
                 checking: net.checking && !net.checkingExit,
                 failed: net.error && net.realIp == null,
+                hidden: app.hideAddresses,
               ),
               _SlideIn(
                 visible: connected,
@@ -59,6 +68,7 @@ class IpGeoPanel extends StatelessWidget {
                     info: net.exitIp,
                     checking: net.checking && net.checkingExit,
                     failed: net.error && net.exitIp == null,
+                    hidden: app.hideAddresses,
                   ),
                 ]),
               ),
@@ -98,11 +108,13 @@ class _IpLine extends StatelessWidget {
     required this.info,
     required this.checking,
     required this.failed,
+    required this.hidden,
   });
   final String label;
   final IpInfo? info;
   final bool checking;
   final bool failed;
+  final bool hidden;
 
   @override
   Widget build(BuildContext context) {
@@ -132,13 +144,13 @@ class _IpLine extends StatelessWidget {
             child: Text.rich(
               TextSpan(children: [
                 TextSpan(
-                  text: i?.ip ?? '—',
+                  text: hidden ? l('dashboard.hidden') : i?.ip ?? '—',
                   style: t.mono.copyWith(
                       fontSize: 14, color: i == null ? c.tertiaryLabel : c.label),
                 ),
                 if (i == null && failed)
                   TextSpan(text: '  ${l('geo.noAnswer')}', style: t.footnote)
-                else if (detail != null && detail.isNotEmpty)
+                else if (!hidden && detail != null && detail.isNotEmpty)
                   TextSpan(text: '  $detail', style: t.caption),
               ]),
               maxLines: 1,

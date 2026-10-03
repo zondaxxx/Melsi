@@ -262,6 +262,11 @@ void main() {
     _totals(state, 1 * _mb, 5 * _mb);
     await tester.pump(const Duration(seconds: 6));
     await settle(tester);
+    final details = find.byKey(const ValueKey('dashboard-details'));
+    await tester.ensureVisible(details);
+    await settle(tester);
+    await tester.tap(details);
+    await settle(tester);
     expect(find.text('СЕГОДНЯ'), findsOneWidget);
     expect(find.text('5.0 МБ'), findsWidgets);
     expect(find.byKey(const ValueKey('stats-today-open')), findsOneWidget);

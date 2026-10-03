@@ -27,7 +27,7 @@ EXT_BUNDLE_ID = 'app.melsi.PacketTunnel'
 DEPLOYMENT_TARGET = '15.0'
 SWIFT_VERSION = '5.0'
 
-EXT_SOURCES = %w[PacketTunnelProvider.swift MelsiPlatformInterface.swift].freeze
+EXT_SOURCES = %w[PacketTunnelProvider.swift MelsiPlatformInterface.swift TunnelConfiguration.swift].freeze
 RUNNER_SOURCES = %w[MelsiVpnBridge.swift].freeze
 
 project = Xcodeproj::Project.open(PROJECT_PATH)
@@ -115,6 +115,17 @@ end
 find_or_create_file(ext_group, 'Info.plist', 'text.plist.xml')
 find_or_create_file(ext_group, "#{EXT_NAME}.entitlements", 'text.plist.entitlements')
 xcconfig_ref = find_or_create_file(ext_group, "#{EXT_NAME}.xcconfig", 'text.xcconfig')
+rules_ref = find_or_create_file(ext_group, '../../assets/rulesets', 'folder')
+rules_ref.name = 'rulesets'
+ensure_in_phase(ext.resources_build_phase, rules_ref)
+tests = project.targets.find { |target| target.name == 'RunnerTests' }
+if tests
+  tests_group = find_or_create_group(project.main_group, 'RunnerTests', 'RunnerTests')
+  tests_ref = find_or_create_file(tests_group, 'TunnelConfigurationTests.swift', 'sourcecode.swift')
+  ensure_in_phase(tests.source_build_phase, tests_ref)
+  config_ref = find_or_create_file(ext_group, 'TunnelConfiguration.swift', 'sourcecode.swift')
+  ensure_in_phase(tests.source_build_phase, config_ref)
+end
 
 # Frameworks: NetworkExtension + Libbox.xcframework (static, link only)
 ensure_in_phase(ext.frameworks_build_phase, ne_ref)

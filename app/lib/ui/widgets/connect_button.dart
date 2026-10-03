@@ -140,9 +140,11 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
                       CupertinoActivityIndicator(radius: 7, color: fg),
                       const SizedBox(width: Space.s + 2),
                     ],
-                    Text(label,
+                    Flexible(child: Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: context.t.headline.copyWith(
-                            color: fg.withValues(alpha: enabled ? 1 : 0.5), fontSize: 15)),
+                            color: fg.withValues(alpha: enabled ? 1 : 0.5), fontSize: 15))),
                   ],
                 ),
               ),

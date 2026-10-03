@@ -32,6 +32,8 @@ class MobileVpnController extends VpnController {
       return await _ch.invokeMethod<bool>('prepare') ?? false;
     } on MissingPluginException {
       return false;
+    } on PlatformException catch (e) {
+      throw VpnStartException(e.message ?? e.code);
     }
   }
 
