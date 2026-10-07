@@ -76,17 +76,26 @@ void main() {
     state.dispose();
   });
 
-  test('phone refuses Xray without starting a tunnel', () async {
-    final vpn = FakeVpn();
-    final state = testState(vpn: vpn, platform: PlatformKind.android);
-    await state.load();
-    await state.importText(kSampleVless);
-    state.updateSettings((s) => s.core = VpnCore.xray);
-    await state.connect();
-    expect(state.vpnState.status, VpnStatus.error);
-    expect(vpn.starts, 0);
-    state.dispose();
-  });
+  for (final platform in [PlatformKind.android, PlatformKind.ios]) {
+    test('${platform.name} starts the tunnel with embedded Xray selected', () async {
+      final vpn = FakeVpn();
+      final state = testState(vpn: vpn, platform: platform);
+      addTearDown(state.dispose);
+      await state.load();
+      await state.importText(kSampleVless);
+      state.updateSettings((s) => s.core = VpnCore.xray);
+      await state.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(state.vpnState.status, VpnStatus.connected);
+      expect(vpn.starts, 1);
+      expect(vpn.started!.xray, isNull, reason: 'phones do not launch a separate process');
+      final config = jsonDecode(vpn.started!.singBox) as Map<String, dynamic>;
+      final selectedTag = vpn.started!.nodeTags[state.selectedNodeId];
+      final outbound = (config['outbounds'] as List).cast<Map>()
+          .firstWhere((outbound) => outbound['tag'] == selectedTag);
+      expect(outbound['type'], 'xray');
+    });
+  }
 }
 
 class _SlowPrepare extends FakeVpn {

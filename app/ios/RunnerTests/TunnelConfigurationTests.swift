@@ -3,6 +3,19 @@ import XCTest
 import Darwin
 
 final class TunnelConfigurationTests: XCTestCase {
+    func testCoreFailureIsNotHiddenByGenericIOSDisconnectError() {
+        XCTAssertEqual(TunnelConfiguration.disconnectMessage(
+            tunnelError: "start service: invalid REALITY public key",
+            systemError: "The VPN connection failed"), "start service: invalid REALITY public key")
+    }
+
+    func testSystemDisconnectErrorIsUsedWithoutCoreFailure() {
+        XCTAssertEqual(TunnelConfiguration.disconnectMessage(
+            tunnelError: " \n", systemError: "The VPN extension was terminated"),
+            "The VPN extension was terminated")
+        XCTAssertNil(TunnelConfiguration.disconnectMessage(tunnelError: nil, systemError: nil))
+    }
+
     func testResignedInstallationUsesShortCommandSocketPath() throws {
         for prefix in ["/var", "/private/var"] {
             let sandbox = URL(fileURLWithPath: "\(prefix)/mobile/Containers/Data/PluginKitPlugin/6BF1D1ED-E67B-4767-B49E-7C0E850F27F1")

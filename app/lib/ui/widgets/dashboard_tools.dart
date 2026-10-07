@@ -28,54 +28,57 @@ class DashboardTools extends StatelessWidget {
         LayoutBuilder(
           builder: (context, box) {
             final width = (box.maxWidth - Space.s * 2) / 3;
-            return Wrap(
-              spacing: Space.s,
-              runSpacing: Space.s,
-              children: [
-                for (final action in [
-                  (
-                    'speed',
-                    Icons.speed_rounded,
-                    () => showSpeedTestSheet(context),
-                  ),
-                  (
-                    'doctor',
-                    Icons.troubleshoot_rounded,
-                    () => showDoctorSheet(context),
-                  ),
-                  (
-                    'timer',
-                    Icons.timer_outlined,
-                    () => showDisconnectTimer(context),
-                  ),
-                ])
-                  SizedBox(
-                    width: width,
-                    child: PressableScale(
-                      key: ValueKey('dashboard-${action.$1}'),
-                      semanticLabel: l('dashboard.${action.$1}'),
-                      onTap: action.$3,
-                      child: Panel(
-                        radius: Radii.l,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: Space.xs,
-                          vertical: Space.l,
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(action.$2, size: 22, color: context.c.label),
-                            const SizedBox(height: Space.s),
-                            Text(
-                              l('dashboard.${action.$1}'),
-                              textAlign: TextAlign.center,
-                              style: context.t.caption,
-                            ),
-                          ],
+            return IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  for (final action in [
+                    (
+                      'speed',
+                      Icons.speed_rounded,
+                      () => showSpeedTestSheet(context),
+                    ),
+                    (
+                      'doctor',
+                      Icons.troubleshoot_rounded,
+                      () => showDoctorSheet(context),
+                    ),
+                    (
+                      'timer',
+                      Icons.timer_outlined,
+                      () => showDisconnectTimer(context),
+                    ),
+                  ])
+                    SizedBox(
+                      width: width,
+                      child: PressableScale(
+                        key: ValueKey('dashboard-${action.$1}'),
+                        semanticLabel: l('dashboard.${action.$1}'),
+                        onTap: action.$3,
+                        child: Panel(
+                          radius: Radii.l,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: Space.xs,
+                            vertical: Space.l,
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(action.$2, size: 22, color: context.c.label),
+                              const SizedBox(height: Space.s),
+                              Text(
+                                l('dashboard.${action.$1}'),
+                                textAlign: TextAlign.center,
+                                style: context.t.caption,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             );
           },
         ),

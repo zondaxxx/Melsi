@@ -515,9 +515,10 @@ enum LogLevel { trace, debug, info, warn, error }
 /// Which proxy engine dials the selected servers.
 ///
 /// sing-box always owns TUN, DNS and routing. [mihomo] moves supported
-/// proxy dials onto the embedded Mihomo adapter. [xray] runs the original
-/// Xray core on desktop and points those dials at it. Protocols the chosen
-/// engine cannot carry stay on sing-box so the others keep working.
+/// proxy dials onto the embedded Mihomo adapter. [xray] uses the bundled
+/// desktop core or the embedded mobile adapter. REALITY and XHTTP select
+/// Xray automatically regardless of this preference. Protocols the chosen
+/// engine cannot carry use their compatible engine so the others keep working.
 enum VpnCore { singBox, mihomo, xray }
 
 /// Desktop only: how traffic is captured.

@@ -14,6 +14,17 @@ enum TunnelConfiguration {
         var url: URL
     }
 
+    /// The extension records the underlying core failure. iOS often reports
+    /// only that its provider disconnected, so preserve the more useful cause.
+    static func disconnectMessage(tunnelError: String?, systemError: String?) -> String? {
+        for message in [tunnelError, systemError] {
+            guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !message.isEmpty else { continue }
+            return message
+        }
+        return nil
+    }
+
     /// Directory that will hold `command.sock`.
     ///
     /// `group.app.melsi` (and any other real App Group container) is short

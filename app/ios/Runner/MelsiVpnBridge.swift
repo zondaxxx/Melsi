@@ -294,7 +294,7 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
         DispatchQueue.main.async {
           guard !completed else { return }
           completed = true
-          continuation.resume(returning: message ?? file)
+          continuation.resume(returning: TunnelConfiguration.disconnectMessage(tunnelError: file, systemError: message))
         }
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) { finish(nil) }
@@ -399,7 +399,7 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
       connection.fetchLastDisconnectError { [weak self] error in
         DispatchQueue.main.async {
           guard self != nil else { return }
-          report(error?.localizedDescription ?? fileError)
+          report(TunnelConfiguration.disconnectMessage(tunnelError: fileError, systemError: error?.localizedDescription))
         }
       }
     } else {

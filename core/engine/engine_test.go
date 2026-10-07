@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -161,6 +162,50 @@ func TestParseConfigDefaults(t *testing.T) {
 }
 
 // --- switching policy ------------------------------------------------------
+
+func TestManualStartOverridesCachedSelector(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		t.Run(fmt.Sprintf("auto=%v", auto), func(t *testing.T) {
+			f := newFakeClash(t, testSecret)
+			f.now["proxy"] = "B"
+			cfg := group("proxy", ModeBalanced, auto, "A", "B")
+			cfg.Selected = "A"
+			e, _ := newTestEngine(t, f, []GroupConfig{cfg}, Options{})
+			g := mustGroup(t, e, "proxy")
+			g.initCurrent(context.Background())
+			want := "A"
+			if auto {
+				want = "B"
+			}
+			if f.current("proxy") != want || g.Status().Current != want {
+				t.Fatalf("selector=%q status=%q want %q", f.current("proxy"), g.Status().Current, want)
+			}
+		})
+	}
+}
+
+func TestManualSelectionBeforeAttachWins(t *testing.T) {
+	f := newFakeClash(t, testSecret)
+	f.now["proxy"] = "A"
+	cfg := group("proxy", ModeBalanced, false, "A", "B")
+	cfg.Selected = "A"
+	e, _ := newTestEngine(t, f, []GroupConfig{cfg}, Options{})
+	g := mustGroup(t, e, "proxy")
+	if err := g.Select(context.Background(), "B"); err != nil {
+		t.Fatal(err)
+	}
+	g.initCurrent(context.Background())
+	if f.current("proxy") != "B" || g.Status().Current != "B" {
+		t.Fatal("startup overwrote the newer manual selection")
+	}
+}
+
+func TestRejectUnknownInitialSelection(t *testing.T) {
+	_, err := ParseConfig([]byte(`{"groups":[{"selector":"proxy","selected":"missing","candidates":[{"tag":"A"}]}]}`))
+	if err == nil {
+		t.Fatal("unknown selected outbound accepted")
+	}
+}
 
 func TestInitialCurrentAndSwitchToMuchBetter(t *testing.T) {
 	f := newFakeClash(t, testSecret)

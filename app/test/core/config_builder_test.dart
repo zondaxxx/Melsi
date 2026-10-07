@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -53,6 +54,26 @@ Map<String, dynamic> outboundByTag(Map<String, dynamic> c, String tag) =>
     [...c['outbounds'] as List, ...(c['endpoints'] as List? ?? [])]
         .cast<Map<String, dynamic>>()
         .firstWhere((o) => o['tag'] == tag);
+
+// Do not block Flutter's test isolate while a native core is running. In
+// particular, synchronous calls prevent the test timeout from firing when a
+// child stalls. Drain both pipes immediately and bound their completion too,
+// so an unresponsive process or inherited pipe cannot hang the matrix.
+Future<ProcessResult> runCore(String bin, List<String> arguments) async {
+  final process = await Process.start(bin, arguments,
+      environment: {'ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS': ''});
+  final stdout = process.stdout.transform(utf8.decoder).join();
+  final stderr = process.stderr.transform(utf8.decoder).join();
+  try {
+    final result = await Future.wait<Object>([process.exitCode, stdout, stderr])
+        .timeout(const Duration(seconds: 15));
+    return ProcessResult(process.pid, result[0] as int, result[1], result[2]);
+  } on TimeoutException {
+    process.kill(ProcessSignal.sigkill);
+    await process.exitCode.timeout(const Duration(seconds: 2));
+    fail('Core command timed out after 15 seconds: $bin ${arguments.join(' ')}');
+  }
+}
 
 void main() {
   group('structure', () {
@@ -477,26 +498,26 @@ void main() {
   group('melsi-core check', () {
     late bool hasNaive;
     late Directory tmp;
-    setUpAll(() {
-      final v = Process.runSync(bin!, ['version']);
-      hasNaive = v.stdout.toString().contains('with_naive_outbound');
+    setUpAll(() async {
       tmp = Directory.systemTemp.createTempSync('melsi-sb-check');
+      final v = await runCore(bin!, ['version']);
+      expect(v.exitCode, 0, reason: '${v.stdout}${v.stderr}');
+      hasNaive = v.stdout.toString().contains('with_naive_outbound');
     });
     tearDownAll(() => tmp.deleteSync(recursive: true));
 
     var counter = 0;
-    void check(String label, BuiltConfig b) {
+    Future<void> check(String label, BuiltConfig b) async {
       final f = File('${tmp.path}/c${counter++}.json')
         ..writeAsStringSync(b.singBox);
-      final r = Process.runSync(bin!, ['check', '-c', f.path],
-          environment: {'ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS': ''});
+      final r = await runCore(bin!, ['check', '-c', f.path]);
       final err = '${r.stdout}${r.stderr}';
       expect(r.exitCode, 0, reason: '$label\n$err\n${f.path}');
       expect(err.toLowerCase().contains('deprecated'), isFalse,
           reason: '$label: deprecation warning\n$err');
     }
 
-    test('matrix: presets x game x platforms x killSwitch/antiDpi', () {
+    test('matrix: presets x game x platforms x killSwitch/antiDpi', () async {
       final nodes = allNodes(includeNaive: hasNaive);
       expect(nodes.map((n) => n.type).toSet(),
           containsAll(<String>{
@@ -552,7 +573,7 @@ void main() {
                 endpoints: _endpoints,
                 cacheDir: tmp.path,
               );
-              check(
+              await check(
                   '${preset.name} game=$gameOn ${platform.name} '
                   'ks/dpi=${flags.$1}',
                   b);
@@ -564,7 +585,7 @@ void main() {
       expect(n, 80);
     });
 
-    test('edge cases', () {
+    test('edge cases', () async {
       for (final dns in [
         ('https://dns.google/dns-query', 'https://77.88.8.8/dns-query'),
         ('tls://1.1.1.1', 'udp://77.88.8.8'),
@@ -572,7 +593,7 @@ void main() {
         ('h3://1.1.1.1/dns-query', '77.88.8.8'),
         ('8.8.8.8', 'local'),
       ]) {
-        check(
+        await check(
             'dns $dns',
             ConfigBuilder.build(
               nodes: allNodes(includeNaive: hasNaive),
@@ -586,7 +607,7 @@ void main() {
             ));
       }
       // No nodes at all.
-      check(
+      await check(
           'empty',
           ConfigBuilder.build(
             nodes: const [],
@@ -600,7 +621,7 @@ void main() {
           ));
       // Every node on its own (catches per-protocol schema errors).
       for (final node in allNodes(includeNaive: hasNaive)) {
-        check(
+        await check(
             'single ${node.type} ${node.name}',
             ConfigBuilder.build(
               nodes: [node],
@@ -790,11 +811,12 @@ void main() {
       expect(rulesOf(c).first, {'action': 'sniff'});
     });
 
-    test('sing-box check accepts chained configs', () {
+    test('sing-box check accepts chained configs', () async {
       final tmp = Directory.systemTemp.createTempSync('melsi-chain-check');
       addTearDown(() => tmp.deleteSync(recursive: true));
-      final hasNaive =
-          Process.runSync(bin!, ['version']).stdout.toString().contains('with_naive_outbound');
+      final version = await runCore(bin!, ['version']);
+      expect(version.exitCode, 0, reason: '${version.stdout}${version.stderr}');
+      final hasNaive = version.stdout.toString().contains('with_naive_outbound');
       final nodes = allNodes(includeNaive: hasNaive);
       var i = 0;
       for (final entry in nodes.where((n) => !n.protocol.isEndpoint)) {
@@ -812,8 +834,7 @@ void main() {
           );
           if (!b.chainActive) continue;
           final f = File('${tmp.path}/c${i++}.json')..writeAsStringSync(b.singBox);
-          final r = Process.runSync(bin, ['check', '-c', f.path],
-              environment: {'ENABLE_DEPRECATED_SPECIAL_OUTBOUNDS': ''});
+          final r = await runCore(bin, ['check', '-c', f.path]);
           final err = '${r.stdout}${r.stderr}';
           expect(r.exitCode, 0, reason: 'entry ${entry.name} ${platform.name}\n$err');
         }

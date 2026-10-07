@@ -100,6 +100,44 @@ void main() {
     await gone(tester);
   });
 
+  testWidgets('a late exit lookup recovers after the map timed out', (tester) async {
+    final state = await show(tester, status: VpnStatus.connected);
+    await tester.pump(const Duration(seconds: 20));
+    await tester.pump(const Duration(milliseconds: 1600));
+    expect(state.debugCue, MapCue.failed);
+
+    await show(tester, status: VpnStatus.connected, exitReady: true);
+    expect(state.debugCue, MapCue.travel);
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(state.debugCue, MapCue.settled);
+    await gone(tester);
+  });
+
+  testWidgets('retry during the error animation starts a fresh approach', (tester) async {
+    final state = await show(tester, status: VpnStatus.connecting);
+    await tester.pump(const Duration(milliseconds: 200));
+    await show(tester, status: VpnStatus.error);
+    expect(state.debugCue, MapCue.retreat);
+
+    await show(tester, status: VpnStatus.connecting);
+    expect(state.debugCue, MapCue.approach);
+    await tester.pump(const Duration(milliseconds: 1000));
+    expect(state.debugCue, MapCue.waiting);
+    await gone(tester);
+  });
+
+  testWidgets('reduced motion settles when connection skips the connecting frame', (tester) async {
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final state = await show(tester, status: VpnStatus.stopped);
+    await show(tester, status: VpnStatus.connected, exitReady: true);
+    expect(state.debugCue, MapCue.settled);
+    await gone(tester);
+  });
+
   testWidgets('a server change waits, then flies, without restarting the approach', (tester) async {
     var state = await show(tester, status: VpnStatus.connected, exitReady: true);
     expect(state.debugCue, MapCue.settled);

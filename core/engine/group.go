@@ -48,13 +48,14 @@ type GroupStatus struct {
 
 // Group drives one sing-box selector.
 type Group struct {
-	e        *Engine
-	log      *slog.Logger
-	selector string
-	probeURL string
-	interval time.Duration
-	timeout  int
-	cands    []Candidate
+	e               *Engine
+	log             *slog.Logger
+	selector        string
+	probeURL        string
+	interval        time.Duration
+	timeout         int
+	cands           []Candidate
+	initialSelected string
 
 	probeMu  sync.Mutex // serializes probe rounds
 	selectMu sync.Mutex // serializes decide+PUT so manual and auto picks cannot interleave
@@ -70,16 +71,17 @@ type Group struct {
 
 func newGroup(e *Engine, cfg GroupConfig) *Group {
 	g := &Group{
-		e:        e,
-		log:      e.log.With("group", cfg.Selector),
-		selector: cfg.Selector,
-		probeURL: cfg.ProbeURL,
-		interval: time.Duration(cfg.IntervalSec) * time.Second,
-		timeout:  cfg.TimeoutMs,
-		cands:    cfg.Candidates,
-		auto:     cfg.Auto,
-		mode:     cfg.Mode,
-		stats:    make(map[string]*nodeStats, len(cfg.Candidates)),
+		e:               e,
+		log:             e.log.With("group", cfg.Selector),
+		selector:        cfg.Selector,
+		probeURL:        cfg.ProbeURL,
+		interval:        time.Duration(cfg.IntervalSec) * time.Second,
+		timeout:         cfg.TimeoutMs,
+		cands:           cfg.Candidates,
+		initialSelected: cfg.Selected,
+		auto:            cfg.Auto,
+		mode:            cfg.Mode,
+		stats:           make(map[string]*nodeStats, len(cfg.Candidates)),
 	}
 	for _, c := range cfg.Candidates {
 		g.stats[c.Tag] = &nodeStats{}
@@ -106,11 +108,26 @@ func (g *Group) run(ctx context.Context) {
 	}
 }
 
-// initCurrent reads the selector's current member, retrying briefly while
-// sing-box finishes starting.
+// initCurrent restores an explicit manual choice before attaching. sing-box
+// restores its own selector cache before considering the config's default;
+// a live A -> B switch can otherwise poison the next manual A session.
 func (g *Group) initCurrent(ctx context.Context) {
+	g.selectMu.Lock()
+	defer g.selectMu.Unlock()
 	for attempt := 0; attempt < 10; attempt++ {
+		g.mu.Lock()
+		auto, current := g.auto, g.current
+		g.mu.Unlock()
+		if current != "" {
+			return // A newer manual selection won the startup race.
+		}
 		now, err := g.e.clash.Now(ctx, g.selector)
+		if err == nil && !auto && g.initialSelected != "" && now != g.initialSelected {
+			err = g.e.clash.Select(ctx, g.selector, g.initialSelected)
+			if err == nil {
+				now = g.initialSelected
+			}
+		}
 		if err == nil {
 			g.mu.Lock()
 			g.current = now

@@ -78,9 +78,10 @@ void main() {
       await tester.tap(find.text('Серверы'));
       await tester.pump(const Duration(milliseconds: 16));
       final retargeted = _stack(tester).debugOffset;
-      expect(retargeted, lessThan(0), reason: 'now moving to a lower index');
-      expect(retargeted.abs(), lessThan(FadeIndexedStack.travel),
-          reason: 'progress is kept, not restarted from 10px');
+      expect(retargeted, greaterThan(0),
+          reason: 'reversing tabs must not teleport the visible page across zero');
+      expect(retargeted, lessThanOrEqualTo(midway),
+          reason: 'the page continues toward its resting position');
 
       await tester.pump(const Duration(milliseconds: 600));
       expect(_stack(tester).debugOffset, 0);

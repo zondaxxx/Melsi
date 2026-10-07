@@ -50,10 +50,13 @@ class FadeIndexedStackState extends State<FadeIndexedStack>
   void didUpdateWidget(FadeIndexedStack oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.index == widget.index) return;
-    _direction = widget.index > oldWidget.index ? 1 : -1;
     // A settled stack starts a fresh transition; a mid-flight one keeps its
-    // progress so the new page continues from the current offset and opacity.
-    if (!_c.isAnimating) _c.value = 0;
+    // direction as well as progress. Flipping the sign during a reversal
+    // would teleport the page across zero and reverse its velocity.
+    if (!_c.isAnimating) {
+      _direction = widget.index > oldWidget.index ? 1 : -1;
+      _c.value = 0;
+    }
     _reduce = context.reduceMotion;
     if (_reduce) {
       _c.animateTo(1, duration: const Duration(milliseconds: 160), curve: Curves.easeOut);

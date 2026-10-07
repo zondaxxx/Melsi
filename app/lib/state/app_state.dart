@@ -1127,11 +1127,6 @@ class AppState extends ChangeNotifier {
       notice('notice.addServerFirst', kind: NoticeKind.error);
       return;
     }
-    if (settings.core == VpnCore.xray && isMobilePlatform) {
-      _setVpn(const VpnState(VpnStatus.error, 'xray-mobile'));
-      notice('notice.xrayDesktopOnly', kind: NoticeKind.error);
-      return;
-    }
     final attempt = ++_connectAttempt;
     _setVpn(const VpnState(VpnStatus.connecting));
     try {

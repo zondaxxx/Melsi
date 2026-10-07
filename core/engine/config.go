@@ -41,6 +41,7 @@ type Config struct {
 type GroupConfig struct {
 	Selector    string      `json:"selector"`
 	Auto        bool        `json:"auto"`
+	Selected    string      `json:"selected,omitempty"`
 	Mode        Mode        `json:"mode"`
 	ProbeURL    string      `json:"probe_url"`
 	IntervalSec int         `json:"interval_sec"`
@@ -123,6 +124,9 @@ func (c *Config) normalize() error {
 			cands = append(cands, cand)
 		}
 		g.Candidates = cands
+		if g.Selected != "" && !tags[g.Selected] {
+			return fmt.Errorf("group %q: selected outbound %q is not a candidate", g.Selector, g.Selected)
+		}
 	}
 	return nil
 }

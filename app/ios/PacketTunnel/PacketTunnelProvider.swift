@@ -80,6 +80,22 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func startTunnel(options: [String: NSObject]?) async throws {
         Self.adoptSharedContainer(hint: options?["appGroup"] as? String)
+        clearLastError()
+        do {
+            try startTunnelService(options: options)
+        } catch {
+            // iOS need not call stopTunnel after a failed start. Release the
+            // listener and any partially started service before the next try.
+            let startupError = fail(error.localizedDescription)
+            stopEngine()
+            stopService()
+            commandServer?.close()
+            commandServer = nil
+            throw startupError
+        }
+    }
+
+    private func startTunnelService(options: [String: NSObject]?) throws {
         let fileManager = FileManager.default
         let sandboxDirectory = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         let commandDirectory = try TunnelConfiguration.commandBaseDirectory(
@@ -99,8 +115,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if let group = Self.activeAppGroup {
             os_log("shared app group %{public}@", log: Self.log, type: .default, group)
         }
-        clearLastError()
-
         let setupOptions = LibboxSetupOptions()
         setupOptions.basePath = basePath
         setupOptions.workingPath = workingPath
@@ -163,7 +177,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 try startService(payload)
                 return nil
             } catch {
-                return error.localizedDescription.data(using: .utf8)
+                return fail(error.localizedDescription).localizedDescription.data(using: .utf8)
             }
         }
         let message = String(data: messageData, encoding: .utf8) ?? ""
@@ -176,7 +190,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 try startService(payload)
                 return nil
             } catch {
-                return error.localizedDescription.data(using: .utf8)
+                return fail(error.localizedDescription).localizedDescription.data(using: .utf8)
             }
         case "version":
             return versionJSON().data(using: .utf8)
@@ -238,6 +252,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         } catch {
             throw fail("start service: \(error.localizedDescription)")
         }
+        clearLastError()
         if !payload.engine.isEmpty {
             var engineError: NSError?
             MelsicoreStartEngine(payload.engine, &engineError)
@@ -245,7 +260,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // The tunnel itself works without the engine (manual selection),
                 // so report but do not tear the VPN down.
                 writeMessage("(packet-tunnel) start engine: \(engineError.localizedDescription)")
-                saveLastError("engine: \(engineError.localizedDescription)")
             } else {
                 engineRunning = true
             }

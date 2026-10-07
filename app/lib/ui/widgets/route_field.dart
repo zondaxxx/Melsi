@@ -161,14 +161,27 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
       _begin(_Phase.idle);
       return;
     }
-    if (status == VpnStatus.error || widget.exitFailed || _timedOut) {
+    if (status == VpnStatus.connecting) {
+      _timedOut = false;
+      if (_phase == _Phase.idle || _phase == _Phase.failed || _phase == _Phase.retreat) {
+        _begin(_Phase.approach);
+      }
+      return;
+    }
+    // A lookup timeout describes the old result, not the live tunnel. A
+    // later successful lookup (or disabling it) must let the map recover.
+    if (widget.exitReady || widget.exitSkipped) _timedOut = false;
+    if (status == VpnStatus.error ||
+        (widget.exitFailed && !widget.exitReady && !widget.exitSkipped) ||
+        _timedOut) {
       if (_phase == _Phase.retreat || _phase == _Phase.failed) return;
       _begin(_Phase.retreat);
       return;
     }
-    if (status == VpnStatus.connecting) {
-      _timedOut = false;
-      if (_phase == _Phase.idle || _phase == _Phase.failed) _begin(_Phase.approach);
+    if ((_phase == _Phase.retreat || _phase == _Phase.failed) &&
+        (widget.exitReady || widget.exitSkipped)) {
+      _homeOnly = !widget.exitReady;
+      _begin(widget.exitReady ? _Phase.travel : _Phase.reveal);
       return;
     }
     if (_phase == _Phase.idle) {
@@ -267,13 +280,19 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
   void _begin(_Phase phase) {
     if (_reduce && phase != _Phase.idle) {
       _stopMotion();
-      if (phase == _Phase.travel ||
+      final connectedWithoutApproach = phase == _Phase.approach &&
+          widget.status == VpnStatus.connected &&
+          (widget.exitReady || widget.exitSkipped);
+      if (connectedWithoutApproach || phase == _Phase.travel ||
           phase == _Phase.spread ||
           phase == _Phase.reveal ||
           phase == _Phase.settled) {
         if (widget.exitReady) {
           _homeOnly = false;
           _latchLanded();
+        } else if (widget.exitSkipped) {
+          _homeOnly = true;
+          _clearFlight();
         }
         _phase = _Phase.settled;
       } else if (phase == _Phase.retreat || phase == _Phase.failed) {

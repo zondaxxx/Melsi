@@ -84,6 +84,7 @@ class PageScaffold extends StatelessWidget {
                     actions: actions,
                     topPadding: top,
                     hPad: h,
+                    textScale: math.max(1, MediaQuery.textScalerOf(context).scale(28) / 28),
                   ),
           ),
           for (final s in slivers)
@@ -104,6 +105,7 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
     required this.actions,
     required this.topPadding,
     required this.hPad,
+    required this.textScale,
   });
 
   final String title;
@@ -111,9 +113,10 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
   final List<Widget> actions;
   final double topPadding;
   final double hPad;
+  final double textScale;
 
   static const _bar = 48.0;
-  double get _large => subtitle == null ? 44.0 : 64.0;
+  double get _large => (subtitle == null ? 44.0 : 64.0) * textScale;
 
   @override
   double get minExtent => topPadding + _bar;
@@ -202,6 +205,7 @@ class _LargeTitleHeader extends SliverPersistentHeaderDelegate {
       old.actions != actions ||
       old.topPadding != topPadding ||
       old.hPad != hPad ||
+      old.textScale != textScale ||
       old.subtitle != subtitle;
 }
 
