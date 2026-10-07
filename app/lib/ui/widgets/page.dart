@@ -65,7 +65,7 @@ class PageScaffold extends StatelessWidget {
       final top = MediaQuery.paddingOf(context).top;
       return CustomScrollView(
         controller: controller,
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
         slivers: [
           SliverPersistentHeader(
             pinned: true,

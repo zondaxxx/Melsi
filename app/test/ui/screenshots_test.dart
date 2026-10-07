@@ -25,9 +25,10 @@ import 'fakes.dart';
 final _out = Platform.environment['MELSI_SHOTS'];
 
 Future<void> _loadFonts() async {
-  final interLoader = FontLoader('Inter')
-    ..addFont(rootBundle.load('assets/fonts/InterVariable.ttf'));
-  await interLoader.load();
+  final monoLoader = FontLoader('Liberation Mono')
+    ..addFont(rootBundle.load('assets/fonts/LiberationMono-Regular.ttf'))
+    ..addFont(rootBundle.load('assets/fonts/LiberationMono-Bold.ttf'));
+  await monoLoader.load();
   Future<void> family(String name, List<String> files) async {
     final loader = FontLoader(name);
     for (final f in files) {

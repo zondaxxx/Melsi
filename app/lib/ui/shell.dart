@@ -209,11 +209,11 @@ class _TabItem {
 }
 
 List<_TabItem> _items(L10n l) => [
-      _TabItem(AppTab.home, Icons.shield_outlined, Icons.shield_rounded, l('tab.home')),
-      _TabItem(AppTab.servers, Icons.dns_outlined, Icons.dns_rounded, l('tab.servers')),
-      _TabItem(AppTab.routing, Icons.alt_route_rounded, Icons.alt_route_rounded, l('tab.routing')),
-      _TabItem(AppTab.game, Icons.sports_esports_outlined, Icons.sports_esports_rounded, l('tab.game')),
-      _TabItem(AppTab.settings, Icons.tune_rounded, Icons.tune_rounded, l('tab.settings')),
+      _TabItem(AppTab.home, Icons.shield_outlined, Icons.shield_outlined, l('tab.home')),
+      _TabItem(AppTab.servers, Icons.dns_outlined, Icons.dns_outlined, l('tab.servers')),
+      _TabItem(AppTab.routing, Icons.alt_route, Icons.alt_route, l('tab.routing')),
+      _TabItem(AppTab.game, Icons.sports_esports_outlined, Icons.sports_esports_outlined, l('tab.game')),
+      _TabItem(AppTab.settings, Icons.tune, Icons.tune, l('tab.settings')),
     ];
 
 /// Flat tab bar: solid background, hairline on top, equal-width items. The
@@ -269,12 +269,8 @@ class _TabButton extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 160),
-            child: Icon(selected ? item.iconActive : item.icon,
-                key: ValueKey(selected), color: color, size: 22),
-          ),
-          const SizedBox(height: 3),
+          Icon(selected ? item.iconActive : item.icon, color: color, size: 20),
+          const SizedBox(height: 4),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2),
             child: FittedBox(
@@ -284,12 +280,14 @@ class _TabButton extends StatelessWidget {
                   softWrap: false,
                   style: context.t.caption.copyWith(
                       color: color,
-                      fontSize: 10.5,
-                      height: 1.15,
-                      letterSpacing: 0.1,
-                      fontWeight: FontWeight.w500)),
+                      fontSize: 10,
+                      height: 1.1,
+                      letterSpacing: 0.4,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w400)),
             ),
           ),
+          const SizedBox(height: 3),
+          Container(width: selected ? 12 : 0, height: 2, color: c.accent),
         ],
       ),
     );
@@ -370,7 +368,9 @@ class _SidebarItemState extends State<_SidebarItem> {
                 : hovered
                     ? c.fill
                     : Colors.transparent,
-            shape: Radii.shape(Radii.s + 1),
+            shape: Radii.shape(Radii.s, side: sel
+                ? BorderSide(color: c.accent, width: kHairline)
+                : BorderSide.none),
           ),
           child: Row(children: [
             Icon(sel ? widget.item.iconActive : widget.item.icon,

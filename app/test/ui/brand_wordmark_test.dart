@@ -14,14 +14,15 @@ Widget subject({bool glow = true, bool enabled = true}) => MaterialApp(
 );
 
 void main() {
-  testWidgets('hero uses bundled Inter and a finite glow', (tester) async {
+  testWidgets('hero uses bundled mono and a finite tracking settle', (tester) async {
     await tester.pumpWidget(subject());
     final initial = tester.widget<Text>(find.text('Melsi')).style!;
-    expect(initial.fontFamily, 'Inter');
+    expect(initial.fontFamily, 'Liberation Mono');
     expect(initial.fontSize, 80);
+    expect(initial.shadows, isNull);
     await tester.pump(const Duration(milliseconds: 1200));
-    final peak = tester.widget<Text>(find.text('Melsi')).style!;
-    expect(peak.shadows!.first.blurRadius, greaterThan(initial.shadows!.first.blurRadius));
+    final settled = tester.widget<Text>(find.text('Melsi')).style!;
+    expect(settled.letterSpacing, greaterThan(initial.letterSpacing!));
     await tester.pump(const Duration(milliseconds: 1500));
     expect(tester.binding.hasScheduledFrame, false);
     expect(tester.takeException(), isNull);

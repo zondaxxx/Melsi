@@ -63,7 +63,7 @@ class DashboardTools extends StatelessWidget {
                         ),
                         child: Column(
                           children: [
-                            Icon(action.$2, size: 24, color: context.c.accent),
+                            Icon(action.$2, size: 22, color: context.c.label),
                             const SizedBox(height: Space.s),
                             Text(
                               l('dashboard.${action.$1}'),
@@ -230,9 +230,11 @@ class HomeFavorites extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            Icons.star_rounded,
+                            Icons.star_border,
                             size: 16,
-                            color: context.c.accent,
+                            color: app.activeNode?.id == node.id
+                                ? context.c.accent
+                                : context.c.secondaryLabel,
                           ),
                           const SizedBox(width: Space.s),
                           Flexible(

@@ -88,9 +88,9 @@ class _Notice extends StatelessWidget {
         // content and must separate from a card edge it happens to cross.
         shadows: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: c.isDark ? 0.45 : 0.08),
-              blurRadius: 14,
-              offset: const Offset(0, 4)),
+              color: c.isDark ? const Color(0xFF000000) : const Color(0x33111111),
+              blurRadius: 0,
+              offset: const Offset(4, 4)),
         ],
       ),
       child: Padding(

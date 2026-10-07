@@ -474,7 +474,7 @@ class _GameChip extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(Space.m, 0, Space.m - 2, 0),
             decoration: ShapeDecoration(
               color: interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
-              shape: Radii.shape(Radii.s + 2,
+              shape: Radii.shape(Radii.s,
                   side: BorderSide(
                       color: selected ? c.accent.withValues(alpha: 0.4) : c.separator,
                       width: kHairline)),

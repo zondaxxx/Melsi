@@ -467,7 +467,7 @@ class CountryChip extends StatelessWidget {
           decoration: ShapeDecoration(
             color: interactiveSurface(c, selected ? c.fillStrong : c.surface,
                 hovered: hovered, pressed: pressed),
-            shape: Radii.shape(Radii.s + 1,
+            shape: Radii.shape(Radii.s,
                 side: BorderSide(color: c.separator, width: kHairline)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [

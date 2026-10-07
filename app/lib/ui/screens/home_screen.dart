@@ -12,6 +12,7 @@ import '../../services/engine_api.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
+import '../../state/features.dart';
 import '../../state/traffic.dart';
 import '../shell.dart';
 import '../slots/home_slots.dart';
@@ -24,6 +25,7 @@ import '../widgets/connect_button.dart';
 import '../widgets/dashboard_tools.dart';
 import '../widgets/format.dart';
 import '../widgets/page.dart';
+import '../widgets/route_field.dart';
 import '../widgets/segmented.dart';
 import 'add_sheet.dart';
 import 'server_switcher.dart';
@@ -45,7 +47,6 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.app;
     final l = context.l;
-    final c = context.c;
     final wide = context.isWide;
     // Same content column as every other page, so the headline's left edge
     // is the other tabs' title edge; on desktop the live column and the rail
@@ -71,43 +72,26 @@ class HomeScreen extends StatelessWidget {
             ]);
 
             final main = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              AnimatedContainer(
-                duration: Duration(milliseconds: context.reduceMotion ? 0 : 320),
-                padding: const EdgeInsets.all(Space.xl),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: c.separator),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [c.accent.withValues(alpha: connected ? 0.16 : 0.09), c.surface],
-                  ),
-                ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  Row(children: [
-                    Expanded(child: Overline(l('dashboard.eyebrow'))),
-                    Icon(connected ? Icons.shield_rounded : Icons.shield_outlined,
-                        color: c.accent, size: 26),
-                  ]),
-                  const SizedBox(height: Space.l),
-                  _Status(app: app),
-                  const SizedBox(height: Space.l),
-                  ConnectButton(
-                    status: status,
-                    height: wide ? 56 : 52,
-                    hasServer: hasServer,
-                    noServerLabel: app.nodes.isEmpty ? l('servers.add') : l('home.chooseServer'),
-                    onTap: hasServer
-                        ? app.toggle
-                        : () => app.nodes.isEmpty ? showAddSheet(context) : showServerSwitcher(context),
-                  ),
-                  HomeSlots.underButton(context, app),
-                  SectionHeader(l('home.server'),
-                      padding: const EdgeInsets.fromLTRB(Space.xs, Space.m, Space.xs, Space.s + 2)),
-                  _NodePanel(app: app),
-                  HomeSlots.connectionRoute(context, app),
-                ]),
+              _RouteStage(app: app, status: status, tall: twoColumn),
+              const SizedBox(height: Space.l),
+              Overline(l('dashboard.eyebrow')),
+              const SizedBox(height: Space.s),
+              _Status(app: app),
+              const SizedBox(height: Space.l),
+              ConnectButton(
+                status: status,
+                height: wide ? 64 : 60,
+                hasServer: hasServer,
+                noServerLabel: app.nodes.isEmpty ? l('servers.add') : l('home.chooseServer'),
+                onTap: hasServer
+                    ? app.toggle
+                    : () => app.nodes.isEmpty ? showAddSheet(context) : showServerSwitcher(context),
               ),
+              HomeSlots.underButton(context, app),
+              SectionHeader(l('home.server'),
+                  padding: const EdgeInsets.fromLTRB(Space.xs, Space.xl, Space.xs, Space.s + 2)),
+              _NodePanel(app: app),
+              HomeSlots.connectionRoute(context, app),
               const DashboardTools(),
               const HomeFavorites(),
               // Telemetry appears with the session (dashes while the tunnel
@@ -119,9 +103,9 @@ class HomeScreen extends StatelessWidget {
               ],
             ]);
 
-            Widget side({EdgeInsetsGeometry? firstHeaderPadding}) =>
+            Widget side({EdgeInsetsGeometry? firstHeaderPadding, bool alerts = true}) =>
                 Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  HomeSlots.railTop(context, app),
+                  if (alerts) HomeSlots.railTop(context, app),
                   SectionHeader(l('home.quick'), padding: firstHeaderPadding),
                   _QuickToggles(app: app),
                   SectionHeader(l('home.routing')),
@@ -139,22 +123,22 @@ class HomeScreen extends StatelessWidget {
               return Padding(
                 padding: const EdgeInsets.only(top: Space.m),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  // Warnings sit above the map on a phone so they stay in
+                  // the first screen. On a wide layout they stay in the rail.
+                  HomeSlots.railTop(context, app),
                   main,
                   HomeSlots.afterNodePanel(context, app),
-                  side(),
+                  side(alerts: false),
                   _Reveal(visible: session, child: DashboardDetails(child: traffic)),
                 ]),
               );
             }
-            // Wide: live column on the left (capped, left-aligned; button and
-            // cards share the cap), controls in a fixed rail on the right.
-            // The status row is centred on the line the other tabs' titles
-            // sit on, so the first line holds still on tab switch; the
-            // rail's first header trades its top margin for the offset that
-            // centres the 11px overline on the 30px status line.
+            // Wide: live column on the left (capped, left-aligned; the map,
+            // status and connect button share the cap), controls in a fixed
+            // rail on the right. The server stays in the live column, under
+            // the connect control.
             return Padding(
-              padding: const EdgeInsets.only(
-                  top: (PageScaffold.titleLine - _Status.lineHeight) / 2),
+              padding: const EdgeInsets.only(top: Space.s),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Align(
@@ -177,6 +161,31 @@ class HomeScreen extends StatelessWidget {
           }),
         ),
       ],
+    );
+  }
+}
+
+/// The map sits above the status. Origin comes from the last real-IP lookup
+/// when the feature service is in the tree.
+class _RouteStage extends StatelessWidget {
+  const _RouteStage({required this.app, required this.status, required this.tall});
+  final AppState app;
+  final VpnStatus status;
+  final bool tall;
+
+  @override
+  Widget build(BuildContext context) {
+    final net = FeaturesScope.maybeOf(context)?.netcheck;
+    Widget field(String? origin) => RouteField(
+          originCode: origin,
+          exitCode: app.activeNode?.countryCode,
+          status: status,
+          height: tall ? 248 : 196,
+        );
+    if (net == null) return field(null);
+    return ListenableBuilder(
+      listenable: net,
+      builder: (context, _) => field(net.realIp?.countryCode),
     );
   }
 }
@@ -219,9 +228,6 @@ class _Status extends StatelessWidget {
   static const double _dot = 10;
   static const double _gap = Space.m;
 
-  /// Height of the headline row (dot, status, timer).
-  static const double lineHeight = 30;
-
   @override
   Widget build(BuildContext context) {
     final l = context.l;
@@ -241,7 +247,7 @@ class _Status extends StatelessWidget {
       VpnStatus.stopped when app.nodes.isEmpty => l('home.addServerHint'),
       _ => null,
     };
-    final style = t.title1.copyWith(fontWeight: FontWeight.w700);
+    final style = t.monoDisplay.copyWith(fontSize: 28, height: 1.1);
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
@@ -428,7 +434,7 @@ class _NodePanel extends StatelessWidget {
                           LatencyChip(ms: lat, failed: failed, label: l('ping.timeout')),
                         ],
                         const SizedBox(width: Space.s),
-                        Icon(Icons.chevron_right_rounded, color: c.secondaryLabel, size: 20),
+                        Icon(Icons.chevron_right, color: c.secondaryLabel, size: 18),
                       ]),
               ),
               if (node != null && connected) ...[
