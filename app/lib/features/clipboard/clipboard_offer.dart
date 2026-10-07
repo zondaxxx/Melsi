@@ -216,7 +216,7 @@ class _AddButton extends StatelessWidget {
         height: 34,
         padding: const EdgeInsets.symmetric(horizontal: Space.l),
         alignment: Alignment.center,
-        decoration: ShapeDecoration(color: c.accent, shape: Radii.shape(Radii.m - 2)),
+        decoration: ShapeDecoration(color: c.accent, shape: Radii.shape(Radii.m)),
         child: Text(label,
             style: context.t.subhead.copyWith(color: c.onAccent, fontWeight: FontWeight.w600)),
       ),

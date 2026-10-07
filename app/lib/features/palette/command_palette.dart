@@ -392,7 +392,7 @@ class _Row extends StatelessWidget {
         child: DecoratedBox(
           decoration: ShapeDecoration(
             color: selected ? c.fill : Colors.transparent,
-            shape: Radii.shape(Radii.s + 1),
+            shape: Radii.shape(Radii.s),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: Space.m, vertical: Space.s + 2),

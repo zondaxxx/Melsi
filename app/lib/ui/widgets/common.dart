@@ -486,7 +486,7 @@ class PrimaryButton extends StatelessWidget {
         height: 44,
         padding: const EdgeInsets.symmetric(horizontal: Space.xl),
         decoration: ShapeDecoration(
-            color: live ? c.accent : c.fillStrong, shape: Radii.shape(Radii.m - 2)),
+            color: live ? c.accent : c.fillStrong, shape: Radii.shape(Radii.m)),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -529,7 +529,7 @@ class SecondaryButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: Space.l),
         decoration: ShapeDecoration(
           color: c.surface,
-          shape: Radii.shape(Radii.m - 2, side: BorderSide(color: c.separator, width: kHairline)),
+          shape: Radii.shape(Radii.m, side: BorderSide(color: c.separator, width: kHairline)),
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
@@ -587,7 +587,7 @@ class ToolButton extends StatelessWidget {
             height: size,
             decoration: ShapeDecoration(
               color: interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
-              shape: Radii.shape(Radii.s + 1,
+              shape: Radii.shape(Radii.s,
                   side: BorderSide(color: c.separator, width: kHairline)),
             ),
             child: busy

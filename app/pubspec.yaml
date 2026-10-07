@@ -31,9 +31,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   fonts:
-    - family: Inter
+    - family: Liberation Mono
       fonts:
-        - asset: assets/fonts/InterVariable.ttf
+        - asset: assets/fonts/LiberationMono-Regular.ttf
+        - asset: assets/fonts/LiberationMono-Bold.ttf
+          weight: 700
   assets:
     - assets/fonts/OFL.txt
     - assets/rulesets/

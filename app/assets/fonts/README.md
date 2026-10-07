@@ -1,6 +1,9 @@
-# Inter
+# Liberation Mono
 
-Unmodified Inter Variable with Latin and Cyrillic glyphs, bundled for consistent
-offline typography on every platform. License: SIL OFL 1.1, see `OFL.txt`.
+Unmodified Liberation Mono (Regular and Bold) with Latin and Cyrillic glyphs.
+It is metric-compatible with Courier New, so the interface stays monospace
+and offline on every platform. License: SIL OFL 1.1, see `OFL.txt`.
 
-Source: https://github.com/rsms/inter/blob/353b61b9f4430d5f420d56605a6e7993e0941470/docs/font-files/InterVariable.ttf
+Reserved font name: Liberation. These files are unmodified.
+
+Source: https://github.com/liberationfonts/liberation-fonts

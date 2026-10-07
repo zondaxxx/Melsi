@@ -1,10 +1,11 @@
 // Melsi design tokens: colour, spacing, radii, typography.
 //
-// The visual system is an instrument, not a landing page: a warm-neutral
-// monochrome base, one accent (brand violet) reserved for the primary action
-// and selection, and colour otherwise carrying meaning only — green for
-// "connected / good", amber and red for "degraded / bad", always as small
-// indicators and text. Hierarchy comes from type and hairlines.
+// The visual system is a sharp instrument: pure-black AMOLED in dark, a cool
+// graphite paper in light, Courier-like monospace throughout, and square
+// geometry. One accent (brand violet) is reserved for the primary action and
+// selection. Green, amber and red carry meaning only — connected, degraded,
+// failed — as small indicators and text. Hierarchy comes from type size and
+// hairlines, not shadows or rounded cards.
 //
 // Everything visual in the app reads from here (via `context.c` / `context.t`)
 // so light/dark and high-contrast variants stay consistent.
@@ -29,14 +30,14 @@ abstract final class Space {
   static const double gutterWide = 32;
 }
 
-/// Corner radii: moderate and consistent. Panels and buttons share [m];
-/// small controls (tags, code boxes) use [xs]/[s]; sheets use [l].
+/// Corner radii. Square by default: panels, buttons, sheets and tags share
+/// a hard edge. [pill] is kept only so older call sites stay rectangular.
 abstract final class Radii {
-  static const double xs = 4;
-  static const double s = 6;
-  static const double m = 10;
-  static const double l = 14;
-  static const double pill = 999;
+  static const double xs = 0;
+  static const double s = 0;
+  static const double m = 0;
+  static const double l = 0;
+  static const double pill = 0;
 
   static OutlinedBorder shape(double r, {BorderSide side = BorderSide.none}) =>
       RoundedRectangleBorder(borderRadius: BorderRadius.circular(r), side: side);
@@ -69,7 +70,7 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
 
   final Brightness brightness;
 
-  /// Page background (paper in light, warm near-black in dark).
+  /// Page background (graphite paper in light, pure black in dark).
   final Color background;
 
   /// Panels / grouped rows — the single "card" level.
@@ -113,38 +114,38 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
 
   static const light = MelsiColors(
     brightness: Brightness.light,
-    background: Color(0xFFF4F2EF),
-    surface: Color(0xFFFFFFFF),
+    background: Color(0xFFECECEC),
+    surface: Color(0xFFF7F7F7),
     surfaceRaised: Color(0xFFFFFFFF),
-    fill: Color(0x0D1B1A17),
-    fillStrong: Color(0x1A1B1A17),
-    label: Color(0xFF1B1A17),
-    secondaryLabel: Color(0x9E1B1A17),
-    tertiaryLabel: Color(0x661B1A17),
-    separator: Color(0x1F1B1A17),
+    fill: Color(0x0F111111),
+    fillStrong: Color(0x1A111111),
+    label: Color(0xFF111111),
+    secondaryLabel: Color(0xFF5E5E5E),
+    tertiaryLabel: Color(0xFF8A8A8A),
+    separator: Color(0xFFCFCFCF),
     accent: Color(0xFF7053E8),
     onAccent: Color(0xFFFFFFFF),
-    success: Color(0xFF1E8A4E),
-    warning: Color(0xFF9A6B00),
-    danger: Color(0xFFC0392B),
+    success: Color(0xFF147A3E),
+    warning: Color(0xFF8A5A00),
+    danger: Color(0xFFC62828),
   );
 
   static const dark = MelsiColors(
     brightness: Brightness.dark,
-    background: Color(0xFF141312),
-    surface: Color(0xFF1C1B19),
-    surfaceRaised: Color(0xFF242220),
-    fill: Color(0x12ECE8E1),
-    fillStrong: Color(0x22ECE8E1),
-    label: Color(0xFFECE8E1),
-    secondaryLabel: Color(0xA3ECE8E1),
-    tertiaryLabel: Color(0x66ECE8E1),
-    separator: Color(0x1FECE8E1),
+    background: Color(0xFF000000),
+    surface: Color(0xFF070707),
+    surfaceRaised: Color(0xFF101010),
+    fill: Color(0xFF121212),
+    fillStrong: Color(0xFF1C1C1C),
+    label: Color(0xFFF4F4F4),
+    secondaryLabel: Color(0xFF9A9A9A),
+    tertiaryLabel: Color(0xFF6A6A6A),
+    separator: Color(0xFF2A2A2A),
     accent: Color(0xFF7053E8),
     onAccent: Color(0xFFFFFFFF),
-    success: Color(0xFF4CC272),
-    warning: Color(0xFFE0B23E),
-    danger: Color(0xFFEE6A5C),
+    success: Color(0xFF3DDC97),
+    warning: Color(0xFFE6B450),
+    danger: Color(0xFFFF4D4D),
   );
 
   @override
@@ -174,17 +175,18 @@ class MelsiColors extends ThemeExtension<MelsiColors> {
   }
 }
 
-/// Monospaced family for metrics (latency, speeds, timer, codes). The name
-/// resolves to the platform monospace where one is registered; the fallback
-/// list covers iOS/macOS/Windows/Linux system fonts.
-const String kMonoFamily = 'monospace';
+/// Bundled Courier-metric family. Cyrillic is in the font files, so Russian
+/// and English render the same offline. Fallbacks cover a machine that has
+/// not registered the asset yet (tests, first frame).
+const String kUiFamily = 'Liberation Mono';
+const String kMonoFamily = kUiFamily;
 const List<String> kMonoFallback = [
+  'Courier New',
+  'Courier',
+  'monospace',
   'Menlo',
-  'SF Mono',
-  'Roboto Mono',
   'Consolas',
   'DejaVu Sans Mono',
-  'Liberation Mono',
 ];
 
 /// Type ramp with size-specific tracking: negative for large sizes, ~0 for
@@ -202,7 +204,8 @@ class MelsiType extends ThemeExtension<MelsiType> {
 
   TextStyle _s(double size, FontWeight w, double tracking, double height) =>
       TextStyle(
-        fontFamily: 'Inter',
+        fontFamily: kUiFamily,
+        fontFamilyFallback: kMonoFallback,
         fontSize: size,
         fontWeight: w,
         letterSpacing: tracking,
@@ -218,34 +221,32 @@ class MelsiType extends ThemeExtension<MelsiType> {
         fontFamilyFallback: kMonoFallback,
       );
 
-  /// Page titles.
-  TextStyle get title1 => _s(28, FontWeight.w600, -0.7, 1.15);
-  TextStyle get title2 => _s(22, FontWeight.w600, -0.45, 1.2);
-  TextStyle get title3 => _s(18, FontWeight.w600, -0.3, 1.25);
+  /// Page titles. Only regular and bold are bundled, so emphasis is w700.
+  TextStyle get title1 => _s(28, FontWeight.w700, -0.6, 1.12);
+  TextStyle get title2 => _s(22, FontWeight.w700, -0.4, 1.15);
+  TextStyle get title3 => _s(18, FontWeight.w700, -0.3, 1.2);
 
   /// Row titles that need emphasis, panel titles.
-  TextStyle get headline => _s(16, FontWeight.w600, -0.2, 1.3);
-  TextStyle get body => _s(15, FontWeight.w400, 0, 1.4);
-  TextStyle get callout => _s(14, FontWeight.w400, 0, 1.4);
-  TextStyle get subhead => _s(14, FontWeight.w500, -0.05, 1.36);
+  TextStyle get headline => _s(15, FontWeight.w700, 0, 1.25);
+  TextStyle get body => _s(14, FontWeight.w400, 0, 1.35);
+  TextStyle get callout => _s(13, FontWeight.w400, 0, 1.35);
+  TextStyle get subhead => _s(13, FontWeight.w700, 0, 1.3);
   TextStyle get footnote =>
-      _s(13, FontWeight.w400, 0, 1.38).copyWith(color: secondary);
+      _s(12, FontWeight.w400, 0, 1.35).copyWith(color: secondary);
   TextStyle get caption =>
-      _s(12, FontWeight.w500, 0.05, 1.33).copyWith(color: secondary);
+      _s(11, FontWeight.w400, 0.4, 1.3).copyWith(color: secondary);
 
   /// Small uppercase tracked label (section headers, metric labels). Apply
   /// `.toUpperCase()` to the string; the style only sets the tracking.
   TextStyle get overline =>
-      _s(11, FontWeight.w600, 0.8, 1.2).copyWith(color: secondary);
+      _s(10, FontWeight.w700, 1.4, 1.2).copyWith(color: secondary);
 
-  /// Metrics: monospaced, tabular. [mono] for inline values, [monoSmall]
-  /// for codes and protocol tags, [monoLarge] for the headline number of a
-  /// panel (latency, speed).
-  TextStyle get mono => _s(13, FontWeight.w500, 0, 1.3);
+  /// Metrics. The whole UI is monospace; these sizes are the numeric ramp.
+  TextStyle get mono => _m(13, FontWeight.w400, 0, 1.3);
   TextStyle get monoSmall =>
-      _m(11, FontWeight.w500, 0.4, 1.2).copyWith(color: secondary);
-  TextStyle get monoLarge => _s(22, FontWeight.w500, -0.6, 1.1);
-  TextStyle get monoDisplay => _s(34, FontWeight.w500, -1.2, 1.05);
+      _m(11, FontWeight.w400, 0.4, 1.2).copyWith(color: secondary);
+  TextStyle get monoLarge => _m(22, FontWeight.w700, -0.4, 1.1);
+  TextStyle get monoDisplay => _m(34, FontWeight.w700, -0.8, 1.05);
 
   @override
   MelsiType copyWith() => this;

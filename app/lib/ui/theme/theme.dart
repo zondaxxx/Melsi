@@ -25,7 +25,8 @@ ThemeData buildTheme(Brightness brightness) {
 
   return ThemeData(
     useMaterial3: true,
-    fontFamily: 'Inter',
+    fontFamily: kUiFamily,
+    fontFamilyFallback: kMonoFallback,
     brightness: brightness,
     colorScheme: scheme,
     scaffoldBackgroundColor: c.background,
@@ -77,15 +78,15 @@ ThemeData buildTheme(Brightness brightness) {
       hintStyle: t.body.copyWith(color: c.tertiaryLabel),
       labelStyle: t.callout.copyWith(color: c.secondaryLabel),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(Radii.m - 2),
+        borderRadius: BorderRadius.circular(Radii.m),
         borderSide: BorderSide(color: c.separator, width: kHairline),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(Radii.m - 2),
+        borderRadius: BorderRadius.circular(Radii.m),
         borderSide: BorderSide(color: c.separator, width: kHairline),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(Radii.m - 2),
+        borderRadius: BorderRadius.circular(Radii.m),
         borderSide: BorderSide(color: c.accent, width: 1.5),
       ),
     ),

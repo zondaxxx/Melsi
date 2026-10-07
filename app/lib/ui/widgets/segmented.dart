@@ -100,7 +100,7 @@ class _SegmentedState<T> extends State<Segmented<T>>
               padding: const EdgeInsets.all(pad),
               decoration: ShapeDecoration(
                 color: c.fill,
-                shape: Radii.shape(Radii.m - 2,
+                shape: Radii.shape(Radii.m,
                     side: BorderSide(color: c.separator, width: kHairline)),
               ),
               child: Stack(

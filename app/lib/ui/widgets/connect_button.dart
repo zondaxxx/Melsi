@@ -6,24 +6,21 @@ import '../../services/vpn_controller.dart';
 import '../theme/pressable.dart';
 import '../theme/theme.dart';
 
-/// The connect control: a wide, tactile button whose label and colour state
-/// the action.
+/// The one connect control: a hard rectangle whose fill and label state the
+/// action. It does not scale on press.
 ///
 /// * Idle: solid accent, "Подключиться".
 /// * Connecting / stopping: neutral, a small spinner, the action is "Отмена".
-/// * Connected: neutral with a visible 1px stroke (30% label, both themes,
-///   so it reads as a control rather than another card), "Отключить".
+/// * Connected: neutral with a 1px label stroke, "Отключить".
 /// * Error: neutral with a red hairline, "Подключиться" (retry).
 /// * No server ([hasServer] false): still the accent — it is the one
 ///   primary action of an empty Home, "Добавить сервер" / "Выбрать сервер",
 ///   and [onTap] opens the add flow or the switcher (the caller decides).
 ///
-/// 52px on phones, 56px on wide layouts; the caller constrains the width
-/// (full column on phones, the live column on desktop).
+/// 60px on phones, 64px on wide layouts; the caller constrains the width.
 ///
-/// Presses down instantly (spring scale) and fires a haptic on commit; colour
-/// springs between states. A medium haptic confirms the connection, a heavy
-/// one an error. Reduced motion: state changes cross-fade.
+/// Colour moves between states. A medium haptic confirms the connection, a
+/// heavy one an error. Reduced motion: state changes cross-fade.
 class ConnectButton extends StatefulWidget {
   const ConnectButton({
     super.key,
@@ -31,7 +28,7 @@ class ConnectButton extends StatefulWidget {
     required this.onTap,
     this.hasServer = true,
     this.noServerLabel,
-    this.height = 52,
+    this.height = 60,
   });
 
   final VpnStatus status;
@@ -100,7 +97,7 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
     final enabled = s != VpnStatus.stopping;
 
     return PressableScale(
-      scale: 0.985,
+      scale: 1,
       haptic: false,
       enabled: enabled,
       onTap: () {
@@ -125,9 +122,9 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
             return Container(
               height: widget.height,
               alignment: Alignment.center,
-              decoration: ShapeDecoration(
+              decoration: BoxDecoration(
                 color: bg,
-                shape: Radii.shape(Radii.m, side: BorderSide(color: edge, width: kHairline)),
+                border: Border.all(color: edge, width: kHairline),
               ),
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
@@ -140,11 +137,13 @@ class _ConnectButtonState extends State<ConnectButton> with SingleTickerProvider
                       CupertinoActivityIndicator(radius: 7, color: fg),
                       const SizedBox(width: Space.s + 2),
                     ],
-                    Flexible(child: Text(label,
+                    Flexible(child: Text(label.toUpperCase(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: context.t.headline.copyWith(
-                            color: fg.withValues(alpha: enabled ? 1 : 0.5), fontSize: 15))),
+                            color: fg.withValues(alpha: enabled ? 1 : 0.5),
+                            fontSize: 14,
+                            letterSpacing: 1.2))),
                   ],
                 ),
               ),

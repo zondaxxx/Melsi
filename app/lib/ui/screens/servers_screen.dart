@@ -414,7 +414,7 @@ class _FilterChip<T> extends StatelessWidget {
           alignment: Alignment.center,
           decoration: ShapeDecoration(
             color: interactiveSurface(c, c.surface, hovered: hovered, pressed: pressed),
-            shape: Radii.shape(Radii.s + 1,
+            shape: Radii.shape(Radii.s,
                 side: BorderSide(color: active ? c.accent : c.separator, width: kHairline)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -450,7 +450,7 @@ class _ActionChip extends StatelessWidget {
           decoration: ShapeDecoration(
               color: interactiveSurface(c, Color.alphaBlend(c.fill, c.background),
                   hovered: hovered, pressed: pressed),
-              shape: Radii.shape(Radii.s + 1, side: BorderSide(color: c.separator, width: kHairline))),
+              shape: Radii.shape(Radii.s, side: BorderSide(color: c.separator, width: kHairline))),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 14, color: c.secondaryLabel),
             const SizedBox(width: 4),

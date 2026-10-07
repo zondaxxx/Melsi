@@ -1,4 +1,8 @@
-Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+Digitized data copyright (c) 2010 Google Corporation
+with Reserved Font Arimo, Tinos and Cousine.
+Copyright (c) 2012 Red Hat, Inc.
+with Reserved Font Name Liberation.
+Source: https://github.com/liberationfonts/liberation-fonts
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
