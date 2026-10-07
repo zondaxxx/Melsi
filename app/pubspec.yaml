@@ -2,7 +2,7 @@ name: melsi
 description: "Melsi — a fast, beautiful cross-platform VPN client on sing-box."
 publish_to: 'none'
 
-version: 1.1.3+6
+version: 1.1.4+7
 
 environment:
   sdk: ^3.13.4
