@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../../core/models.dart';
-import '../../features/netcheck/ip_geo.dart';
 import '../../core/game_presets.dart';
 import '../../features/doctor/doctor_widgets.dart';
 import '../../features/motion/rolling_number.dart';
@@ -168,89 +166,50 @@ class HomeScreen extends StatelessWidget {
 }
 
 /// The map sits above the status. Origin is the last real (pre-VPN) IP.
-/// A numeric server address is resolved once so the camera can land on the
-/// exit point; a hostname falls back to the server's country.
-class _RouteStage extends StatefulWidget {
+/// The flight waits for the post-VPN exit lookup and lands on that country,
+/// which can differ from the server address in the subscription.
+class _RouteStage extends StatelessWidget {
   const _RouteStage({required this.app, required this.status, required this.tall});
   final AppState app;
   final VpnStatus status;
   final bool tall;
 
   @override
-  State<_RouteStage> createState() => _RouteStageState();
-}
-
-class _RouteStageState extends State<_RouteStage> {
-  static final _points = <String, IpInfo>{};
-  String? _asked;
-  IpInfo? _server;
-  bool _ready = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_ready) return;
-    _ready = true;
-    _resolve();
-  }
-
-  @override
-  void didUpdateWidget(_RouteStage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.app.activeNode?.id != widget.app.activeNode?.id) _resolve();
-  }
-
-  void _resolve() {
-    final node = widget.app.activeNode;
-    final host = node?.server ?? '';
-    if (node == null || InternetAddress.tryParse(host) == null) {
-      _asked = node?.id;
-      _server = null;
-      return;
-    }
-    final cached = _points[host];
-    if (cached != null) {
-      _asked = node.id;
-      _server = cached;
-      return;
-    }
-    if (_asked == node.id) return;
-    _asked = node.id;
-    final features = FeaturesScope.maybeOf(context);
-    if (features == null) return;
-    final id = node.id;
-    unawaited(() async {
-      try {
-        final info = await IpGeoClient(
-          client: features.httpClient,
-          providers: [Uri.parse('https://ipwho.is/$host')],
-        ).lookup();
-        _points[host] = info;
-        if (!mounted || widget.app.activeNode?.id != id) return;
-        setState(() => _server = info);
-      } catch (_) {}
-    }());
-  }
-
-  @override
   Widget build(BuildContext context) {
     final net = FeaturesScope.maybeOf(context)?.netcheck;
-    Widget field(IpInfo? origin) => RouteField(
-          originCode: origin?.countryCode,
-          originLat: origin?.latitude,
-          originLon: origin?.longitude,
-          exitCode: _server?.countryCode ?? widget.app.activeNode?.countryCode,
-          exitLat: _server?.latitude,
-          exitLon: _server?.longitude,
-          status: widget.status,
-          height: widget.tall ? 248 : 196,
-        );
-    if (net == null) return field(null);
+    final height = tall ? 248.0 : 196.0;
+    if (net == null) {
+      return RouteField(status: status, height: height, exitSkipped: true);
+    }
     return ListenableBuilder(
       listenable: net,
-      builder: (context, _) => field(net.realIp),
+      builder: (context, _) {
+        final exit = net.exitIp;
+        final connected = status == VpnStatus.connected;
+        final ready = connected && _located(exit);
+        return RouteField(
+          originCode: net.realIp?.countryCode,
+          originLat: net.realIp?.latitude,
+          originLon: net.realIp?.longitude,
+          exitCode: ready ? exit?.countryCode : null,
+          exitLat: ready ? exit?.latitude : null,
+          exitLon: ready ? exit?.longitude : null,
+          exitReady: ready,
+          exitFailed: connected && net.error && exit == null,
+          exitSkipped: !app.settings.ipCheck,
+          status: status,
+          height: height,
+        );
+      },
     );
   }
+}
+
+bool _located(IpInfo? info) {
+  if (info == null) return false;
+  final code = info.countryCode?.trim();
+  if (code != null && code.length == 2) return true;
+  return info.latitude != null && info.longitude != null;
 }
 
 /// Springs a block open/closed (height + fade) as it becomes relevant.

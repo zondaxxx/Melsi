@@ -142,13 +142,17 @@ class NetCheckService extends FeatureService {
     return LeakVerdict.ok;
   }
 
-  /// iOS shows a system indicator for background network use, so there the
-  /// lookup runs only when the user asks. `defaultTargetPlatform` (not
-  /// dart:io) so tests can override it.
+  /// iOS shows a system indicator for background network use, so idle
+  /// lookups run only when the user asks. A connect is the user's action:
+  /// the map needs the exit country, and that request goes through the
+  /// tunnel. `defaultTargetPlatform` (not dart:io) so tests can override it.
   bool get isIOS => defaultTargetPlatform == TargetPlatform.iOS;
 
-  /// Whether a lookup may start on its own (load, connect, resume …).
+  /// Whether a lookup may start on its own while disconnected (load, resume).
   bool get autoAllowed => app.settings.ipCheck && !isIOS;
+
+  /// Exit lookup after connect or a server change. Allowed on iOS.
+  bool get exitProbeAllowed => app.settings.ipCheck;
 
   // ---------------------------------------------------------------- lifecycle
 
@@ -242,7 +246,7 @@ class NetCheckService extends FeatureService {
       _switchSeen = null;
       _nodeSeen = app.activeNode?.id;
       _notify();
-      if (autoAllowed) _connectTimer = Timer(connectDelay, () => refresh());
+      if (exitProbeAllowed) _connectTimer = Timer(connectDelay, () => refresh());
       return;
     }
     // A session ended (a failed connect never had an exit to re-read).
@@ -271,6 +275,14 @@ class NetCheckService extends FeatureService {
     final nodeChanged = nodeId != _nodeSeen;
     final at = app.proxyGroup?.lastSwitch?.at;
     if (!nodeChanged && (at == null || at == _switchSeen)) return;
+    // Importing a server while disconnected leaves [_nodeSeen] stale, so the
+    // first connected notification looks like a switch. [onVpn] owns that
+    // lookup and waits until the tunnel can answer.
+    if (_connectedAt == null) {
+      _nodeSeen = nodeId;
+      if (at != null) _switchSeen = at;
+      return;
+    }
     final first = _switchSeen == null;
     _switchSeen = at;
     _nodeSeen = nodeId;
@@ -286,7 +298,7 @@ class NetCheckService extends FeatureService {
     final since = _connectedAt == null ? null : now().difference(_connectedAt!);
     if (!nodeChanged && first && since != null && since < connectDelay * 2) return;
     final last = _lastRefresh;
-    if (!autoAllowed) return;
+    if (!exitProbeAllowed) return;
     _connectTimer?.cancel();
     final remaining = last == null ? Duration.zero : switchMinGap - now().difference(last);
     if (remaining > Duration.zero) {
@@ -324,16 +336,19 @@ class NetCheckService extends FeatureService {
 
   /// Looks the public IP up and files it as the real IP or the exit,
   /// depending on the tunnel state when the lookup started. Automatic
-  /// callers respect the setting and the iOS rule; a user tap ([manual])
-  /// only needs the panel to exist.
+  /// callers respect the setting. Idle lookups also skip iOS; a connected
+  /// lookup does not, because the map needs the exit country. A user tap
+  /// ([manual]) only needs the panel to exist.
   Future<void> refresh({bool manual = false}) async {
     if (_disposed) return;
-    if (!manual && !autoAllowed) return;
+    final exit = app.connected;
+    // Idle lookups stay off on iOS. A connected lookup is the exit probe the
+    // map waits on, so it runs there too.
+    if (!manual && !(exit ? exitProbeAllowed : autoAllowed)) return;
     if (checking) {
       _queued = true;
       return;
     }
-    final exit = app.connected;
     final generation = _lookupGeneration;
     final nodeId = app.activeNode?.id;
     checking = true;

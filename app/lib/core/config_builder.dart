@@ -103,6 +103,10 @@ class ConfigBuilder {
     'http', 'socks', 'ssh', 'snell',
   };
 
+  /// sing-box multiplex exists on these four. Vision, REALITY, and every
+  /// other protocol are left alone even when the setting is on.
+  static const _muxTypes = {'shadowsocks', 'vmess', 'vless', 'trojan'};
+
   static BuiltConfig build({
     required List<ProxyNode> nodes,
     required String? selectedNodeId,
@@ -213,7 +217,8 @@ class ConfigBuilder {
           !settings.memorySaver &&
           !n.protocol.isEndpoint &&
           !CompatibilityCore.needsMihomo(ob) &&
-          _tcpTypes.contains(ob['type'])) {
+          !CompatibilityCore.realityOrVision(ob) &&
+          _muxTypes.contains(ob['type'])) {
         ob['multiplex'] = {
           'enabled': true,
           'protocol': 'h2mux',
