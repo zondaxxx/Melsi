@@ -47,8 +47,8 @@ abstract class VpnController {
   /// Core version string(s) for the About screen, if known.
   Future<String?> coreVersion() async => null;
 
-  /// Tail of the core log (desktop). Mobile returns null (logs come from the
-  /// Clash API stream instead).
+  /// Saved diagnostics: desktop core log, or the iOS tunnel lifecycle journal.
+  /// Returns null when the platform has no persisted log.
   Future<String?> readLog({int maxLines = 400}) async => null;
 
   void dispose() {}

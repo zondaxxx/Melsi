@@ -3,6 +3,89 @@ import XCTest
 import Darwin
 
 final class TunnelConfigurationTests: XCTestCase {
+    func testRecoveryPolicyRejectsOutdatedStartAndPreservesManualStop() {
+        XCTAssertTrue(TunnelConfiguration.mayUpdateOnDemand(enabling: true, requestedAttempt: 1, currentAttempt: 1, userStopped: false))
+        XCTAssertFalse(TunnelConfiguration.mayUpdateOnDemand(enabling: true, requestedAttempt: 1, currentAttempt: 2, userStopped: false))
+        XCTAssertFalse(TunnelConfiguration.mayUpdateOnDemand(enabling: true, requestedAttempt: 1, currentAttempt: 1, userStopped: true))
+        XCTAssertTrue(TunnelConfiguration.mayUpdateOnDemand(enabling: false, requestedAttempt: 2, currentAttempt: 2, userStopped: true))
+        XCTAssertFalse(TunnelConfiguration.mayUpdateOnDemand(enabling: false, requestedAttempt: 2, currentAttempt: 3, userStopped: false))
+    }
+
+    func testPreferenceQueueSerializesSuspendedSavesAndRecoversAfterFailure() {
+        let finished = expectation(description: "queued preference updates")
+        let queue = TunnelPreferenceQueue()
+        var events: [String] = []
+        Task { @MainActor in
+            try? await queue.perform {
+                events.append("save started")
+                try await Task.sleep(nanoseconds: 30_000_000)
+                events.append("save failed")
+                throw NSError(domain: "test", code: 1)
+            }
+        }
+        Task { @MainActor in
+            try? await queue.perform { events.append("stop saved") }
+        }
+        Task { @MainActor in
+            try? await queue.perform { events.append("status loaded") }
+            XCTAssertEqual(events, ["save started", "save failed", "stop saved", "status loaded"])
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 3)
+    }
+
+    func testDiagnosticLogIsBoundedAndIncludesPersistedFailure() {
+        XCTAssertEqual(TunnelConfiguration.diagnosticLog(journal: "start\nhealth\n", stop: "device sleep", error: "core failed", maxLines: 3),
+            "health\n[last stop] device sleep\n[last error] core failed")
+        XCTAssertEqual(TunnelConfiguration.diagnosticLog(journal: "start\nhealth", stop: nil, error: " \n", maxLines: 0), "health")
+        let many = (0 ..< 450).map(String.init).joined(separator: "\n")
+        XCTAssertEqual(TunnelConfiguration.diagnosticLog(journal: many, stop: nil, error: nil, maxLines: 999).split(separator: "\n").count, 400)
+        XCTAssertEqual(TunnelConfiguration.diagnosticLog(journal: nil, stop: nil, error: nil, maxLines: 200), "")
+    }
+
+    func testLifecycleJournalPersistsBoundedHistoryAndStopReason() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for index in 0 ..< 70 {
+            try TunnelConfiguration.recordTunnelEvent("event-\(index)", in: directory, date: Date(timeIntervalSince1970: Double(index)))
+        }
+        try TunnelConfiguration.recordTunnelEvent("stopped", in: directory, stopReason: 15,
+            memoryBytes: 32 * 1024 * 1024, date: Date(timeIntervalSince1970: 70))
+        let text = try String(contentsOf: directory.appendingPathComponent("tunnel_lifecycle.jsonl"), encoding: .utf8)
+        let lines = text.split(separator: "\n")
+        XCTAssertEqual(lines.count, TunnelConfiguration.lifecycleHistoryLimit)
+        XCTAssertFalse(text.contains("\"event-0\""))
+        XCTAssertTrue(text.contains("\"event-69\""))
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("last_stop.txt"), encoding: .utf8),
+            "VPN stopped: device sleep (15).")
+        XCTAssertEqual(TunnelConfiguration.lifecycleSummary(text),
+            "Last tunnel event: stopped at 1970-01-01T00:01:10Z; memory 32.0 MiB.")
+    }
+
+    func testLifecycleSummaryNeverInventsTerminationCause() throws {
+        XCTAssertNil(TunnelConfiguration.lifecycleSummary(nil))
+        XCTAssertNil(TunnelConfiguration.lifecycleSummary("not json"))
+        XCTAssertEqual(TunnelConfiguration.lifecycleSummary("{\"event\":\"sleep\",\"at\":\"2026-10-08T00:00:00Z\"}\n"),
+            "Last tunnel event: sleep at 2026-10-08T00:00:00Z.")
+        XCTAssertEqual(TunnelConfiguration.stopReasonMessage(999), "VPN stopped: unknown system reason (999).")
+        XCTAssertEqual(TunnelConfiguration.stopReasonMessage(11), "VPN stopped: another VPN started (11).")
+    }
+
+    func testResumeRecognizesMissingStopAndSystemFailureWithoutFlaggingUserStop() {
+        XCTAssertTrue(TunnelConfiguration.hasUnreportedTunnelStop("{\"event\":\"health\"}"))
+        XCTAssertTrue(TunnelConfiguration.hasUnreportedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":2}"))
+        XCTAssertTrue(TunnelConfiguration.hasUnreportedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":15}"))
+        XCTAssertFalse(TunnelConfiguration.hasUnreportedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":1}"))
+        XCTAssertFalse(TunnelConfiguration.hasUnreportedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":11}"))
+        XCTAssertFalse(TunnelConfiguration.hasUnreportedTunnelStop("{\"event\":\"start_failed\"}"))
+        XCTAssertFalse(TunnelConfiguration.hasUnreportedTunnelStop(nil))
+        XCTAssertTrue(TunnelConfiguration.isExpectedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":1}"))
+        XCTAssertTrue(TunnelConfiguration.isExpectedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":11}"))
+        XCTAssertFalse(TunnelConfiguration.isExpectedTunnelStop("{\"event\":\"stopped\",\"stop_reason\":2}"))
+        XCTAssertFalse(TunnelConfiguration.isExpectedTunnelStop(nil))
+    }
+
     func testCoreFailureIsNotHiddenByGenericIOSDisconnectError() {
         XCTAssertEqual(TunnelConfiguration.disconnectMessage(
             tunnelError: "start service: invalid REALITY public key",

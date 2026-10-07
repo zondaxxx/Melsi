@@ -30,7 +30,7 @@ If you change a seam, change this file in the same commit.
 | iOS/macOS app bundle id | `app.melsi` |
 | iOS Packet Tunnel extension bundle id | `app.melsi.PacketTunnel` |
 | App Group (iOS) | `group.app.melsi`, or another group from the signed entitlements |
-| Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.25.5` |
+| Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.26.0` |
 | sing-box | `github.com/sagernet/sing-box v1.14.2` |
 | Compatibility adapters | `github.com/metacubex/mihomo v1.19.32` |
 | Clash API default | `127.0.0.1:9790` |
@@ -287,6 +287,7 @@ MethodChannel `app.melsi/vpn`:
 | `stop` | – | `null` |
 | `status` | – | `"stopped" \| "connecting" \| "connected" \| "stopping"` |
 | `coreVersion` | – | `String` (libbox version) |
+| `readLog` | `{"maxLines": int}` (1–400) | iOS: saved tunnel lifecycle/stop diagnostics; other mobile bridges may return no implementation |
 | `installedApps` | – | Android: `List<Map>` `{"package","label","system":bool}` ; iOS: `[]` |
 | `appIcon` | `{"package": String}` | Android: PNG `Uint8List` (≤96px) or null |
 
@@ -295,6 +296,16 @@ EventChannel `app.melsi/vpn/events` emits maps
 
 Native side lifecycle: start libbox `CommandServer` + `StartOrReloadService(config)`,
 then `Melsicore.startEngine(engineJson)`; on stop call `Melsicore.stopEngine()` first.
+On iOS device sleep, pause both libbox and the engine; wake resumes both.
+Engine pause cancels probe work without marking nodes dead or stopping the
+tunnel. The mobile bridge preserves this pause across a service reload.
+Automatic rounds in manual mode check only the selected server; explicit
+probe requests still check every candidate. Concurrent probes share one limit
+across proxy/game groups: two on mobile, eight on desktop.
+iOS enables system On Demand recovery only after a successful user connection.
+An explicit stop persists recovery disabled before stopping the provider.
+Preference updates are serialized and checked against the connection attempt,
+so an older connect cannot re-enable recovery after a newer stop.
 
 ### gomobile
 
@@ -324,6 +335,8 @@ Android `app/android/app/libs/libbox.aar` (Java: `io.nekohasekai.libbox.*`,
 ```go
 func StartEngine(engineJSON string) error
 func StopEngine()
+func PauseEngine()           // suspend probes, retain tunnel and selection
+func ResumeEngine()          // resume probes, safe when stopped
 func EngineStatus() string   // same JSON as GET /status
 func Version() string        // melsi version
 ```
@@ -348,8 +361,13 @@ app and the PacketTunnel extension; discovery uses that group for
 `command.sock`.
 
 The app writes `config.json` and `engine.json`. The extension writes
-`version.json` (core versions) and `last_error.txt` (reason for the last
-unexpected stop). The app sends the provider message `"reload"` to hot-reload
+`version.json` (core versions), `last_error.txt` (core failure), and `last_stop.txt`
+(system stop reason). `tunnel_lifecycle.jsonl` keeps at most 64 lifecycle/health
+events, including physical memory samples every 30 seconds, without server
+configuration or credentials. It remains writable after the first device
+unlock and is available through `readLog` on the existing Logs screen.
+A missing stop callback does not prove a memory-pressure kill. The app sends
+the provider message `"reload"` to hot-reload
 a connected tunnel; `"version"` and `"engineStatus"` are also answered.
 `command.sock` stays in the shared container when the path fits `sockaddr_un`.
 The one-character fallback directory is created only when that directory is

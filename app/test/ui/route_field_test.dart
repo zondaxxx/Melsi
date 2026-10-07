@@ -17,21 +17,23 @@ void main() {
     double exitLat = 35.7,
     double exitLon = 139.7,
   }) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: buildTheme(Brightness.dark),
-      home: RouteField(
-        status: status,
-        originCode: 'DE',
-        originLat: 52.5,
-        originLon: 13.4,
-        exitCode: exitReady ? exitCode : null,
-        exitLat: exitReady ? exitLat : null,
-        exitLon: exitReady ? exitLon : null,
-        exitReady: exitReady,
-        exitFailed: exitFailed,
-        exitSkipped: exitSkipped,
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(Brightness.dark),
+        home: RouteField(
+          status: status,
+          originCode: 'DE',
+          originLat: 52.5,
+          originLon: 13.4,
+          exitCode: exitReady ? exitCode : null,
+          exitLat: exitReady ? exitLat : null,
+          exitLon: exitReady ? exitLon : null,
+          exitReady: exitReady,
+          exitFailed: exitFailed,
+          exitSkipped: exitSkipped,
+        ),
       ),
-    ));
+    );
     await tester.pump();
     return tester.state<RouteFieldState>(find.byType(RouteField));
   }
@@ -42,7 +44,9 @@ void main() {
     expect(tester.binding.hasScheduledFrame, isFalse);
   }
 
-  testWidgets('holds at the origin until the exit IP is known, then flies', (tester) async {
+  testWidgets('holds at the origin until the exit IP is known, then flies', (
+    tester,
+  ) async {
     var state = await show(tester, status: VpnStatus.stopped);
     expect(state.debugCue, MapCue.idle);
 
@@ -68,7 +72,9 @@ void main() {
     await gone(tester);
   });
 
-  testWidgets('a failed exit lookup returns home and spreads red', (tester) async {
+  testWidgets('a failed exit lookup returns home and spreads red', (
+    tester,
+  ) async {
     final state = await show(tester, status: VpnStatus.connecting);
     await tester.pump(const Duration(milliseconds: 1000));
     expect(state.debugCue, MapCue.waiting);
@@ -92,15 +98,23 @@ void main() {
     await gone(tester);
   });
 
-  testWidgets('resume with a known exit does not replay the approach', (tester) async {
-    final state = await show(tester, status: VpnStatus.connected, exitReady: true);
+  testWidgets('resume with a known exit does not replay the approach', (
+    tester,
+  ) async {
+    final state = await show(
+      tester,
+      status: VpnStatus.connected,
+      exitReady: true,
+    );
     expect(state.debugCue, MapCue.settled);
     await tester.pump(const Duration(milliseconds: 500));
     expect(state.debugCue, MapCue.settled);
     await gone(tester);
   });
 
-  testWidgets('a late exit lookup recovers after the map timed out', (tester) async {
+  testWidgets('a late exit lookup recovers after the map timed out', (
+    tester,
+  ) async {
     final state = await show(tester, status: VpnStatus.connected);
     await tester.pump(const Duration(seconds: 20));
     await tester.pump(const Duration(milliseconds: 1600));
@@ -115,7 +129,9 @@ void main() {
     await gone(tester);
   });
 
-  testWidgets('retry during the error animation starts a fresh approach', (tester) async {
+  testWidgets('retry during the error animation starts a fresh approach', (
+    tester,
+  ) async {
     final state = await show(tester, status: VpnStatus.connecting);
     await tester.pump(const Duration(milliseconds: 200));
     await show(tester, status: VpnStatus.error);
@@ -128,57 +144,72 @@ void main() {
     await gone(tester);
   });
 
-  testWidgets('reduced motion settles when connection skips the connecting frame', (tester) async {
-    tester.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(disableAnimations: true);
-    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    final state = await show(tester, status: VpnStatus.stopped);
-    await show(tester, status: VpnStatus.connected, exitReady: true);
-    expect(state.debugCue, MapCue.settled);
-    await gone(tester);
-  });
+  testWidgets(
+    'reduced motion settles when connection skips the connecting frame',
+    (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      final state = await show(tester, status: VpnStatus.stopped);
+      await show(tester, status: VpnStatus.connected, exitReady: true);
+      expect(state.debugCue, MapCue.settled);
+      await gone(tester);
+    },
+  );
 
-  testWidgets('a server change waits, then flies, without restarting the approach', (tester) async {
-    var state = await show(tester, status: VpnStatus.connected, exitReady: true);
-    expect(state.debugCue, MapCue.settled);
+  testWidgets(
+    'a server change waits, then flies, without restarting the approach',
+    (tester) async {
+      var state = await show(
+        tester,
+        status: VpnStatus.connected,
+        exitReady: true,
+      );
+      expect(state.debugCue, MapCue.settled);
 
-    state = await show(tester, status: VpnStatus.connected);
-    expect(state.debugCue, MapCue.waiting);
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(state.debugCue, MapCue.waiting);
+      state = await show(tester, status: VpnStatus.connected);
+      expect(state.debugCue, MapCue.waiting);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(state.debugCue, MapCue.waiting);
 
-    state = await show(
-      tester,
-      status: VpnStatus.connected,
-      exitReady: true,
-      exitCode: 'NL',
-      exitLat: 52.3,
-      exitLon: 4.9,
-    );
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(state.debugCue, MapCue.travel);
-    await tester.pump(const Duration(milliseconds: 1000));
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.pump(const Duration(milliseconds: 800));
-    await tester.pump(const Duration(milliseconds: 800));
-    expect(state.debugCue, MapCue.settled);
-    await gone(tester);
-  });
+      state = await show(
+        tester,
+        status: VpnStatus.connected,
+        exitReady: true,
+        exitCode: 'NL',
+        exitLat: 52.3,
+        exitLon: 4.9,
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(state.debugCue, MapCue.travel);
+      await tester.pump(const Duration(milliseconds: 1000));
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 800));
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(state.debugCue, MapCue.settled);
+      await gone(tester);
+    },
+  );
 
-  testWidgets('disconnect during the approach can connect again from the start', (tester) async {
-    var state = await show(tester, status: VpnStatus.connecting);
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(state.debugCue, MapCue.approach);
+  testWidgets(
+    'disconnect during the approach can connect again from the start',
+    (tester) async {
+      var state = await show(tester, status: VpnStatus.connecting);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(state.debugCue, MapCue.approach);
 
-    state = await show(tester, status: VpnStatus.stopped);
-    expect(state.debugCue, MapCue.idle);
+      state = await show(tester, status: VpnStatus.stopped);
+      expect(state.debugCue, MapCue.idle);
 
-    state = await show(tester, status: VpnStatus.connecting);
-    expect(state.debugCue, MapCue.approach);
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(state.debugCue, MapCue.approach);
-    await gone(tester);
-  });
+      state = await show(tester, status: VpnStatus.connecting);
+      expect(state.debugCue, MapCue.approach);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(state.debugCue, MapCue.approach);
+      await gone(tester);
+    },
+  );
 
   testWidgets('reduced motion still waits for the exit', (tester) async {
     tester.platformDispatcher.accessibilityFeaturesTestValue =
@@ -193,6 +224,58 @@ void main() {
 
     state = await show(tester, status: VpnStatus.error);
     expect(state.debugCue, MapCue.failed);
+    await gone(tester);
+  });
+
+  testWidgets('retry takes over the current camera without a jump', (
+    tester,
+  ) async {
+    final state = await show(tester, status: VpnStatus.connecting);
+    await tester.pump(const Duration(milliseconds: 450));
+    await show(tester, status: VpnStatus.error);
+    await tester.pump(const Duration(milliseconds: 300));
+    final zoom = state.debugZoom!;
+    final focus = state.debugFocus!;
+    await show(tester, status: VpnStatus.connecting);
+    expect(state.debugZoom, closeTo(zoom, .00001));
+    expect((state.debugFocus! - focus).distance, lessThan(.00001));
+    await gone(tester);
+  });
+
+  testWidgets(
+    'reduced motion keeps the world still while waiting and on error',
+    (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      final state = await show(tester, status: VpnStatus.connecting);
+      final focus = state.debugFocus;
+      expect(state.debugZoom, 1);
+      await tester.pump(const Duration(seconds: 2));
+      expect(state.debugFocus, focus);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      await show(tester, status: VpnStatus.error);
+      expect(state.debugZoom, 1);
+      expect(state.debugFocus, focus);
+      await gone(tester);
+    },
+  );
+
+  testWidgets('enabling reduced motion stops an in-flight camera', (
+    tester,
+  ) async {
+    final state = await show(tester, status: VpnStatus.connecting);
+    await tester.pump(const Duration(milliseconds: 450));
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pump();
+    expect(state.debugZoom, 1);
+    expect(state.debugCue, MapCue.waiting);
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.binding.hasScheduledFrame, isFalse);
     await gone(tester);
   });
 }

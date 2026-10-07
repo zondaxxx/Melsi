@@ -336,6 +336,7 @@ const _ru = <String, String>{
   'notice.unsupportedLink': 'Ссылка не поддерживается',
   'notice.applyFailed': 'Не удалось применить настройки',
   'notice.vpnError': 'Соединение прервано',
+  'notice.vpnWarning': 'Предупреждение VPN',
 };
 
 const _en = <String, String>{
@@ -639,4 +640,5 @@ const _en = <String, String>{
   'notice.unsupportedLink': 'Unsupported link',
   'notice.applyFailed': 'Couldn’t apply settings',
   'notice.vpnError': 'Connection lost',
+  'notice.vpnWarning': 'VPN warning',
 };

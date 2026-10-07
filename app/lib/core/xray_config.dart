@@ -61,8 +61,9 @@ abstract final class XrayConfig {
     final reality = tls is Map ? tls['reality'] : null;
     if (tls is Map &&
         tls['insecure'] == true &&
-        !(reality is Map && reality['enabled'] == true))
+        !(reality is Map && reality['enabled'] == true)) {
       return null;
+    }
     final protocol = switch (ob['type']) {
       'vless' ||
       'vmess' ||

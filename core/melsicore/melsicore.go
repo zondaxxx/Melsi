@@ -15,6 +15,7 @@ import (
 var (
 	mu      sync.Mutex
 	current *engine.Engine
+	paused  bool
 )
 
 // StartEngine starts (or restarts) the singleton engine from engine JSON
@@ -24,7 +25,11 @@ func StartEngine(engineJSON string) error {
 	if err != nil {
 		return err
 	}
-	e, err := engine.New(cfg, engine.Options{Logger: engine.NewLogger(os.Stderr, cfg.LogLevel)})
+	e, err := engine.New(cfg, engine.Options{
+		Logger: engine.NewLogger(os.Stderr, cfg.LogLevel),
+		// Network extensions share a tight memory budget with all transports.
+		ProbeConcurrency: 2,
+	})
 	if err != nil {
 		return err
 	}
@@ -33,6 +38,9 @@ func StartEngine(engineJSON string) error {
 	if current != nil {
 		_ = current.Close()
 		current = nil
+	}
+	if paused {
+		e.Pause()
 	}
 	if err := e.Start(); err != nil {
 		return err
@@ -49,6 +57,26 @@ func StopEngine() {
 	mu.Unlock()
 	if e != nil {
 		_ = e.Close()
+	}
+}
+
+// PauseEngine suspends probes during device sleep while keeping the VPN alive.
+func PauseEngine() {
+	mu.Lock()
+	defer mu.Unlock()
+	paused = true
+	if current != nil {
+		current.Pause()
+	}
+}
+
+// ResumeEngine resumes probing after wake; safe when the engine is stopped.
+func ResumeEngine() {
+	mu.Lock()
+	defer mu.Unlock()
+	paused = false
+	if current != nil {
+		current.Resume()
 	}
 }
 
