@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../../core/models.dart';
+import '../../features/netcheck/ip_geo.dart';
 import '../../core/game_presets.dart';
 import '../../features/doctor/doctor_widgets.dart';
 import '../../features/motion/rolling_number.dart';
@@ -165,27 +167,88 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-/// The map sits above the status. Origin comes from the last real-IP lookup
-/// when the feature service is in the tree.
-class _RouteStage extends StatelessWidget {
+/// The map sits above the status. Origin is the last real (pre-VPN) IP.
+/// A numeric server address is resolved once so the camera can land on the
+/// exit point; a hostname falls back to the server's country.
+class _RouteStage extends StatefulWidget {
   const _RouteStage({required this.app, required this.status, required this.tall});
   final AppState app;
   final VpnStatus status;
   final bool tall;
 
   @override
+  State<_RouteStage> createState() => _RouteStageState();
+}
+
+class _RouteStageState extends State<_RouteStage> {
+  static final _points = <String, IpInfo>{};
+  String? _asked;
+  IpInfo? _server;
+  bool _ready = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_ready) return;
+    _ready = true;
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(_RouteStage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.app.activeNode?.id != widget.app.activeNode?.id) _resolve();
+  }
+
+  void _resolve() {
+    final node = widget.app.activeNode;
+    final host = node?.server ?? '';
+    if (node == null || InternetAddress.tryParse(host) == null) {
+      _asked = node?.id;
+      _server = null;
+      return;
+    }
+    final cached = _points[host];
+    if (cached != null) {
+      _asked = node.id;
+      _server = cached;
+      return;
+    }
+    if (_asked == node.id) return;
+    _asked = node.id;
+    final features = FeaturesScope.maybeOf(context);
+    if (features == null) return;
+    final id = node.id;
+    unawaited(() async {
+      try {
+        final info = await IpGeoClient(
+          client: features.httpClient,
+          providers: [Uri.parse('https://ipwho.is/$host')],
+        ).lookup();
+        _points[host] = info;
+        if (!mounted || widget.app.activeNode?.id != id) return;
+        setState(() => _server = info);
+      } catch (_) {}
+    }());
+  }
+
+  @override
   Widget build(BuildContext context) {
     final net = FeaturesScope.maybeOf(context)?.netcheck;
-    Widget field(String? origin) => RouteField(
-          originCode: origin,
-          exitCode: app.activeNode?.countryCode,
-          status: status,
-          height: tall ? 248 : 196,
+    Widget field(IpInfo? origin) => RouteField(
+          originCode: origin?.countryCode,
+          originLat: origin?.latitude,
+          originLon: origin?.longitude,
+          exitCode: _server?.countryCode ?? widget.app.activeNode?.countryCode,
+          exitLat: _server?.latitude,
+          exitLon: _server?.longitude,
+          status: widget.status,
+          height: widget.tall ? 248 : 196,
         );
     if (net == null) return field(null);
     return ListenableBuilder(
       listenable: net,
-      builder: (context, _) => field(net.realIp?.countryCode),
+      builder: (context, _) => field(net.realIp),
     );
   }
 }

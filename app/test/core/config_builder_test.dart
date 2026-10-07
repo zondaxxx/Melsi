@@ -86,8 +86,12 @@ void main() {
       }
       expect(c['experimental']['clash_api'],
           {'external_controller': '127.0.0.1:9790', 'secret': 'deadbeef'});
-      expect(c['experimental']['cache_file'],
-          {'enabled': true, 'path': '/tmp/melsi-test/cache.db'});
+      expect(c['experimental']['cache_file'], {
+        'enabled': true,
+        'path': '/tmp/melsi-test/cache.db',
+        'cache_id': 'auto',
+        'store_dns': true,
+      });
       expect(c['route']['auto_detect_interface'], true);
       expect(c['route']['default_domain_resolver']['server'], 'dns-direct');
       final tun = (c['inbounds'] as List).firstWhere((i) => i['type'] == 'tun');

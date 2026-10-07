@@ -48,24 +48,45 @@ type Outbound struct {
 	cancel    context.CancelFunc
 }
 
+// supportedProxy is the Mihomo dial set Melsi will hand this adapter.
+// SSR, XHTTP and AmneziaWG are always required. The rest are used when the
+// user picks the Mihomo core for ordinary proxy protocols.
+func supportedProxy(proxy map[string]any) error {
+	proxyType, _ := proxy["type"].(string)
+	switch proxyType {
+	case "ssr", "ss", "vmess", "trojan", "socks5", "http", "hysteria2", "wireguard":
+		return nil
+	case "vless":
+		network, _ := proxy["network"].(string)
+		if network == "" {
+			network = "tcp"
+		}
+		switch network {
+		case "tcp", "ws", "grpc", "http", "h2", "xhttp":
+		default:
+			return fmt.Errorf("unsupported VLESS network %q", network)
+		}
+		if network == "xhttp" {
+			if transport, ok := proxy["xhttp-opts"].(map[string]any); ok {
+				if _, exists := transport["download-settings"]; exists {
+					return fmt.Errorf("separate XHTTP download-settings are not supported")
+				}
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported compatibility protocol %q", proxyType)
+	}
+}
+
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options Options) (adapter.Outbound, error) {
 	proxyType, _ := options.Proxy["type"].(string)
-	if proxyType != "ssr" && proxyType != "vless" && proxyType != "wireguard" {
-		return nil, fmt.Errorf("unsupported compatibility protocol %q", proxyType)
+	if err := supportedProxy(options.Proxy); err != nil {
+		return nil, err
 	}
 	for _, forbidden := range []string{"dialer-proxy", "interface-name", "routing-mark", "remote-dns-resolve", "dns"} {
 		if _, exists := options.Proxy[forbidden]; exists {
 			return nil, fmt.Errorf("compatibility proxy cannot override %s", forbidden)
-		}
-	}
-	if proxyType == "vless" {
-		if options.Proxy["network"] != "xhttp" {
-			return nil, fmt.Errorf("compatibility VLESS requires XHTTP")
-		}
-		if transport, ok := options.Proxy["xhttp-opts"].(map[string]any); ok {
-			if _, exists := transport["download-settings"]; exists {
-				return nil, fmt.Errorf("separate XHTTP download-settings are not supported")
-			}
 		}
 	}
 	protected, err := dialer.New(ctx, options.DialerOptions, true)

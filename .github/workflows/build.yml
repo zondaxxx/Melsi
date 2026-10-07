@@ -297,6 +297,9 @@ jobs:
           bash scripts/build-core.sh darwin universal
           file core/dist/melsi-core-darwin-universal
 
+      - name: Fetch Xray-core (darwin universal)
+        run: bash scripts/fetch-xray.sh darwin universal
+
       - name: flutter build macos
         working-directory: app
         run: |
@@ -309,13 +312,16 @@ jobs:
           [ -n "$built" ] || { echo "::error::no .app in Build/Products/Release"; exit 1; }
           mkdir -p stage
           ditto "$built" stage/Melsi.app
-          core=stage/Melsi.app/Contents/Resources/melsi-core
-          if [ ! -f "$core" ]; then
-            echo "::warning::melsi-core missing from the .app (Xcode phase did not copy it) - copying"
-            cp core/dist/melsi-core-darwin-universal "$core"
-          fi
-          chmod 0755 "$core"
+          res=stage/Melsi.app/Contents/Resources
+          core="$res/melsi-core"
+          # Always install the core built in this job, not a leftover binary.
+          cp -f core/dist/melsi-core-darwin-universal "$core"
+          cp -f core/dist/xray-darwin-universal "$res/xray"
+          cp -f core/dist/XRAY-LICENSE "$res/XRAY-LICENSE"
+          chmod 0755 "$core" "$res/xray"
           lipo -info "$core"
+          lipo -info "$res/xray"
+          test -s "$res/XRAY-LICENSE"
           echo "APP_PATH=$PWD/stage/Melsi.app" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificate
@@ -414,20 +420,23 @@ jobs:
       - name: Build melsi-core (windows amd64)
         run: bash scripts/build-core.sh windows amd64
 
+      - name: Fetch Xray-core (windows amd64)
+        run: bash scripts/fetch-xray.sh windows amd64
+
       - name: flutter build windows
         working-directory: app
         run: |
           # shellcheck disable=SC2086
           flutter build windows --release $MELSI_BUILD_ARGS
 
-      - name: Complete bundle (melsi-core.exe, VC++ runtime)
+      - name: Complete bundle (melsi-core.exe, xray.exe, VC++ runtime)
         run: |
           rel=app/build/windows/x64/runner/Release
           [ -f "$rel/melsi.exe" ] || { echo "::error::$rel/melsi.exe not found"; exit 1; }
-          if [ ! -f "$rel/melsi-core.exe" ]; then
-            echo "::warning::melsi-core.exe missing from Release (CMake install did not copy it) - copying"
-            cp core/dist/melsi-core-windows-amd64.exe "$rel/melsi-core.exe"
-          fi
+          cp -f core/dist/melsi-core-windows-amd64.exe "$rel/melsi-core.exe"
+          cp -f core/dist/xray-windows-amd64.exe "$rel/xray.exe"
+          cp -f core/dist/XRAY-LICENSE "$rel/XRAY-LICENSE"
+          test -s "$rel/melsi-core.exe" && test -s "$rel/xray.exe" && test -s "$rel/XRAY-LICENSE"
           # App-local VC++ runtime so the app starts on machines without the redist.
           for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
             [ -f "$rel/$dll" ] || cp "/c/Windows/System32/$dll" "$rel/" || true
@@ -439,6 +448,10 @@ jobs:
           mkdir -p dist portable
           cp -r app/build/windows/x64/runner/Release portable/Melsi
           (cd portable && 7z a -tzip -mx=9 "../dist/Melsi-$MELSI_VERSION-windows-x64-portable.zip" Melsi > /dev/null)
+          listing="$(7z l "dist/Melsi-$MELSI_VERSION-windows-x64-portable.zip")"
+          echo "$listing" | grep -q 'melsi-core.exe'
+          echo "$listing" | grep -q 'xray.exe'
+          echo "$listing" | grep -q 'XRAY-LICENSE'
 
       - name: Ensure Inno Setup
         run: |
@@ -501,21 +514,25 @@ jobs:
       - name: Build melsi-core (linux amd64)
         run: bash scripts/build-core.sh linux amd64
 
+      - name: Fetch Xray-core (linux amd64)
+        run: bash scripts/fetch-xray.sh linux amd64
+
       - name: flutter build linux
         working-directory: app
         run: |
           # shellcheck disable=SC2086
           flutter build linux --release $MELSI_BUILD_ARGS
 
-      - name: Complete bundle (melsi-core)
+      - name: Complete bundle (melsi-core, xray)
         run: |
           bundle=app/build/linux/x64/release/bundle
           [ -x "$bundle/melsi" ] || { echo "::error::$bundle/melsi not found"; exit 1; }
-          if [ ! -f "$bundle/melsi-core" ]; then
-            echo "::warning::melsi-core missing from bundle (CMake did not copy it) - copying"
-            cp core/dist/melsi-core-linux-amd64 "$bundle/melsi-core"
-          fi
-          chmod 0755 "$bundle/melsi-core"
+          cp -f core/dist/melsi-core-linux-amd64 "$bundle/melsi-core"
+          cp -f core/dist/xray-linux-amd64 "$bundle/xray"
+          cp -f core/dist/XRAY-LICENSE "$bundle/XRAY-LICENSE"
+          chmod 0755 "$bundle/melsi-core" "$bundle/xray"
+          cmp core/dist/melsi-core-linux-amd64 "$bundle/melsi-core"
+          test -s "$bundle/XRAY-LICENSE"
           echo "BUNDLE=$bundle" >> "$GITHUB_ENV"
 
       - name: tar.gz
@@ -534,6 +551,14 @@ jobs:
       - run: |
           ls -la dist
           dpkg-deb --info dist/*.deb
+          dpkg-deb -c dist/*.deb > "$RUNNER_TEMP/deb.txt"
+          grep -q '/opt/melsi/melsi-core$' "$RUNNER_TEMP/deb.txt"
+          grep -q '/opt/melsi/xray$' "$RUNNER_TEMP/deb.txt"
+          grep -q '/opt/melsi/XRAY-LICENSE$' "$RUNNER_TEMP/deb.txt"
+          tar -tzf dist/Melsi-*-linux-x64.tar.gz > "$RUNNER_TEMP/tar.txt"
+          grep -q 'melsi/melsi-core$' "$RUNNER_TEMP/tar.txt"
+          grep -q 'melsi/xray$' "$RUNNER_TEMP/tar.txt"
+          grep -q 'melsi/XRAY-LICENSE$' "$RUNNER_TEMP/tar.txt"
 
       - uses: actions/upload-artifact@v5
         with:

@@ -190,6 +190,23 @@ func TestXHTTPRoundTrip(test *testing.T) {
 	}
 }
 
+func TestVmessParses(test *testing.T) {
+	openOutbound(test, map[string]any{
+		"type": "vmess", "server": "127.0.0.1", "port": 1, "uuid": "b831381d-6324-4d53-ad4f-8cda48b30811",
+		"alterId": 0, "cipher": "auto", "udp": true, "network": "tcp",
+	})
+}
+
+func TestVlessTcpParses(test *testing.T) {
+	openOutbound(test, map[string]any{
+		"type": "vless", "server": "127.0.0.1", "port": 443, "uuid": "bf000d23-0752-40b4-affe-68f7707a9661",
+		"network": "tcp", "tls": true, "servername": "www.microsoft.com", "udp": true,
+		"client-fingerprint": "chrome",
+		"reality-opts": map[string]any{"public-key": "SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc", "short-id": "6ba85179"},
+		"flow": "xtls-rprx-vision",
+	})
+}
+
 func TestAmneziaConstruction(test *testing.T) {
 	openOutbound(test, map[string]any{
 		"type": "wireguard", "server": "127.0.0.1", "port": 51820,

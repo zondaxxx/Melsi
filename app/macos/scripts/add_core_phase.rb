@@ -23,12 +23,12 @@ PHASE_NAME = 'Bundle melsi-core'
 DEPLOYMENT_TARGET = '12.0' # Flutter's minimum for macOS
 
 SCRIPT = <<~'SH'
-  # Copies the melsi-core daemon (docs/CONTRACT.md section 4) into Contents/Resources.
-  # Produced by scripts/build-core.sh; missing binary = warning, not an error.
+  # Copies melsi-core and the pinned Xray-core into Contents/Resources.
+  # melsi-core: scripts/build-core.sh. Xray: scripts/fetch-xray.sh.
   DIST="${PROJECT_DIR}/../../core/dist"
   DEST_DIR="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
-  DEST="${DEST_DIR}/melsi-core"
   mkdir -p "${DEST_DIR}"
+  DEST="${DEST_DIR}/melsi-core"
   if [ -f "${DIST}/melsi-core-darwin-universal" ]; then
     cp -f "${DIST}/melsi-core-darwin-universal" "${DEST}"
   elif [ -f "${DIST}/melsi-core-darwin-arm64" ] && [ -f "${DIST}/melsi-core-darwin-amd64" ]; then
@@ -41,9 +41,29 @@ SCRIPT = <<~'SH'
   fi
   chmod 755 "${DEST}"
   xattr -c "${DEST}" 2>/dev/null || true
-  # Sign nested binary with the app's identity when signing is enabled.
+  XRAY="${DEST_DIR}/xray"
+  if [ -f "${DIST}/xray-darwin-universal" ]; then
+    cp -f "${DIST}/xray-darwin-universal" "${XRAY}"
+  elif [ -f "${DIST}/xray-darwin-arm64" ] && [ -f "${DIST}/xray-darwin-amd64" ]; then
+    lipo -create "${DIST}/xray-darwin-arm64" "${DIST}/xray-darwin-amd64" -output "${XRAY}"
+  elif [ -f "${DIST}/xray-darwin-$(uname -m | sed 's/x86_64/amd64/')" ]; then
+    cp -f "${DIST}/xray-darwin-$(uname -m | sed 's/x86_64/amd64/')" "${XRAY}"
+  else
+    echo "warning: xray not found in ${DIST} (run scripts/fetch-xray.sh); Xray mode will not start."
+  fi
+  if [ -f "${XRAY}" ]; then
+    chmod 755 "${XRAY}"
+    xattr -c "${XRAY}" 2>/dev/null || true
+  fi
+  if [ -f "${DIST}/XRAY-LICENSE" ]; then
+    cp -f "${DIST}/XRAY-LICENSE" "${DEST_DIR}/XRAY-LICENSE"
+  fi
+  # Sign nested binaries with the app's identity when signing is enabled.
   if [ "${CODE_SIGNING_ALLOWED}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY}" ]; then
     codesign --force --options runtime --timestamp=none --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${DEST}" || echo "warning: codesign melsi-core failed"
+    if [ -f "${XRAY}" ]; then
+      codesign --force --options runtime --timestamp=none --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${XRAY}" || echo "warning: codesign xray failed"
+    fi
   fi
 SH
 

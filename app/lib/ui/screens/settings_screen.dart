@@ -137,6 +137,40 @@ class SettingsScreen extends StatelessWidget {
           ]),
         ),
         SliverToBoxAdapter(child: SectionFooter(l('settings.dnsHint'))),
+        SliverToBoxAdapter(
+          child: choice(
+            l('settings.coreEngine'),
+            Segmented<VpnCore>(
+              value: s.core,
+              onChanged: (v) => app.updateSettings((x) => x.core = v),
+              segments: const [
+                Segment(VpnCore.singBox, 'sing-box'),
+                Segment(VpnCore.mihomo, 'Mihomo'),
+                Segment(VpnCore.xray, 'Xray'),
+              ],
+            ),
+            l('core.${s.core.name}.desc'),
+          ),
+        ),
+        SliverToBoxAdapter(child: SectionHeader(l('settings.performance'))),
+        SliverToBoxAdapter(
+          child: GroupCard(children: [
+            SwitchRow(
+              title: l('settings.memorySaver'),
+              subtitle: l('settings.memorySaverHint'),
+              value: s.memorySaver,
+              onChanged: (v) => app.updateSettings((x) => x.memorySaver = v),
+            ),
+            SwitchRow(
+              title: l('settings.multiplex'),
+              subtitle: l('settings.multiplexHint'),
+              value: s.multiplex && !s.memorySaver,
+              onChanged: s.memorySaver
+                  ? null
+                  : (v) => app.updateSettings((x) => x.multiplex = v),
+            ),
+          ]),
+        ),
         // ------------------------------------------------ network
         if (app.isDesktopPlatform) ...[
           SliverToBoxAdapter(

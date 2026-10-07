@@ -121,7 +121,18 @@ class ConfigBuilder {
 - Outbound `direct` (type `direct`). Blocking uses rule action `reject`.
 - `experimental.clash_api`: `external_controller` = `endpoints.clashApi`,
   `secret` = `endpoints.secret`. `experimental.cache_file` enabled at
-  `<cacheDir>/cache.db`.
+  `<cacheDir>/cache.db` with `cache_id` `auto` or `manual:<selectedNodeId>`
+  so a new manual server is not restored from the previous selector entry.
+  `store_dns` is on unless memory saver is set. Memory saver also sets
+  the TUN `udp_timeout` to `30s`. `routing.blockQuic` adds a `quic` reject
+  rule after sniff. `settings.multiplex` adds h2mux on native TCP outbounds.
+- `settings.core`: `singBox` (default), `mihomo` (supported proxies become
+  `type: mihomo` outbounds; SSR/XHTTP/AmneziaWG always do), or `xray`.
+  Xray is desktop-only: translatable nodes become local SOCKS outbounds and
+  `BuiltConfig.xray` is the original Xray JSON. The desktop runner starts
+  `xray` (`MELSI_XRAY`, the binary next to `melsi-core`, or `xray` on `PATH`) before the
+  tunnel and excludes the `xray` process from the TUN. Phones refuse to
+  connect while Xray is selected. A double-VPN chain stays on sing-box.
 - Inbound `tun` tag `tun-in` (address `172.19.0.1/30` (+ `fdfe:dcba:9876::1/126` if ipv6),
   `auto_route: true`, `strict_route: settings.killSwitch`, `stack`).
   Android per-app → `include_package` / `exclude_package`.
@@ -235,6 +246,11 @@ melsi-core version                           # prints JSON {"melsi":..,"sing_box
 - Binary shipped: Windows `melsi-core.exe` next to `melsi.exe`;
   macOS `Melsi.app/Contents/Resources/melsi-core`; Linux `bundle/melsi-core`
   (next to the `melsi` executable). Dart finds it via `Platform.resolvedExecutable`.
+  Release builds compile this binary from the tagged commit (`scripts/build-core.sh`).
+- Desktop release artifacts also ship official Xray-core (`scripts/fetch-xray.sh`,
+  pinned version, SHA256 of the release zip) beside that binary, plus
+  `XRAY-LICENSE` (MPL-2.0): Windows `xray.exe`, macOS `Contents/Resources/xray`
+  (arm64+x64 universal), Linux `xray`. Phones do not ship it.
 
 ## 5. Mobile bridge
 

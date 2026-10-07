@@ -28,6 +28,7 @@ class DesktopVpnController extends VpnController {
   bool _stopping = false;
   bool _elevated = false;
   Directory? _dir;
+  Process? _xray;
 
   @override
   Stream<VpnState> get states => _ctrl.stream;
@@ -84,6 +85,39 @@ class DesktopVpnController extends VpnController {
     return null;
   }
 
+  /// Original Xray binary: `$MELSI_XRAY`, next to `melsi-core`, then `xray`
+  /// on `PATH`. Mobile builds do not ship one.
+  static String? locateXray() {
+    final exe = Platform.isWindows ? 'xray.exe' : 'xray';
+    final env = Platform.environment['MELSI_XRAY'];
+    if (env != null && env.isNotEmpty && File(env).existsSync()) return env;
+    final core = locateCore();
+    if (core != null) {
+      final beside = File(_sibling(core, exe));
+      if (beside.existsSync()) return beside.absolute.path;
+    }
+    final sep = Platform.pathSeparator;
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final nextToApp = File('$exeDir$sep$exe');
+    if (nextToApp.existsSync()) return nextToApp.absolute.path;
+    final pathEnv = Platform.environment['PATH'];
+    if (pathEnv != null) {
+      for (final dir in pathEnv.split(Platform.isWindows ? ';' : ':')) {
+        if (dir.isEmpty) continue;
+        final candidate = File('$dir$sep$exe');
+        if (candidate.existsSync()) return candidate.absolute.path;
+      }
+    }
+    return null;
+  }
+
+  static String _sibling(String path, String name) {
+    final sep = Platform.pathSeparator;
+    final i = path.lastIndexOf(sep);
+    if (i < 0) return name;
+    return '${path.substring(0, i + 1)}$name';
+  }
+
   // ------------------------------------------------------------ start
 
   @override
@@ -93,6 +127,7 @@ class DesktopVpnController extends VpnController {
     try {
       await _start(cfg);
     } catch (e) {
+      await _killXray();
       _emit(VpnState(VpnStatus.error, e.toString()));
       rethrow;
     }
@@ -107,6 +142,7 @@ class DesktopVpnController extends VpnController {
 
     // Stop a daemon left over from a previous session (it holds the ports).
     await _stopStale();
+    await _killXray();
 
     final configPath = await _path('config.json');
     final enginePath = await _path('engine.json');
@@ -134,6 +170,10 @@ class DesktopVpnController extends VpnController {
       endpoint: engine['control_listen'] as String? ?? '127.0.0.1:9791',
       secret: engine['secret'] as String? ?? '',
     );
+
+    if (cfg.xray != null) {
+      await _startXray(cfg.xray!);
+    }
 
     final needsElevation = _hasTun(cfg.singBox);
     final args = ['run', '--config', configPath, '--engine', enginePath, '--log', logPath];
@@ -289,7 +329,61 @@ class DesktopVpnController extends VpnController {
       }
       if (alive) await _killByPid();
     }
+    await _killXray();
     _emit(VpnState.stopped);
+  }
+
+  Future<void> _startXray(String config) async {
+    final bin = locateXray();
+    if (bin == null) {
+      throw const DesktopVpnException(
+          'Xray core not found. Place xray next to melsi-core, set MELSI_XRAY, or install it on PATH.');
+    }
+    final configPath = await _path('xray.json');
+    final logPath = await _path('xray.log');
+    await _atomicWrite(configPath, config);
+    final log = File(logPath).openWrite();
+    final proc = await Process.start(bin, ['run', '-c', configPath]);
+    _xray = proc;
+    proc.stdout.listen(log.add, onDone: log.close);
+    proc.stderr.listen(log.add);
+    await File(await _path('xray.pid')).writeAsString('${proc.pid}');
+    final exited = await proc.exitCode
+        .timeout(const Duration(milliseconds: 300), onTimeout: () => -1);
+    if (exited != -1) {
+      final tail = await _fileTail(logPath, 8);
+      throw DesktopVpnException(
+          'Xray exited before the tunnel started${tail.isEmpty ? '' : ':\n$tail'}');
+    }
+  }
+
+  Future<void> _killXray() async {
+    final proc = _xray;
+    _xray = null;
+    if (proc != null) {
+      proc.kill();
+    }
+    try {
+      final pid = int.tryParse((await File(await _path('xray.pid')).readAsString()).trim());
+      if (pid != null && pid != proc?.pid) {
+        if (Platform.isWindows) {
+          await Process.run('taskkill', ['/PID', '$pid', '/F']);
+        } else {
+          Process.killPid(pid);
+        }
+      }
+    } catch (_) {}
+    try {
+      await File(await _path('xray.pid')).delete();
+    } catch (_) {}
+  }
+
+  Future<String> _fileTail(String path, int n) async {
+    try {
+      return _lastLines(await File(path).readAsString(), n);
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<void> _killByPid() async {

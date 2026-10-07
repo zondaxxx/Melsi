@@ -42,6 +42,7 @@ install -d "$pkg/DEBIAN" "$pkg/opt/melsi" "$pkg/usr/bin" \
 cp -a "$bundle/." "$pkg/opt/melsi/"
 chmod 0755 "$pkg/opt/melsi/melsi"
 [[ -f "$pkg/opt/melsi/melsi-core" ]] && chmod 0755 "$pkg/opt/melsi/melsi-core"
+[[ -f "$pkg/opt/melsi/xray" ]] && chmod 0755 "$pkg/opt/melsi/xray"
 ln -s /opt/melsi/melsi "$pkg/usr/bin/melsi"
 
 # .desktop: prefer the app's own file, otherwise generate one.
@@ -70,6 +71,10 @@ fi
 cat > "$pkg/usr/share/doc/melsi/copyright" <<'COPY'
 Melsi VPN client. Bundles sing-box (GPL-3.0-or-later),
 https://github.com/SagerNet/sing-box
+
+Desktop packages also bundle Xray-core (MPL-2.0),
+https://github.com/XTLS/Xray-core
+The license text is /opt/melsi/XRAY-LICENSE.
 COPY
 
 installed_size="$(du -sk "$pkg" | cut -f1)"
