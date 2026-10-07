@@ -180,7 +180,7 @@ class _RouteStage extends StatelessWidget {
           originCode: origin,
           exitCode: app.activeNode?.countryCode,
           status: status,
-          height: tall ? 220 : 156,
+          height: tall ? 248 : 196,
         );
     if (net == null) return field(null);
     return ListenableBuilder(

@@ -39,3 +39,4 @@ flutter:
   assets:
     - assets/fonts/OFL.txt
     - assets/rulesets/
+    - assets/map/countries.json

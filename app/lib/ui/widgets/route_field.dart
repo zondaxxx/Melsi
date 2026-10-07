@@ -1,18 +1,23 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../services/vpn_controller.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 
-/// Lightweight status map: a square grid, a pixel landmass, and one route
-/// from the device to the selected server. Not a map SDK — a status picture.
+/// Home status map: Natural Earth country borders, painted locally.
+/// Ocean is the page colour. One route runs from the real-IP country to the
+/// selected server when both are known.
 class RouteField extends StatelessWidget {
   const RouteField({
     super.key,
     required this.status,
     this.originCode,
     this.exitCode,
-    this.height = 156,
+    this.height = 196,
   });
 
   final VpnStatus status;
@@ -23,26 +28,31 @@ class RouteField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final route = switch (status) {
+      VpnStatus.connected => c.success,
+      VpnStatus.connecting || VpnStatus.stopping => c.warning,
+      VpnStatus.error => c.danger,
+      VpnStatus.stopped => c.secondaryLabel,
+    };
     return Panel(
       padding: EdgeInsets.zero,
       clip: true,
+      color: c.background,
       child: SizedBox(
         height: height,
         width: double.infinity,
-        child: CustomPaint(
-          painter: _RoutePainter(
-            land: c.fillStrong,
-            grid: c.separator,
-            ink: c.label,
-            route: switch (status) {
-              VpnStatus.connected => c.success,
-              VpnStatus.connecting || VpnStatus.stopping => c.warning,
-              VpnStatus.error => c.danger,
-              VpnStatus.stopped => c.tertiaryLabel,
-            },
-            origin: _place(originCode),
-            exit: _place(exitCode),
-            exitLabel: _code(exitCode),
+        child: FutureBuilder<WorldMapData>(
+          future: WorldMapData.load(),
+          builder: (context, snap) => CustomPaint(
+            painter: _MapPainter(
+              map: snap.data,
+              land: c.isDark ? const Color(0xFF141414) : const Color(0xFFFFFFFF),
+              border: c.label.withValues(alpha: c.isDark ? 0.22 : 0.35),
+              ink: c.label,
+              route: route,
+              originCode: _code(originCode),
+              exitCode: _code(exitCode),
+            ),
           ),
         ),
       ),
@@ -56,188 +66,245 @@ String? _code(String? raw) {
   return cc == 'UK' ? 'GB' : cc;
 }
 
-/// Normalized map position, or null when the code is unknown.
-({double x, double y})? _place(String? raw) {
-  final cc = _code(raw);
-  if (cc == null) return null;
-  return _places[cc];
+/// Parsed country outlines. Loaded once from the bundled asset.
+class WorldMapData {
+  WorldMapData(this.countries) : byCode = {
+          for (final c in countries)
+            if (c.code.isNotEmpty) c.code: c,
+        };
+
+  static const asset = 'assets/map/countries.json';
+
+  /// Visible window. Drops the polar stretch so the inhabited world fills
+  /// the short home panel.
+  static const double minLat = -56;
+  static const double maxLat = 78;
+
+  final List<MapCountry> countries;
+  final Map<String, MapCountry> byCode;
+
+  static Future<WorldMapData>? _future;
+
+  static Future<WorldMapData> load() => _future ??= _read();
+
+  static Future<WorldMapData> _read() async {
+    final raw = await rootBundle.loadString(asset);
+    final root = jsonDecode(raw) as Map<String, dynamic>;
+    final list = root['c'] as List;
+    final countries = <MapCountry>[];
+    for (final item in list) {
+      final m = item as Map<String, dynamic>;
+      final anchor = m['a'] as List;
+      final rings = <List<(double, double)>>[];
+      for (final ring in m['r'] as List) {
+        final pts = <(double, double)>[];
+        for (final pt in ring as List) {
+          final pair = pt as List;
+          pts.add(((pair[0] as num).toDouble(), (pair[1] as num).toDouble()));
+        }
+        if (pts.length >= 4) rings.add(pts);
+      }
+      if (rings.isEmpty) continue;
+      countries.add(MapCountry(
+        code: m['i'] as String? ?? '',
+        lon: (anchor[0] as num).toDouble(),
+        lat: (anchor[1] as num).toDouble(),
+        rings: rings,
+      ));
+    }
+    return WorldMapData(countries);
+  }
+
+  static double xOf(double lon) => (lon + 180) / 360;
+
+  static double yOf(double lat) {
+    final clamped = lat.clamp(minLat, maxLat);
+    double merc(double deg) {
+      final r = deg * math.pi / 180;
+      return math.log(math.tan(math.pi / 4 + r / 2));
+    }
+
+    final top = merc(maxLat);
+    final bot = merc(minLat);
+    return (top - merc(clamped)) / (top - bot);
+  }
 }
 
-class _RoutePainter extends CustomPainter {
-  _RoutePainter({
-    required this.land,
-    required this.grid,
-    required this.ink,
-    required this.route,
-    required this.origin,
-    required this.exit,
-    required this.exitLabel,
+class MapCountry {
+  const MapCountry({
+    required this.code,
+    required this.lon,
+    required this.lat,
+    required this.rings,
   });
 
+  final String code;
+  final double lon;
+  final double lat;
+  final List<List<(double, double)>> rings;
+}
+
+class _MapPainter extends CustomPainter {
+  _MapPainter({
+    required this.map,
+    required this.land,
+    required this.border,
+    required this.ink,
+    required this.route,
+    required this.originCode,
+    required this.exitCode,
+  });
+
+  final WorldMapData? map;
   final Color land;
-  final Color grid;
+  final Color border;
   final Color ink;
   final Color route;
-  final ({double x, double y})? origin;
-  final ({double x, double y})? exit;
-  final String? exitLabel;
+  final String? originCode;
+  final String? exitCode;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final g = Paint()
-      ..color = grid
-      ..strokeWidth = 1;
-    const cols = 8;
-    const rows = 4;
-    for (var i = 1; i < cols; i++) {
-      final x = size.width * i / cols;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), g);
-    }
-    for (var i = 1; i < rows; i++) {
-      final y = size.height * i / rows;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), g);
-    }
+    final data = map;
+    if (data == null || size.isEmpty) return;
+    final fill = Paint()..color = land..style = PaintingStyle.fill;
+    final stroke = Paint()
+      ..color = border
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..strokeJoin = StrokeJoin.bevel;
 
-    final cell = size.width / _landWidth;
-    final landPaint = Paint()..color = land;
-    for (var r = 0; r < _landRows.length; r++) {
-      final row = _landRows[r];
-      for (var c = 0; c < row.length; c++) {
-        if (row[c] != '#') continue;
-        canvas.drawRect(Rect.fromLTWH(c * cell, r * cell, cell, cell), landPaint);
-      }
+    for (final country in data.countries) {
+      final path = _path(country, size);
+      canvas.drawPath(path, fill);
+      canvas.drawPath(path, stroke);
     }
 
-    final from = origin == null
-        ? Offset(size.width * 0.08, size.height * 0.62)
-        : Offset(size.width * origin!.x, size.height * origin!.y);
-    _square(canvas, from, 7, ink, filled: false);
-
+    final exit = exitCode == null ? null : data.byCode[exitCode];
+    final origin = originCode == null ? null : data.byCode[originCode];
     if (exit != null) {
-      final to = Offset(size.width * exit!.x, size.height * exit!.y);
-      final line = Paint()
-        ..color = route
-        ..strokeWidth = 1
-        ..style = PaintingStyle.stroke;
-      final path = Path()
-        ..moveTo(from.dx, from.dy)
-        ..lineTo(to.dx, from.dy)
-        ..lineTo(to.dx, to.dy);
-      canvas.drawPath(path, line);
-      _square(canvas, to, 7, route, filled: true);
+      canvas.drawPath(
+        _path(exit, size),
+        Paint()..color = route.withValues(alpha: 0.38),
+      );
+      canvas.drawPath(
+        _path(exit, size),
+        Paint()
+          ..color = route
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2
+          ..strokeJoin = StrokeJoin.bevel,
+      );
     }
 
-    final label = exitLabel;
-    if (label != null) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: label,
-          style: TextStyle(
-            fontFamily: kUiFamily,
-            fontFamilyFallback: kMonoFallback,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: ink,
-            height: 1,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, Offset(12, size.height - tp.height - 10));
+    if (origin != null && exit != null && origin.code != exit.code) {
+      _route(canvas, size, origin, exit);
+    }
+    if (origin != null && (exit == null || origin.code != exit.code)) {
+      _mark(canvas, _at(origin, size), ink, hollow: true);
+    }
+    if (exit != null) {
+      final at = _at(exit, size);
+      _mark(canvas, at, route, hollow: false);
+      _label(canvas, size, at, exit.code);
     }
   }
 
-  void _square(Canvas canvas, Offset at, double s, Color color, {required bool filled}) {
-    final rect = Rect.fromCenter(center: at, width: s, height: s);
+  Path _path(MapCountry country, Size size) {
+    final path = Path();
+    for (final ring in country.rings) {
+      double? prevLon;
+      var open = false;
+      for (final pt in ring) {
+        if (prevLon != null && (pt.$1 - prevLon).abs() > 180) {
+          open = false;
+        }
+        final o = _xy(pt.$1, pt.$2, size);
+        if (!open) {
+          path.moveTo(o.dx, o.dy);
+          open = true;
+        } else {
+          path.lineTo(o.dx, o.dy);
+        }
+        prevLon = pt.$1;
+      }
+      if (open) path.close();
+    }
+    return path;
+  }
+
+  void _route(Canvas canvas, Size size, MapCountry from, MapCountry to) {
+    var dLon = to.lon - from.lon;
+    if (dLon > 180) dLon -= 360;
+    if (dLon < -180) dLon += 360;
+    final paint = Paint()
+      ..color = route
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.25
+      ..strokeCap = StrokeCap.square;
+    final path = Path();
+    Offset? prev;
+    const steps = 28;
+    for (var i = 0; i <= steps; i++) {
+      final t = i / steps;
+      var lon = from.lon + dLon * t;
+      if (lon > 180) lon -= 360;
+      if (lon < -180) lon += 360;
+      final lat = from.lat + (to.lat - from.lat) * t;
+      final o = _xy(lon, lat, size);
+      if (prev == null || (o.dx - prev.dx).abs() > size.width * 0.45) {
+        path.moveTo(o.dx, o.dy);
+      } else {
+        path.lineTo(o.dx, o.dy);
+      }
+      prev = o;
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  void _mark(Canvas canvas, Offset at, Color color, {required bool hollow}) {
+    final rect = Rect.fromCenter(center: at, width: 7, height: 7);
     final paint = Paint()
       ..color = color
-      ..style = filled ? PaintingStyle.fill : PaintingStyle.stroke
-      ..strokeWidth = 1;
+      ..style = hollow ? PaintingStyle.stroke : PaintingStyle.fill
+      ..strokeWidth = 1.25;
     canvas.drawRect(rect, paint);
   }
 
+  void _label(Canvas canvas, Size size, Offset at, String code) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: code,
+        style: TextStyle(
+          fontFamily: kUiFamily,
+          fontFamilyFallback: kMonoFallback,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: ink,
+          height: 1,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    var dx = at.dx + 8;
+    var dy = at.dy - tp.height - 4;
+    if (dx + tp.width > size.width - 6) dx = at.dx - tp.width - 8;
+    if (dy < 4) dy = at.dy + 8;
+    tp.paint(canvas, Offset(dx, dy));
+  }
+
+  Offset _at(MapCountry country, Size size) => _xy(country.lon, country.lat, size);
+
+  Offset _xy(double lon, double lat, Size size) =>
+      Offset(WorldMapData.xOf(lon) * size.width, WorldMapData.yOf(lat) * size.height);
+
   @override
-  bool shouldRepaint(covariant _RoutePainter old) =>
+  bool shouldRepaint(covariant _MapPainter old) =>
+      old.map != map ||
       old.land != land ||
-      old.grid != grid ||
+      old.border != border ||
       old.ink != ink ||
       old.route != route ||
-      old.origin?.x != origin?.x ||
-      old.origin?.y != origin?.y ||
-      old.exit?.x != exit?.x ||
-      old.exit?.y != exit?.y ||
-      old.exitLabel != exitLabel;
+      old.originCode != originCode ||
+      old.exitCode != exitCode;
 }
-
-const int _landWidth = 40;
-
-/// 40 columns. `#` is land. Rows are equal length.
-const List<String> _landRows = [
-  '                                        ',
-  '      ####          ######              ',
-  '     ######        ########             ',
-  '     ######        ########    ##       ',
-  '      ####          ######    ####      ',
-  '       ##            ####    ######     ',
-  '                    #####     ####      ',
-  '                   #######     ##       ',
-  '                    #####               ',
-  '                     ###                ',
-  '                      ##     ####       ',
-  '                             ######     ',
-  '                              ####      ',
-  '                                        ',
-];
-
-/// Approximate country positions on the same 0–1 field as [_landRows].
-const Map<String, ({double x, double y})> _places = {
-  'US': (x: 0.18, y: 0.36),
-  'CA': (x: 0.16, y: 0.26),
-  'MX': (x: 0.15, y: 0.46),
-  'BR': (x: 0.30, y: 0.68),
-  'AR': (x: 0.28, y: 0.78),
-  'CL': (x: 0.26, y: 0.76),
-  'GB': (x: 0.46, y: 0.30),
-  'IE': (x: 0.44, y: 0.30),
-  'FR': (x: 0.48, y: 0.36),
-  'DE': (x: 0.51, y: 0.32),
-  'NL': (x: 0.49, y: 0.30),
-  'BE': (x: 0.48, y: 0.32),
-  'LU': (x: 0.49, y: 0.33),
-  'CH': (x: 0.50, y: 0.36),
-  'AT': (x: 0.52, y: 0.35),
-  'IT': (x: 0.52, y: 0.40),
-  'ES': (x: 0.46, y: 0.40),
-  'PT': (x: 0.44, y: 0.40),
-  'SE': (x: 0.53, y: 0.22),
-  'NO': (x: 0.51, y: 0.20),
-  'FI': (x: 0.56, y: 0.20),
-  'DK': (x: 0.51, y: 0.28),
-  'PL': (x: 0.54, y: 0.32),
-  'CZ': (x: 0.52, y: 0.34),
-  'UA': (x: 0.58, y: 0.34),
-  'RO': (x: 0.56, y: 0.38),
-  'BG': (x: 0.56, y: 0.40),
-  'GR': (x: 0.55, y: 0.42),
-  'TR': (x: 0.58, y: 0.42),
-  'RU': (x: 0.70, y: 0.26),
-  'KZ': (x: 0.66, y: 0.38),
-  'AE': (x: 0.63, y: 0.48),
-  'IL': (x: 0.58, y: 0.46),
-  'IN': (x: 0.70, y: 0.50),
-  'SG': (x: 0.76, y: 0.60),
-  'HK': (x: 0.78, y: 0.48),
-  'TW': (x: 0.80, y: 0.48),
-  'JP': (x: 0.86, y: 0.40),
-  'KR': (x: 0.82, y: 0.40),
-  'CN': (x: 0.76, y: 0.40),
-  'TH': (x: 0.74, y: 0.54),
-  'VN': (x: 0.76, y: 0.52),
-  'ID': (x: 0.78, y: 0.64),
-  'AU': (x: 0.84, y: 0.76),
-  'NZ': (x: 0.92, y: 0.82),
-  'ZA': (x: 0.54, y: 0.78),
-  'EG': (x: 0.56, y: 0.48),
-  'NG': (x: 0.48, y: 0.56),
-  'KE': (x: 0.58, y: 0.58),
-};
