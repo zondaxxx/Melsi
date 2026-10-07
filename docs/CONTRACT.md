@@ -125,9 +125,12 @@ class ConfigBuilder {
   so a new manual server is not restored from the previous selector entry.
   `store_dns` is on unless memory saver is set. Memory saver also sets
   the TUN `udp_timeout` to `30s`. `routing.blockQuic` adds a `quic` reject
-  rule after sniff. `settings.multiplex` adds h2mux on native TCP outbounds.
+  rule after sniff. `settings.multiplex` adds h2mux only on native
+  shadowsocks, vmess, vless, and trojan outbounds that have neither a flow
+  nor REALITY.
 - `settings.core`: `singBox` (default), `mihomo` (supported proxies become
-  `type: mihomo` outbounds; SSR/XHTTP/AmneziaWG always do), or `xray`.
+  `type: mihomo` outbounds; SSR/XHTTP/AmneziaWG always do; REALITY and
+  xtls-rprx-vision stay native sing-box), or `xray`.
   Xray is desktop-only: translatable nodes become local SOCKS outbounds and
   `BuiltConfig.xray` is the original Xray JSON. The desktop runner starts
   `xray` (`MELSI_XRAY`, the binary next to `melsi-core`, or `xray` on `PATH`) before the

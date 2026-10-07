@@ -7,7 +7,16 @@ import 'package:melsi/ui/widgets/route_field.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Future<RouteFieldState> show(WidgetTester tester, VpnStatus status) async {
+  Future<RouteFieldState> show(
+    WidgetTester tester, {
+    required VpnStatus status,
+    bool exitReady = false,
+    bool exitFailed = false,
+    bool exitSkipped = false,
+    String exitCode = 'JP',
+    double exitLat = 35.7,
+    double exitLon = 139.7,
+  }) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildTheme(Brightness.dark),
       home: RouteField(
@@ -15,44 +24,137 @@ void main() {
         originCode: 'DE',
         originLat: 52.5,
         originLon: 13.4,
-        exitCode: 'JP',
-        exitLat: 35.7,
-        exitLon: 139.7,
+        exitCode: exitReady ? exitCode : null,
+        exitLat: exitReady ? exitLat : null,
+        exitLon: exitReady ? exitLon : null,
+        exitReady: exitReady,
+        exitFailed: exitFailed,
+        exitSkipped: exitSkipped,
       ),
     ));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 20));
     return tester.state<RouteFieldState>(find.byType(RouteField));
   }
 
-  testWidgets('connect travels to the server and failure spreads at home', (tester) async {
-    var state = await show(tester, VpnStatus.stopped);
+  Future<void> gone(WidgetTester tester) async {
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  }
+
+  testWidgets('holds at the origin until the exit IP is known, then flies', (tester) async {
+    var state = await show(tester, status: VpnStatus.stopped);
     expect(state.debugCue, MapCue.idle);
 
-    state = await show(tester, VpnStatus.connecting);
+    state = await show(tester, status: VpnStatus.connecting);
     await tester.pump(const Duration(milliseconds: 400));
-    expect(state.debugCue, anyOf(MapCue.approach, MapCue.travel));
-    await tester.pump(const Duration(milliseconds: 3400));
+    expect(state.debugCue, MapCue.approach);
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(state.debugCue, MapCue.waiting);
+
+    state = await show(tester, status: VpnStatus.connected);
+    await tester.pump(const Duration(milliseconds: 1200));
+    expect(state.debugCue, MapCue.waiting);
+
+    state = await show(tester, status: VpnStatus.connected, exitReady: true);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(state.debugCue, MapCue.travel);
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 800));
     expect(state.debugCue, MapCue.settled);
 
-    state = await show(tester, VpnStatus.error);
+    await gone(tester);
+  });
+
+  testWidgets('a failed exit lookup returns home and spreads red', (tester) async {
+    final state = await show(tester, status: VpnStatus.connecting);
+    await tester.pump(const Duration(milliseconds: 1000));
+    expect(state.debugCue, MapCue.waiting);
+
+    await show(tester, status: VpnStatus.connected, exitFailed: true);
     await tester.pump(const Duration(milliseconds: 200));
     expect(state.debugCue, MapCue.retreat);
     await tester.pump(const Duration(milliseconds: 1600));
     expect(state.debugCue, MapCue.failed);
 
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump(const Duration(seconds: 1));
-    expect(tester.binding.hasScheduledFrame, isFalse);
+    await gone(tester);
   });
 
-  testWidgets('reduced motion settles without a travelling signal', (tester) async {
+  testWidgets('giving up on the exit IP returns home in red', (tester) async {
+    final state = await show(tester, status: VpnStatus.connected);
+    expect(state.debugCue, MapCue.waiting);
+    await tester.pump(const Duration(seconds: 20));
+    expect(state.debugCue, MapCue.retreat);
+    await tester.pump(const Duration(milliseconds: 1600));
+    expect(state.debugCue, MapCue.failed);
+    await gone(tester);
+  });
+
+  testWidgets('resume with a known exit does not replay the approach', (tester) async {
+    final state = await show(tester, status: VpnStatus.connected, exitReady: true);
+    expect(state.debugCue, MapCue.settled);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(state.debugCue, MapCue.settled);
+    await gone(tester);
+  });
+
+  testWidgets('a server change waits, then flies, without restarting the approach', (tester) async {
+    var state = await show(tester, status: VpnStatus.connected, exitReady: true);
+    expect(state.debugCue, MapCue.settled);
+
+    state = await show(tester, status: VpnStatus.connected);
+    expect(state.debugCue, MapCue.waiting);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(state.debugCue, MapCue.waiting);
+
+    state = await show(
+      tester,
+      status: VpnStatus.connected,
+      exitReady: true,
+      exitCode: 'NL',
+      exitLat: 52.3,
+      exitLon: 4.9,
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(state.debugCue, MapCue.travel);
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(state.debugCue, MapCue.settled);
+    await gone(tester);
+  });
+
+  testWidgets('disconnect during the approach can connect again from the start', (tester) async {
+    var state = await show(tester, status: VpnStatus.connecting);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(state.debugCue, MapCue.approach);
+
+    state = await show(tester, status: VpnStatus.stopped);
+    expect(state.debugCue, MapCue.idle);
+
+    state = await show(tester, status: VpnStatus.connecting);
+    expect(state.debugCue, MapCue.approach);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(state.debugCue, MapCue.approach);
+    await gone(tester);
+  });
+
+  testWidgets('reduced motion still waits for the exit', (tester) async {
     tester.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
-    final state = await show(tester, VpnStatus.connecting);
+
+    var state = await show(tester, status: VpnStatus.connecting);
+    expect(state.debugCue, MapCue.waiting);
+
+    state = await show(tester, status: VpnStatus.connected, exitReady: true);
     expect(state.debugCue, MapCue.settled);
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump();
+
+    state = await show(tester, status: VpnStatus.error);
+    expect(state.debugCue, MapCue.failed);
+    await gone(tester);
   });
 }

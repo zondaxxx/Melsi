@@ -377,7 +377,7 @@ void main() {
       await shutdownApp(tester, state, features: f);
     });
 
-    testWidgets('iOS never looks up on its own; a tap still works', (tester) async {
+    testWidgets('iOS looks up the exit after connect and stays quiet otherwise', (tester) async {
       // Reset inside the body: the binding checks foundation debug
       // variables before tear-downs run.
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
@@ -394,19 +394,22 @@ void main() {
         await state.importText(kSampleVless);
         state.connect();
         await tester.pump(const Duration(milliseconds: 100));
-        await tester.pump(const Duration(seconds: 2));
-        expect(net.geoRequests, 0, reason: 'nothing on connect');
+        expect(state.connected, isTrue);
+        expect(net.geoRequests, 0, reason: 'waits until the tunnel is up');
+        await tester.pump(const Duration(milliseconds: 1600));
+        await tester.pump();
+        expect(net.geoRequests, 1, reason: 'exit lookup after connect');
+        expect(f.netcheck.exitIp?.ip, _nl);
         f.onResume();
         await tester.pump();
-        expect(net.geoRequests, 0, reason: 'nothing on resume');
+        expect(net.geoRequests, 1, reason: 'resume does not look up again');
 
         await f.netcheck.refresh(manual: true);
-        expect(net.geoRequests, 1);
-        expect(f.netcheck.exitIp?.ip, _nl);
+        expect(net.geoRequests, 2);
 
         state.disconnect();
         await tester.pump(const Duration(milliseconds: 100));
-        expect(net.geoRequests, 1, reason: 'nothing on disconnect');
+        expect(net.geoRequests, 2, reason: 'nothing on disconnect');
         f.dispose();
       } finally {
         debugDefaultTargetPlatformOverride = null;

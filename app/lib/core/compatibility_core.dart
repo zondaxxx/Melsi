@@ -21,11 +21,25 @@ abstract final class CompatibilityCore {
       outbound['type'] == 'amneziawg' ||
       (outbound['transport'] as Map?)?['type'] == 'xhttp';
 
+  /// REALITY and xtls-rprx-vision stay native sing-box outbounds.
+  ///
+  /// Mihomo 1.19 finishes the TCP dial and then rejects the ClientHello
+  /// (`REALITY authentication failed`) for ordinary VLESS REALITY servers.
+  /// Vision also cannot share a connection with multiplex.
+  static bool realityOrVision(Map<String, dynamic> outbound) {
+    final flow = outbound['flow'];
+    if (flow is String && flow.isNotEmpty) return true;
+    final tls = outbound['tls'];
+    if (tls is! Map) return false;
+    final reality = tls['reality'];
+    return reality is Map && reality['enabled'] == true;
+  }
+
   /// Clash/Mihomo proxy object for a sing-box outbound the embedded adapter
   /// can dial, or null when the node should stay a native sing-box outbound
-  /// (unknown transport, or a protocol [wrap] already owns).
+  /// (unknown transport, REALITY/vision, or a protocol [wrap] already owns).
   static Map<String, dynamic>? clashProxy(Map<String, dynamic> outbound) {
-    if (needsMihomo(outbound)) return null;
+    if (needsMihomo(outbound) || realityOrVision(outbound)) return null;
     final type = outbound['type'];
     final server = outbound['server'];
     final port = outbound['server_port'];
