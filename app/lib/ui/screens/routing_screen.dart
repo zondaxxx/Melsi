@@ -53,6 +53,12 @@ class RoutingScreen extends StatelessWidget {
               value: r.bypassLan,
               onChanged: (v) => app.updateRouting((x) => x.bypassLan = v),
             ),
+            SwitchRow(
+              title: l('routing.blockQuic'),
+              subtitle: l('routing.blockQuicHint'),
+              value: r.blockQuic,
+              onChanged: (v) => app.updateRouting((x) => x.blockQuic = v),
+            ),
           ]),
         ),
         SliverToBoxAdapter(child: SectionHeader(l('routing.domains'))),

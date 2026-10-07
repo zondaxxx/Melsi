@@ -106,6 +106,8 @@ class IpGeoClient {
       countryCode: _cc(j['country_code']),
       city: _s(j['city']),
       org: _s(conn is Map ? (conn['org'] ?? conn['isp']) : null),
+      latitude: _deg(j['latitude']),
+      longitude: _deg(j['longitude']),
       at: at,
     );
   }
@@ -116,22 +118,30 @@ class IpGeoClient {
         countryCode: _cc(j['country_code']),
         city: _s(j['city']),
         org: _s(j['organization'] ?? j['isp'] ?? j['asn_organization']),
+        latitude: _deg(j['latitude']),
+        longitude: _deg(j['longitude']),
         at: at,
       );
 
   /// ipinfo.io/json: `{ip, country, city, org}` (org is "AS1234 Name").
-  static IpInfo? _ipinfo(Map<String, dynamic> j, DateTime at) => IpInfo(
-        ip: _s(j['ip'])!,
-        countryCode: _cc(j['country']),
-        city: _s(j['city']),
-        org: _stripAsn(_s(j['org'])),
-        at: at,
-      );
+  static IpInfo? _ipinfo(Map<String, dynamic> j, DateTime at) {
+    final loc = _loc(j['loc']);
+    return IpInfo(
+      ip: _s(j['ip'])!,
+      countryCode: _cc(j['country']),
+      city: _s(j['city']),
+      org: _stripAsn(_s(j['org'])),
+      latitude: loc?.$1,
+      longitude: loc?.$2,
+      at: at,
+    );
+  }
 
   /// Any host: the union of the field names above.
   static IpInfo? genericAdapter(Map<String, dynamic> j, DateTime at) {
     if (j['success'] == false) return null;
     final conn = j['connection'];
+    final loc = _loc(j['loc']);
     return IpInfo(
       ip: _s(j['ip'])!,
       countryCode: _cc(j['country_code'] ?? j['countryCode'] ?? j['country']),
@@ -140,6 +150,8 @@ class IpGeoClient {
           j['organization'] ??
           j['isp'] ??
           (conn is Map ? (conn['org'] ?? conn['isp']) : null))),
+      latitude: _deg(j['latitude']) ?? loc?.$1,
+      longitude: _deg(j['longitude']) ?? loc?.$2,
       at: at,
     );
   }
@@ -148,6 +160,24 @@ class IpGeoClient {
     if (v == null) return null;
     final s = v.toString().trim();
     return s.isEmpty ? null : s;
+  }
+
+  static double? _deg(Object? v) {
+    final n = v is num ? v.toDouble() : double.tryParse('${v ?? ''}');
+    if (n == null || n < -180 || n > 180) return null;
+    return n;
+  }
+
+  /// ipinfo.io `loc` is `"lat,lon"`.
+  static (double, double)? _loc(Object? v) {
+    final s = _s(v);
+    if (s == null) return null;
+    final parts = s.split(',');
+    if (parts.length != 2) return null;
+    final lat = _deg(parts[0]);
+    final lon = _deg(parts[1]);
+    if (lat == null || lon == null) return null;
+    return (lat, lon);
   }
 
   /// Two-letter code, upper-cased; anything else is "unknown".

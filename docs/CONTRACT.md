@@ -121,7 +121,18 @@ class ConfigBuilder {
 - Outbound `direct` (type `direct`). Blocking uses rule action `reject`.
 - `experimental.clash_api`: `external_controller` = `endpoints.clashApi`,
   `secret` = `endpoints.secret`. `experimental.cache_file` enabled at
-  `<cacheDir>/cache.db`.
+  `<cacheDir>/cache.db` with `cache_id` `auto` or `manual:<selectedNodeId>`
+  so a new manual server is not restored from the previous selector entry.
+  `store_dns` is on unless memory saver is set. Memory saver also sets
+  the TUN `udp_timeout` to `30s`. `routing.blockQuic` adds a `quic` reject
+  rule after sniff. `settings.multiplex` adds h2mux on native TCP outbounds.
+- `settings.core`: `singBox` (default), `mihomo` (supported proxies become
+  `type: mihomo` outbounds; SSR/XHTTP/AmneziaWG always do), or `xray`.
+  Xray is desktop-only: translatable nodes become local SOCKS outbounds and
+  `BuiltConfig.xray` is the original Xray JSON. The desktop runner starts
+  `xray` (`MELSI_XRAY`, the binary next to `melsi-core`, or `xray` on `PATH`) before the
+  tunnel and excludes the `xray` process from the TUN. Phones refuse to
+  connect while Xray is selected. A double-VPN chain stays on sing-box.
 - Inbound `tun` tag `tun-in` (address `172.19.0.1/30` (+ `fdfe:dcba:9876::1/126` if ipv6),
   `auto_route: true`, `strict_route: settings.killSwitch`, `stack`).
   Android per-app → `include_package` / `exclude_package`.

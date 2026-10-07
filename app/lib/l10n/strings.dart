@@ -294,6 +294,17 @@ const _ru = <String, String>{
   'settings.about': 'О программе',
   'settings.core': 'Ядро',
   'settings.coreMissing': 'melsi-core не найден',
+  'settings.coreEngine': 'Движок',
+  'core.singBox.desc': 'Протоколы sing-box. SSR, XHTTP и AmneziaWG по-прежнему идут через Mihomo.',
+  'core.mihomo.desc': 'Поддерживаемые прокси набирает встроенный Mihomo. Остальные остаются на sing-box.',
+  'core.xray.desc': 'Оригинальный Xray на компьютере: MELSI_XRAY, рядом с melsi-core или в PATH. Телефон остаётся на sing-box.',
+  'settings.performance': 'Память и скорость',
+  'settings.memorySaver': 'Экономить память',
+  'settings.memorySaverHint': 'Короткий UDP-таймаут и без записи DNS-кэша на диск. gVisor всё равно ест больше, чем системный стек.',
+  'settings.multiplex': 'Мультиплекс',
+  'settings.multiplexHint': 'Несколько потоков в одном TCP (h2mux, 4 соединения) на исходящих sing-box.',
+  'routing.blockQuic': 'Блокировать QUIC',
+  'routing.blockQuicHint': 'Отклонять QUIC, чтобы сайты переходили на TCP. Помогает, где UDP режут.',
   'settings.aboutText': 'Клиент на базе sing-box 1.14.',
 
   'logs.pause': 'Пауза',
@@ -325,6 +336,7 @@ const _ru = <String, String>{
   'notice.unsupportedLink': 'Ссылка не поддерживается',
   'notice.applyFailed': 'Не удалось применить настройки',
   'notice.vpnError': 'Соединение прервано',
+  'notice.xrayDesktopOnly': 'Xray в этой сборке только на компьютере',
 };
 
 const _en = <String, String>{
@@ -587,6 +599,17 @@ const _en = <String, String>{
   'settings.about': 'About',
   'settings.core': 'Core',
   'settings.coreMissing': 'melsi-core not found',
+  'settings.coreEngine': 'Engine',
+  'core.singBox.desc': 'sing-box protocols. SSR, XHTTP and AmneziaWG still use the Mihomo adapter.',
+  'core.mihomo.desc': 'Supported proxies dial through embedded Mihomo. Anything else stays on sing-box.',
+  'core.xray.desc': 'Original Xray on desktop: MELSI_XRAY, next to melsi-core, or on PATH. Phones stay on sing-box.',
+  'settings.performance': 'Memory and speed',
+  'settings.memorySaver': 'Save memory',
+  'settings.memorySaverHint': 'Shorter UDP timeout and no DNS cache on disk. gVisor still uses more RAM than the system stack.',
+  'settings.multiplex': 'Multiplex',
+  'settings.multiplexHint': 'Several streams per TCP connection (h2mux, 4 connections) on sing-box outbounds.',
+  'routing.blockQuic': 'Block QUIC',
+  'routing.blockQuicHint': 'Reject QUIC so sites fall back to TCP. Helps where UDP is broken.',
   'settings.aboutText': 'A sing-box 1.14 client.',
 
   'logs.pause': 'Pause',
@@ -617,4 +640,5 @@ const _en = <String, String>{
   'notice.unsupportedLink': 'Unsupported link',
   'notice.applyFailed': 'Couldn’t apply settings',
   'notice.vpnError': 'Connection lost',
+  'notice.xrayDesktopOnly': 'Xray in this build is desktop-only',
 };

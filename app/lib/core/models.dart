@@ -348,6 +348,7 @@ class RoutingSettings {
     List<AppRule>? appRules,
     this.blockAds = true,
     this.bypassLan = true,
+    this.blockQuic = false,
     List<String>? directDomains,
     List<String>? proxyDomains,
     List<String>? blockDomains,
@@ -362,6 +363,9 @@ class RoutingSettings {
   bool blockAds;
   bool bypassLan;
 
+  /// Reject QUIC (UDP/443). Sites fall back to TCP on networks that drop UDP.
+  bool blockQuic;
+
   /// Domain suffixes (`example.com` matches subdomains too).
   List<String> directDomains;
   List<String> proxyDomains;
@@ -373,6 +377,7 @@ class RoutingSettings {
         'appRules': appRules.map((e) => e.toJson()).toList(),
         'blockAds': blockAds,
         'bypassLan': bypassLan,
+        'blockQuic': blockQuic,
         'directDomains': directDomains,
         'proxyDomains': proxyDomains,
         'blockDomains': blockDomains,
@@ -386,6 +391,7 @@ class RoutingSettings {
             .toList(),
         blockAds: j['blockAds'] as bool? ?? true,
         bypassLan: j['bypassLan'] as bool? ?? true,
+        blockQuic: j['blockQuic'] as bool? ?? false,
         directDomains: _strings(j['directDomains']),
         proxyDomains: _strings(j['proxyDomains']),
         blockDomains: _strings(j['blockDomains']),
@@ -506,6 +512,14 @@ enum TunStack { system, gvisor, mixed }
 
 enum LogLevel { trace, debug, info, warn, error }
 
+/// Which proxy engine dials the selected servers.
+///
+/// sing-box always owns TUN, DNS and routing. [mihomo] moves supported
+/// proxy dials onto the embedded Mihomo adapter. [xray] runs the original
+/// Xray core on desktop and points those dials at it. Protocols the chosen
+/// engine cannot carry stay on sing-box so the others keep working.
+enum VpnCore { singBox, mihomo, xray }
+
 /// Desktop only: how traffic is captured.
 enum CaptureMode { tun, systemProxy }
 
@@ -527,6 +541,9 @@ class AppSettings {
     this.captureMode = CaptureMode.tun,
     this.logLevel = LogLevel.warn,
     this.connectOnLaunch = false,
+    this.core = VpnCore.singBox,
+    this.memorySaver = false,
+    this.multiplex = false,
     this.themeMode = 'system',
     this.locale,
     this.onboardingDone = false,
@@ -563,6 +580,15 @@ class AppSettings {
   CaptureMode captureMode;
   LogLevel logLevel;
   bool connectOnLaunch;
+
+  /// Proxy engine. sing-box remains the TUN/DNS/route process either way.
+  VpnCore core;
+
+  /// Drop persisted DNS cache and shorten the TUN UDP timeout.
+  bool memorySaver;
+
+  /// Multiplex TCP proxy streams (h2mux) on native sing-box outbounds.
+  bool multiplex;
 
   /// 'system' | 'light' | 'dark'
   String themeMode;
@@ -607,6 +633,9 @@ class AppSettings {
         'captureMode': captureMode.name,
         'logLevel': logLevel.name,
         'connectOnLaunch': connectOnLaunch,
+        'core': core.name,
+        'memorySaver': memorySaver,
+        'multiplex': multiplex,
         'themeMode': themeMode,
         'locale': locale,
         'onboardingDone': onboardingDone,
@@ -637,6 +666,9 @@ class AppSettings {
             _enum(CaptureMode.values, j['captureMode'], CaptureMode.tun),
         logLevel: _enum(LogLevel.values, j['logLevel'], LogLevel.warn),
         connectOnLaunch: j['connectOnLaunch'] as bool? ?? false,
+        core: _enum(VpnCore.values, j['core'], VpnCore.singBox),
+        memorySaver: j['memorySaver'] as bool? ?? false,
+        multiplex: j['multiplex'] as bool? ?? false,
         themeMode: j['themeMode'] as String? ?? 'system',
         locale: j['locale'] as String?,
         onboardingDone: j['onboardingDone'] as bool? ?? false,
@@ -681,6 +713,8 @@ class IpInfo {
     this.countryCode,
     this.city,
     this.org,
+    this.latitude,
+    this.longitude,
     required this.at,
   });
 
@@ -689,6 +723,10 @@ class IpInfo {
   /// ISO 3166-1 alpha-2.
   final String? countryCode;
   final String? city;
+
+  /// Present when the provider reported a point, not only a country.
+  final double? latitude;
+  final double? longitude;
 
   /// ISP / organisation.
   final String? org;
@@ -699,6 +737,8 @@ class IpInfo {
         'countryCode': countryCode,
         'city': city,
         'org': org,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
         'at': at.toIso8601String(),
       };
 
@@ -707,6 +747,8 @@ class IpInfo {
         countryCode: j['countryCode'] as String?,
         city: j['city'] as String?,
         org: j['org'] as String?,
+        latitude: (j['latitude'] as num?)?.toDouble(),
+        longitude: (j['longitude'] as num?)?.toDouble(),
         at: _date(j['at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
       );
 }
@@ -736,6 +778,7 @@ class BuiltConfig {
     required this.nodeTags,
     this.entryTag,
     this.chainActive = false,
+    this.xray,
   });
 
   /// sing-box 1.14 configuration JSON.
@@ -743,6 +786,10 @@ class BuiltConfig {
 
   /// Melsi engine configuration JSON (docs/CONTRACT.md §2).
   final String engine;
+
+  /// Original Xray JSON for the nodes this build handed to Xray.
+  /// Null when Xray is not driving any outbound.
+  final String? xray;
 
   /// node id -> outbound tag used in [singBox].
   final Map<String, String> nodeTags;

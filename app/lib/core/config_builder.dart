@@ -57,6 +57,7 @@ import 'dart:convert';
 import 'game_presets.dart';
 import 'models.dart';
 import 'compatibility_core.dart';
+import 'xray_config.dart';
 
 class ConfigBuilder {
   ConfigBuilder._();
@@ -152,6 +153,11 @@ class ConfigBuilder {
     final chainActive = entryNode != null &&
         !entryNode.protocol.isEndpoint &&
         ordered.length > 1;
+    // Xray dials from outside the TUN. A chain detour would have to live
+    // inside sing-box, so a double-VPN session stays on sing-box outbounds.
+    final useXray = settings.core == VpnCore.xray && isDesktop && !chainActive;
+    final useMihomo = settings.core == VpnCore.mihomo;
+    final xrayCandidates = <({ProxyNode node, String tag})>[];
 
     for (final n in ordered) {
       final tag = nodeTags[n.id]!;
@@ -183,12 +189,59 @@ class ConfigBuilder {
         nodeOutbounds.add(CompatibilityCore.wrap(h));
       }
       _tune(ob, settings, lowLatency && !isIos);
+      final handToXray = useXray &&
+          (n.chain == null || n.chain!.isEmpty) &&
+          XrayConfig.outbound(n, tag) != null;
+      if (handToXray) {
+        xrayCandidates.add((node: n, tag: tag));
+        continue;
+      }
+      if (useMihomo && helpers.isEmpty) {
+        final clash = CompatibilityCore.clashProxy(ob);
+        if (clash != null) {
+          outbounds.add({
+            'type': 'mihomo',
+            'tag': tag,
+            'domain_resolver': {'server': 'dns-direct'},
+            if (ob['detour'] != null) 'detour': ob['detour'],
+            'proxy': {...clash, 'name': tag},
+          });
+          continue;
+        }
+      }
+      if (settings.multiplex &&
+          !settings.memorySaver &&
+          !n.protocol.isEndpoint &&
+          !CompatibilityCore.needsMihomo(ob) &&
+          _tcpTypes.contains(ob['type'])) {
+        ob['multiplex'] = {
+          'enabled': true,
+          'protocol': 'h2mux',
+          'max_connections': 4,
+          'min_streams': 4,
+          'padding': false,
+        };
+      }
       if (CompatibilityCore.needsMihomo(ob)) {
         outbounds.add(CompatibilityCore.wrap(ob));
       } else if (n.protocol.isEndpoint) {
         endpointsList.add(ob);
       } else {
         outbounds.add(ob);
+      }
+    }
+    final xrayPlan = xrayCandidates.isEmpty
+        ? null
+        : XrayConfig.build(xrayCandidates, logLevel: settings.logLevel);
+    if (xrayPlan != null) {
+      for (final member in xrayPlan.members) {
+        outbounds.add({
+          'type': 'socks',
+          'tag': member.tag,
+          'server': '127.0.0.1',
+          'server_port': member.port,
+          'version': '5',
+        });
       }
     }
     final allTags = nodeTags.values.toList();
@@ -297,6 +350,9 @@ class ConfigBuilder {
     // ---------------------------------------------------------- route rules
     final rules = <Map<String, dynamic>>[];
     rules.add({'action': 'sniff'});
+    if (routing.blockQuic) {
+      rules.add({'protocol': 'quic', 'action': 'reject'});
+    }
     rules.add({
       'type': 'logical',
       'mode': 'or',
@@ -306,6 +362,13 @@ class ConfigBuilder {
       ],
       'action': 'hijack-dns',
     });
+    if (xrayPlan != null) {
+      // Xray's own sockets must leave the machine, not re-enter the TUN.
+      rules.add({
+        'process_name': ['xray', 'xray.exe'],
+        'outbound': tagDirect,
+      });
+    }
     if (routing.bypassLan) {
       rules.add({'ip_is_private': true, 'outbound': tagDirect});
     }
@@ -535,6 +598,7 @@ class ConfigBuilder {
         'auto_route': true,
         'strict_route': settings.killSwitch,
         'stack': stack,
+        if (settings.memorySaver) 'udp_timeout': '30s',
       };
       if (isAndroid &&
           routing.appMode != AppRoutingMode.off &&
@@ -564,8 +628,9 @@ class ConfigBuilder {
     }
 
     // ---------------------------------------------------------- route
-    final usesProcess = isDesktop &&
-        (desktopProcessRules || (game.enabled && gameProcesses.isNotEmpty));
+    final usesProcess = xrayPlan != null ||
+        (isDesktop &&
+            (desktopProcessRules || (game.enabled && gameProcesses.isNotEmpty)));
     final route = <String, dynamic>{
       'rules': rules,
       if (ruleSets.isNotEmpty) 'rule_set': ruleSets.values.toList(),
@@ -594,6 +659,10 @@ class ConfigBuilder {
         'cache_file': {
           'enabled': true,
           'path': _joinPath(cacheDir, 'cache.db'),
+          // Selector memory is keyed by this id. A manual pick gets its own
+          // namespace so a previous outbound cannot be restored over `default`.
+          'cache_id': settings.autoSelect ? 'auto' : 'manual:${selectedNodeId ?? 'none'}',
+          if (!settings.memorySaver) 'store_dns': true,
         },
       },
     };
@@ -646,6 +715,7 @@ class ConfigBuilder {
       nodeTags: nodeTags,
       entryTag: chainActive ? entryTag : null,
       chainActive: chainActive,
+      xray: xrayPlan?.json,
     );
   }
 

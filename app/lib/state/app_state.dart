@@ -245,6 +245,9 @@ class AppState extends ChangeNotifier {
           lastBuilt = await _build(_endpoints!);
         } catch (_) {}
       }
+      // This process did not launch the tunnel, so the live selector may
+      // still be the outbound sing-box restored from an older cache.
+      _startedForNodeId = null;
       _onVpnState(s);
     }
   }
@@ -258,6 +261,9 @@ class AppState extends ChangeNotifier {
         if (s.status != vpnState.status && s.status != VpnStatus.error) _onVpnState(s);
       }));
     }
+    // A tunnel restored in the background can still be sitting on the
+    // outbound sing-box cached before this manual pick.
+    if (connected && !settings.autoSelect) unawaited(_pinManualSelection());
     for (final h in List.of(resumeHooks)) {
       h();
     }
@@ -472,10 +478,13 @@ class AppState extends ChangeNotifier {
   GroupStatus? get proxyGroup => engineGroups[kProxySelector];
   GroupStatus? get gameGroup => engineGroups[kGameSelector];
 
-  /// The node traffic actually uses right now: the engine's pick when
-  /// connected, otherwise the manual selection.
+  /// The node traffic actually uses right now.
+  ///
+  /// Auto mode follows the engine. A manual pick follows [selectedNodeId]
+  /// even while the engine is still reporting the previous outbound, so the
+  /// UI and the next start agree with the server the user chose.
   ProxyNode? get activeNode {
-    if (connected) {
+    if (connected && settings.autoSelect) {
       final n = nodeByTag(proxyGroup?.current);
       if (n != null) return n;
     }
@@ -725,41 +734,100 @@ class AppState extends ChangeNotifier {
 
   // ============================================================ selection
 
+  /// Bumps when the manual server changes, so a connect that is still
+  /// building its config starts the newly chosen node.
+  int _selectionEpoch = 0;
+
+  /// Node id baked into the config that was actually started. Null after
+  /// attaching to a tunnel this process did not start.
+  String? _startedForNodeId;
+
   Future<void> selectNode(String id) async {
+    if (nodeById(id) == null) return;
+    final same = selectedNodeId == id && !settings.autoSelect;
     selectedNodeId = id;
     recentIds
       ..remove(id)
       ..insert(0, id);
     if (recentIds.length > maxRecents) recentIds.removeLast();
     final wasAuto = settings.autoSelect;
-    if (connected) {
-      final tag = tagOf(id);
-      if (tag != null) {
-        try {
-          if (engine != null) {
-            final g = await engine!.select(kProxySelector, tag);
-            engineGroups[kProxySelector] = g;
-          } else {
-            await clash?.select(kProxySelector, tag);
-          }
-          settings.autoSelect = false;
-          unawaited(clash?.closeAllConnections().catchError((_) {}));
-        } catch (_) {
-          try {
-            await clash?.select(kProxySelector, tag);
-            settings.autoSelect = false;
-          } catch (_) {}
-        }
+    // Turn auto off before any await. A connect already in flight reads
+    // these fields, and a failed live switch must not leave auto on.
+    settings.autoSelect = false;
+    if (!same) _selectionEpoch++;
+    if (wasAuto) notice('notice.autoOffManual');
+    _changed();
+    await store.flush();
+    if (same) {
+      if (connected) unawaited(_applyManualSelection());
+      return;
+    }
+    if (vpnState.status == VpnStatus.connecting) return;
+    if (connected) await _applyManualSelection();
+  }
+
+  /// Points the running selector at [selectedNodeId] and drops old flows.
+  /// A failed switch marks the config dirty so the next restart uses the
+  /// manual cache namespace instead of the previous outbound.
+  Future<void> _applyManualSelection() async {
+    if (settings.autoSelect) return;
+    final id = selectedNodeId;
+    if (id == null) return;
+    final tag = tagOf(id);
+    if (tag == null) {
+      _markConfigChanged();
+      return;
+    }
+    try {
+      if (engine != null) {
+        await engine!.setAuto(kProxySelector, false);
+        engineGroups[kProxySelector] = await engine!.select(kProxySelector, tag);
+      } else if (clash != null) {
+        final ok = await clash!.select(kProxySelector, tag);
+        if (!ok) throw StateError('select failed');
       } else {
         _markConfigChanged();
+        return;
       }
-    } else {
-      settings.autoSelect = false;
+      _startedForNodeId = id;
+      unawaited(clash?.closeAllConnections().catchError((_) {}));
+      notifyListeners();
+    } catch (_) {
+      _markConfigChanged();
+      notifyListeners();
     }
-    if (wasAuto && !settings.autoSelect) {
-      notice('notice.autoOffManual');
+  }
+
+  /// After start or resume, move a live tunnel onto the manual pick when
+  /// the running config was not built for it.
+  Future<void> _pinManualSelection() async {
+    if (settings.autoSelect) return;
+    final id = selectedNodeId;
+    if (id == null || _startedForNodeId == id) return;
+    final epoch = _selectionEpoch;
+    for (var i = 0; i < 6; i++) {
+      if (!connected || settings.autoSelect || selectedNodeId != id || _selectionEpoch != epoch) {
+        return;
+      }
+      final tag = tagOf(id);
+      if (tag == null) break;
+      try {
+        if (engine != null) {
+          await engine!.setAuto(kProxySelector, false);
+          final group = await engine!.select(kProxySelector, tag);
+          if (selectedNodeId != id || _selectionEpoch != epoch) return;
+          engineGroups[kProxySelector] = group;
+          _startedForNodeId = id;
+          unawaited(clash?.closeAllConnections().catchError((_) {}));
+          notifyListeners();
+          return;
+        }
+      } catch (_) {}
+      await Future<void>.delayed(Duration(milliseconds: 80 * (i + 1)));
     }
-    _changed();
+    if (connected && !settings.autoSelect && selectedNodeId == id && _selectionEpoch == epoch) {
+      _markConfigChanged();
+    }
   }
 
   Future<void> setAutoSelect(bool on) async {
@@ -894,6 +962,7 @@ class AppState extends ChangeNotifier {
         needsReconnect = false;
         final built = await _build(_endpoints!);
         lastBuilt = built;
+        _startedForNodeId = selectedNodeId;
         await vpn.start(built, name: selectedNode?.name ?? 'Melsi');
         _startRuntime();
       } else {
@@ -1058,6 +1127,11 @@ class AppState extends ChangeNotifier {
       notice('notice.addServerFirst', kind: NoticeKind.error);
       return;
     }
+    if (settings.core == VpnCore.xray && isMobilePlatform) {
+      _setVpn(const VpnState(VpnStatus.error, 'xray-mobile'));
+      notice('notice.xrayDesktopOnly', kind: NoticeKind.error);
+      return;
+    }
     final attempt = ++_connectAttempt;
     _setVpn(const VpnState(VpnStatus.connecting));
     try {
@@ -1072,11 +1146,18 @@ class AppState extends ChangeNotifier {
       _endpoints = RuntimeEndpoints(secret: secret);
       _lastSecret = secret;
       _save();
-      final built = await _build(_endpoints!);
-      if (attempt != _connectAttempt) return;
-      lastBuilt = built;
-      needsReconnect = false;
-      await vpn.start(built, name: selectedNode?.name ?? 'Melsi');
+      while (true) {
+        if (attempt != _connectAttempt) return;
+        final epoch = _selectionEpoch;
+        final built = await _build(_endpoints!);
+        if (attempt != _connectAttempt) return;
+        if (epoch != _selectionEpoch) continue;
+        lastBuilt = built;
+        needsReconnect = false;
+        _startedForNodeId = selectedNodeId;
+        await vpn.start(built, name: selectedNode?.name ?? 'Melsi');
+        break;
+      }
     } catch (e) {
       if (attempt != _connectAttempt) return;
       _setVpn(VpnState(VpnStatus.error, _short(e)));
@@ -1160,6 +1241,7 @@ class AppState extends ChangeNotifier {
     _poll?.cancel();
     _poll = Timer.periodic(const Duration(seconds: 2), (_) => _pollRuntime());
     _pollRuntime();
+    unawaited(_pinManualSelection());
   }
 
   void _stopRuntime() {
