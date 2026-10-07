@@ -10,14 +10,22 @@ import os.log
 ///   -> MelsicoreStartEngine(engine)
 /// and on stop: MelsicoreStopEngine() -> closeService() -> close().
 ///
-/// The app writes `config.json` / `engine.json` into the App Group container
-/// (`group.app.melsi`) before calling `startVPNTunnel(options:)`; the same
-/// payload may also be passed in the start options (`configContent`,
-/// `engineContent`). Options win, the files are the fallback (on-demand /
-/// system restarts start the tunnel without options).
+/// The app writes `config.json` / `engine.json` into the shared App Group
+/// container before calling `startVPNTunnel(options:)`; the same payload may
+/// also be passed in the start options (`configContent`, `engineContent`,
+/// `appGroup`). Options win, the files are the fallback (on-demand / system
+/// restarts start the tunnel without options).
+///
+/// `group.app.melsi` is preferred. A re-signed build whose profile uses
+/// another group still shares that container with the app.
 class PacketTunnelProvider: NEPacketTunnelProvider {
-    static let appGroup = "group.app.melsi"
     static let log = OSLog(subsystem: "app.melsi.PacketTunnel", category: "tunnel")
+
+    private static let containerLock = NSLock()
+    private static var chosenContainer: TunnelConfiguration.SharedContainer?
+    private static let fallbackSharedDirectory: URL = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Melsi", isDirectory: true)
 
     private(set) var commandServer: LibboxCommandServer?
     private lazy var platformInterface = MelsiPlatformInterface(self)
@@ -25,14 +33,39 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     // MARK: - Paths
 
+    static var activeAppGroup: String? {
+        containerLock.lock()
+        defer { containerLock.unlock() }
+        return chosenContainer?.group
+    }
+
     static var sharedDirectory: URL {
-        if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
-            return url
+        containerLock.lock()
+        defer { containerLock.unlock() }
+        if chosenContainer == nil {
+            adoptLocked(hint: nil)
         }
-        // No app group entitlement (e.g. re-signed build): fall back to the
-        // extension's own sandbox so the tunnel can at least run with options.
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Melsi", isDirectory: true)
+        return chosenContainer?.url ?? fallbackSharedDirectory
+    }
+
+    /// `hint` is the group the app already selected (`appGroup` start option).
+    /// An explicit hint can replace a container chosen earlier in this process.
+    static func adoptSharedContainer(hint: String?) {
+        containerLock.lock()
+        defer { containerLock.unlock() }
+        adoptLocked(hint: hint)
+    }
+
+    private static func adoptLocked(hint: String?) {
+        let explicit = hint?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let explicitHint = (explicit?.isEmpty == false) ? explicit : nil
+        if let current = chosenContainer, explicitHint == nil || explicitHint == current.group {
+            return
+        }
+        let resolved = TunnelConfiguration.resolveSharedContainer(hint: TunnelConfiguration.effectiveHint(explicitHint))
+        guard let resolved else { return }
+        chosenContainer = resolved
+        TunnelConfiguration.rememberAppGroup(resolved.group)
     }
 
     static var workingDirectory: URL {
@@ -46,15 +79,25 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // MARK: - Start / stop
 
     override func startTunnel(options: [String: NSObject]?) async throws {
+        Self.adoptSharedContainer(hint: options?["appGroup"] as? String)
         let fileManager = FileManager.default
+        let sandboxDirectory = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         let commandDirectory = try TunnelConfiguration.commandBaseDirectory(
             sharedDirectory: Self.sharedDirectory,
-            sandboxDirectory: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+            sandboxDirectory: sandboxDirectory,
+            isUsable: { TunnelConfiguration.directoryIsWritable($0) })
         let basePath = commandDirectory.path
         let workingPath = Self.workingDirectory.path
         let tempPath = Self.cacheDirectory.path
         for directory in [Self.sharedDirectory, commandDirectory, Self.workingDirectory, Self.cacheDirectory] {
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            do {
+                try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            } catch {
+                throw fail("create \(directory.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        if let group = Self.activeAppGroup {
+            os_log("shared app group %{public}@", log: Self.log, type: .default, group)
         }
         clearLastError()
 
@@ -112,6 +155,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if let object = (try? JSONSerialization.jsonObject(with: messageData)) as? [String: String],
            object["action"] == "reload" {
             do {
+                Self.adoptSharedContainer(hint: object["appGroup"])
                 let options = object.mapValues { $0 as NSObject }
                 let payload = try loadPayload(options)
                 reasserting = true

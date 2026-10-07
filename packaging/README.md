@@ -34,5 +34,10 @@ back to `pkexec`, or you can run the `setcap` command above on the extracted
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Notarization of the DMG. This also requires the certificate secrets. |
 
 The iOS IPA is always unsigned. The Packet Tunnel extension needs a team that
-has the Network Extension entitlement, so re-sign the IPA with one.
+has the Network Extension entitlement, so re-sign the IPA with one. The
+unsigned build declares the App Group `group.app.melsi`. After a re-sign
+(GBox and similar tools) the app uses that group when its container is
+writable, and otherwise a group from the provisioning profile. The profile's
+group id does not have to be `group.app.melsi`; the app and the PacketTunnel
+extension must both be signed with that group.
 Windows arm64 is not built because Flutter needs an arm64 host for it.
