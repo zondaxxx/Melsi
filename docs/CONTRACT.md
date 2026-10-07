@@ -246,6 +246,11 @@ melsi-core version                           # prints JSON {"melsi":..,"sing_box
 - Binary shipped: Windows `melsi-core.exe` next to `melsi.exe`;
   macOS `Melsi.app/Contents/Resources/melsi-core`; Linux `bundle/melsi-core`
   (next to the `melsi` executable). Dart finds it via `Platform.resolvedExecutable`.
+  Release builds compile this binary from the tagged commit (`scripts/build-core.sh`).
+- Desktop release artifacts also ship official Xray-core (`scripts/fetch-xray.sh`,
+  pinned version, SHA256 of the release zip) beside that binary, plus
+  `XRAY-LICENSE` (MPL-2.0): Windows `xray.exe`, macOS `Contents/Resources/xray`
+  (arm64+x64 universal), Linux `xray`. Phones do not ship it.
 
 ## 5. Mobile bridge
 

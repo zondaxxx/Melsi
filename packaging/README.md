@@ -41,3 +41,15 @@ writable, and otherwise a group from the provisioning profile. The profile's
 group id does not have to be `group.app.melsi`; the app and the PacketTunnel
 extension must both be signed with that group.
 Windows arm64 is not built because Flutter needs an arm64 host for it.
+
+## Xray-core
+
+Desktop release jobs run `scripts/fetch-xray.sh` before packaging. It downloads
+the pinned XTLS/Xray-core release, checks the zip SHA256, and installs `xray`
+(or `xray.exe`) next to `melsi-core`, plus `XRAY-LICENSE`. The macOS binary is
+a universal lipo of the arm64 and x64 official builds. Phones do not get a
+binary; the app refuses to connect while Xray is selected.
+
+The same jobs overwrite `melsi-core` in the bundle with the binary
+`scripts/build-core.sh` just produced, so the shipped daemon is the one from
+that commit.

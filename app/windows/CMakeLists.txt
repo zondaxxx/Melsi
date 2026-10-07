@@ -130,3 +130,26 @@ if(EXISTS "${MELSI_CORE_BINARY}")
 else()
   message(WARNING "melsi-core not found at ${MELSI_CORE_BINARY} (run scripts/build-core.sh)")
 endif()
+
+# Original Xray-core, next to melsi-core.exe. scripts/fetch-xray.sh.
+set(XRAY_BINARY
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../core/dist/xray-windows-${MELSI_CORE_ARCH}.exe")
+if(NOT EXISTS "${XRAY_BINARY}")
+  set(XRAY_BINARY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../core/dist/xray-windows-amd64.exe")
+endif()
+set(XRAY_LICENSE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../core/dist/XRAY-LICENSE")
+if(EXISTS "${XRAY_BINARY}")
+  install(PROGRAMS "${XRAY_BINARY}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    RENAME "xray.exe"
+    COMPONENT Runtime)
+else()
+  message(WARNING "xray not found at ${XRAY_BINARY} (run scripts/fetch-xray.sh)")
+endif()
+if(EXISTS "${XRAY_LICENSE}")
+  install(FILES "${XRAY_LICENSE}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    COMPONENT Runtime)
+endif()
