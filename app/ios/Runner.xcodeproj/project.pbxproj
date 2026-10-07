@@ -10,6 +10,7 @@
 		A117A0000000000000000005 /* TunnelConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000001 /* TunnelConfiguration.swift */; };
 		A117A0000000000000000007 /* TunnelConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000006 /* TunnelConfigurationTests.swift */; };
 		A117A0000000000000000002 /* TunnelConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000001 /* TunnelConfiguration.swift */; };
+		A117A0000000000000000008 /* TunnelConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000001 /* TunnelConfiguration.swift */; };
 		A117A0000000000000000004 /* rulesets in Resources */ = {isa = PBXBuildFile; fileRef = A117A0000000000000000003 /* rulesets */; };
 		03497A3CAAFBF043FD8E4A43 /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DA84263919B4F506E448AF42 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		126C0326A197C43F6D43D0D2 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7ACF9CFFE2E5BF14EC95041D /* NetworkExtension.framework */; };
@@ -410,6 +411,7 @@
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 				91AD3D3AEBEF942804273ADD /* MelsiVpnBridge.swift in Sources */,
+				A117A0000000000000000008 /* TunnelConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

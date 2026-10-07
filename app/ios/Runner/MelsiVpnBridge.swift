@@ -9,10 +9,12 @@ import NetworkExtension
 /// `{"state": "<stopped|connecting|connected|stopping>", "message": String?}`.
 ///
 /// The Runner app does not link libbox: the tunnel runs in the PacketTunnel
-/// extension (bundle id `app.melsi.PacketTunnel`); config is handed over via
-/// the App Group container `group.app.melsi`.
+/// extension (bundle id `app.melsi.PacketTunnel`). Config is handed over via
+/// an App Group container. Official builds use `group.app.melsi`; a re-signed
+/// build uses the first writable group shared by the app and the extension.
 final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
-  static let appGroup = "group.app.melsi"
+  static let preferredAppGroup = TunnelConfiguration.preferredAppGroup
+  private var cachedContainer: TunnelConfiguration.SharedContainer?
   static var packetTunnelBundle: Bundle? {
     guard let plugins = Bundle.main.builtInPlugInsURL,
           let urls = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil),
@@ -210,6 +212,7 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
     defer { if currentAttempt == attempt { starting = false } }
     // Best effort: the payload also travels in the start options; the files are
     // what on-demand / system restarts and hot reloads use.
+    let container = try? sharedContainer()
     try? writeSharedFile("config.json", config)
     try? writeSharedFile("engine.json", engine)
     try? writeSharedFile("last_error.txt", "")
@@ -239,10 +242,13 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
     guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
     lastState = "connecting"
     emit("connecting", message: nil)
-    let options: [String: NSObject] = [
+    var options: [String: NSObject] = [
       "configContent": config as NSString,
       "engineContent": engine as NSString,
     ]
+    if let group = container?.group {
+      options["appGroup"] = group as NSString
+    }
     try connection.startVPNTunnel(options: options)
     do {
       try await waitForConnection(connection, attempt: currentAttempt)
@@ -298,9 +304,13 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
 
   @MainActor
   private func reload(_ session: NETunnelProviderSession, config: String, engine: String) async throws {
-    let message = try JSONSerialization.data(withJSONObject: [
+    var payload: [String: String] = [
       "action": "reload", "configContent": config, "engineContent": engine,
-    ])
+    ]
+    if let group = (try? sharedContainer())?.group {
+      payload["appGroup"] = group
+    }
+    let message = try JSONSerialization.data(withJSONObject: payload)
     let response: Data? = try await withCheckedThrowingContinuation { continuation in
       var completed = false
       let finish: (Result<Data?, Error>) -> Void = { result in
@@ -408,20 +418,24 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
 
   // MARK: - Shared container
 
-  private func sharedDirectory() throws -> URL {
-    guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroup) else {
-      throw bridgeError("App Group \(Self.appGroup) is not available (check entitlements / provisioning)")
+  private func sharedContainer() throws -> TunnelConfiguration.SharedContainer {
+    if let cachedContainer { return cachedContainer }
+    guard let resolved = TunnelConfiguration.resolveSharedContainer(hint: TunnelConfiguration.effectiveHint(nil)) else {
+      throw bridgeError("No writable App Group container. Sign the app and PacketTunnel with a profile that contains a shared App Group. Melsi uses \(Self.preferredAppGroup) when that container is writable; otherwise it uses a group from the profile.")
     }
-    return url
+    TunnelConfiguration.rememberAppGroup(resolved.group)
+    cachedContainer = resolved
+    return resolved
   }
 
   private func writeSharedFile(_ name: String, _ content: String) throws {
-    let url = try sharedDirectory().appendingPathComponent(name)
-    try content.write(to: url, atomically: true, encoding: .utf8)
+    let directory = try sharedContainer().url
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try content.write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
   }
 
   private func readSharedFile(_ name: String) -> String? {
-    guard let url = try? sharedDirectory().appendingPathComponent(name) else { return nil }
+    guard let url = try? sharedContainer().url.appendingPathComponent(name) else { return nil }
     return try? String(contentsOf: url, encoding: .utf8)
   }
 

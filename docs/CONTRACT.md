@@ -29,7 +29,7 @@ If you change a seam, change this file in the same commit.
 | Android Kotlin package | `app.melsi` (`app/android/app/src/main/kotlin/app/melsi/`) |
 | iOS/macOS app bundle id | `app.melsi` |
 | iOS Packet Tunnel extension bundle id | `app.melsi.PacketTunnel` |
-| App Group (iOS) | `group.app.melsi` |
+| App Group (iOS) | `group.app.melsi`, or another group from the signed entitlements |
 | Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.25.5` |
 | sing-box | `github.com/sagernet/sing-box v1.14.2` |
 | Compatibility adapters | `github.com/metacubex/mihomo v1.19.32` |
@@ -288,9 +288,29 @@ func EngineStatus() string   // same JSON as GET /status
 func Version() string        // melsi version
 ```
 
-### iOS app group files (`group.app.melsi`)
+### iOS app group files
+
+Official and CI builds declare `group.app.melsi` in `Runner.entitlements` and
+`PacketTunnel.entitlements`. At runtime the app and the PacketTunnel extension
+select one container, in the same order:
+
+1. `group.app.melsi`, when that container exists and is writable.
+2. Otherwise an App Group present in both signed entitlements (the embedded
+   provisioning profile is the fallback). The lists are intersected and sorted
+   so both processes pick the same id. The app also passes the chosen id as
+   the `appGroup` start option.
+
+A GBox (or similar) re-sign replaces the embedded entitlements with the
+profile's groups, for example `group.5c65ddfeba24ae58.1`. The profile does not
+need a group named `group.app.melsi`. It does need one App Group on both the
+app and the PacketTunnel extension; discovery uses that group for
+`config.json`, `engine.json`, `version.json`, `last_error.txt`, and
+`command.sock`.
 
 The app writes `config.json` and `engine.json`. The extension writes
 `version.json` (core versions) and `last_error.txt` (reason for the last
 unexpected stop). The app sends the provider message `"reload"` to hot-reload
 a connected tunnel; `"version"` and `"engineStatus"` are also answered.
+`command.sock` stays in the shared container when the path fits `sockaddr_un`.
+The one-character fallback directory is created only when that directory is
+writable.

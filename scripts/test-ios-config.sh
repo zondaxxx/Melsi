@@ -6,11 +6,15 @@ TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 DEVELOPER="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
 FRAMEWORKS="$DEVELOPER/Library/Frameworks"
-cat > "$TEMP/main.swift" <<'SWIFT'
+EXPECTED="$(grep -c 'func test' "$ROOT/app/ios/RunnerTests/TunnelConfigurationTests.swift")"
+cat > "$TEMP/main.swift" <<SWIFT
 import XCTest
 let suite = TunnelConfigurationTests.defaultTestSuite
 suite.run()
-guard let run = suite.testRun, run.executionCount == 9, run.totalFailureCount == 0 else { exit(1) }
+guard let run = suite.testRun, run.executionCount == $EXPECTED, run.totalFailureCount == 0 else {
+    fputs("expected $EXPECTED tests, ran \\(run?.executionCount ?? 0), failures \\(run?.totalFailureCount ?? -1)\\n", stderr)
+    exit(1)
+}
 SWIFT
 xcrun swiftc -I "$DEVELOPER/usr/lib" -L "$DEVELOPER/usr/lib" -F "$FRAMEWORKS" \
   -Xlinker -rpath -Xlinker "$FRAMEWORKS" -Xlinker -rpath -Xlinker "$DEVELOPER/usr/lib" \

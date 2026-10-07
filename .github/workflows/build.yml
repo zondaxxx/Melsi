@@ -248,8 +248,12 @@ jobs:
           `Melsi-*-ios-unsigned.ipa` must be re-signed before installing.
           The VPN runs in the `app.melsi.PacketTunnel` Network Extension, so the
           signing team needs the **Network Extension (packet-tunnel-provider)**
-          entitlement and the App Group `group.app.melsi`. Free/sideload
-          certificates (AltStore, Sideloadly with a free Apple ID) cannot grant it.
+          entitlement and an App Group shared by the app and the extension.
+          Official builds use `group.app.melsi`. A re-signed install (GBox and
+          similar) uses that group when the container is writable, otherwise a
+          group from the provisioning profile — the profile id does not have to
+          be renamed. Free/sideload certificates (AltStore, Sideloadly with a
+          free Apple ID) cannot grant the Network Extension entitlement.
           EOF
 
       - uses: actions/upload-artifact@v5
