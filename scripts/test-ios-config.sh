@@ -11,8 +11,10 @@ cat > "$TEMP/main.swift" <<SWIFT
 import XCTest
 let suite = TunnelConfigurationTests.defaultTestSuite
 suite.run()
-guard let run = suite.testRun, run.executionCount == $EXPECTED, run.totalFailureCount == 0 else {
-    fputs("expected $EXPECTED tests, ran \\(run?.executionCount ?? 0), failures \\(run?.totalFailureCount ?? -1)\\n", stderr)
+let executed = suite.testRun?.executionCount ?? 0
+let failures = suite.testRun?.totalFailureCount ?? -1
+guard executed == $EXPECTED, failures == 0 else {
+    fputs("expected $EXPECTED tests, ran \\(executed), failures \\(failures)\\n", stderr)
     exit(1)
 }
 SWIFT
