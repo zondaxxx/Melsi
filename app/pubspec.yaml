@@ -18,7 +18,7 @@ dependencies:
   path_provider: ^2.1.6
   mobile_scanner: ^7.4.2
   app_links: ^7.2.1
-  url_launcher: ^6.3.2
+  url_launcher: ^6.3.3
   file_selector: ^1.1.0
   share_plus: ^13.3.0
   qr_flutter: ^4.1.0
