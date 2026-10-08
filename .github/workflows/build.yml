@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-go
 
@@ -90,17 +90,17 @@ jobs:
     env:
       HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Version
         run: bash scripts/version.sh --github
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - uses: subosito/flutter-action@v2
         with:
@@ -144,7 +144,7 @@ jobs:
 
       - name: Cache libbox.aar
         id: libbox
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: app/android/app/libs/libbox.aar
           key: libbox-android-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ANDROID_NDK_VERSION }}-${{ steps.libbox-inputs.outputs.source }}
@@ -208,7 +208,7 @@ jobs:
 
       - run: ls -la dist
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: melsi-android
           path: dist/*
@@ -222,7 +222,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Version
         run: bash scripts/version.sh --github
@@ -248,7 +248,7 @@ jobs:
 
       - name: Cache Libbox.xcframework (iOS device)
         id: libbox
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: app/ios/Frameworks/Libbox.xcframework
           key: libbox-ios-arm64-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.libbox-inputs.outputs.sdk }}-${{ steps.libbox-inputs.outputs.source }}
@@ -299,7 +299,7 @@ jobs:
           free Apple ID) cannot grant the Network Extension entitlement.
           EOF
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: melsi-ios
           path: dist/*
@@ -316,7 +316,7 @@ jobs:
       HAS_MACOS_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Version
         run: bash scripts/version.sh --github
@@ -425,7 +425,7 @@ jobs:
         if: always() && env.KEYCHAIN_PATH != ''
         run: security delete-keychain "$KEYCHAIN_PATH" || true
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: melsi-macos
           path: dist/*
@@ -443,7 +443,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Version
         run: bash scripts/version.sh --github
@@ -514,7 +514,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: melsi-windows
           path: dist/*
@@ -528,7 +528,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Version
         run: bash scripts/version.sh --github
@@ -597,7 +597,7 @@ jobs:
           grep -q 'melsi/xray$' "$RUNNER_TEMP/tar.txt"
           grep -q 'melsi/XRAY-LICENSE$' "$RUNNER_TEMP/tar.txt"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: melsi-linux
           path: dist/*
@@ -615,7 +615,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           pattern: melsi-*
           path: dist
@@ -627,7 +627,7 @@ jobs:
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           # On a manual run the action creates the tag at this commit.
           tag_name: ${{ env.MELSI_RELEASE_TAG || github.ref_name }}
