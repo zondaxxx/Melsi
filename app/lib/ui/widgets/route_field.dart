@@ -39,8 +39,8 @@ enum _Phase {
 ///
 /// Connect zooms toward the pre-VPN country and holds a signal there until
 /// the tunnel is up and the exit IP has been located. Only then does the
-/// signal fly to that country, fill it, and zoom back out. A failure or a
-/// lookup that never arrives returns home and fills the origin in red.
+/// signal fly to that country, fill it, and settle into a closer view. A
+/// failure or a lookup that never arrives returns home in red.
 class RouteField extends StatefulWidget {
   const RouteField({
     super.key,
@@ -81,11 +81,12 @@ class RouteField extends StatefulWidget {
   State<RouteField> createState() => RouteFieldState();
 }
 
-class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
+class RouteFieldState extends State<RouteField>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const _approachFor = Duration(milliseconds: 900);
   static const _travelFor = Duration(milliseconds: 1100);
   static const _spreadFor = Duration(milliseconds: 500);
-  static const _revealFor = Duration(milliseconds: 700);
+  static const _revealFor = Duration(milliseconds: 1100);
   static const _backFor = Duration(milliseconds: 1500);
   static const _exitWait = Duration(seconds: 20);
 
@@ -112,6 +113,8 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
   _MapPainter? _lastPainter;
   _CameraPose? _cameraFrom;
   bool _wasReduced = false;
+  bool _foreground = true;
+  bool _tickerEnabled = true;
   Timer? _exitTimer;
 
   String? _originCode;
@@ -141,16 +144,45 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
   @visibleForTesting
   Offset? get debugFocus => _lastPainter?.cameraPose.focus;
 
+  @visibleForTesting
+  double get debugPulse => _pulse.value;
+
+  @visibleForTesting
+  bool get debugPulseAnimating => _pulse.isAnimating;
+
   bool get _reduce => context.reduceMotion;
+  bool get _canAnimate => !_reduce && _foreground && _tickerEnabled;
+  bool get _hasFlight => _landedCode != null || _landedLat != null;
+  bool get _hasWave =>
+      widget.status == VpnStatus.connected &&
+      _phase == _Phase.settled &&
+      !_homeOnly &&
+      _hasFlight;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_booted) _syncMotion();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
     if (_booted) {
       if (_wasReduced != _reduce) {
         _wasReduced = _reduce;
         if (_reduce) _begin(_phase);
       }
+      _syncMotion();
       return;
     }
     _wasReduced = _reduce;
@@ -173,11 +205,13 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
         oldWidget.exitLat != widget.exitLat ||
         oldWidget.exitLon != widget.exitLon) {
       _sync();
+      _syncMotion();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _exitTimer?.cancel();
     _step.dispose();
     _pulse.dispose();
@@ -231,6 +265,7 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
           _latchLanded();
           _phase = _Phase.settled;
           _stopMotion();
+          _syncMotion();
           _refresh();
         } else if (widget.exitSkipped) {
           _homeOnly = true;
@@ -302,6 +337,7 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
         case _Phase.reveal:
           _phase = _Phase.settled;
           _stopMotion();
+          _syncMotion();
           _refresh();
         case _Phase.retreat:
           _phase = _Phase.failed;
@@ -411,6 +447,7 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
       case _Phase.settled:
         _phase = _Phase.settled;
         _stopMotion();
+        _syncMotion();
       case _Phase.retreat:
         _zoomFrom = _zoomFor(_phase);
         if (_landedCode == null && _landedLat == null) _clearFlight();
@@ -427,12 +464,33 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
 
   void _play(Duration duration) {
     _step.duration = duration;
-    _step.forward(from: 0);
+    _step.value = 0;
+    if (_canAnimate) _step.forward();
   }
 
   void _startPulse() {
-    if (_reduce || _pulse.isAnimating) return;
-    _pulse.repeat();
+    if (!_canAnimate || _pulse.isAnimating) return;
+    _pulse.repeat(period: Duration(milliseconds: _hasWave ? 4200 : 1400));
+  }
+
+  void _syncMotion() {
+    if (!_canAnimate) {
+      _step.stop();
+      _pulse.stop();
+      return;
+    }
+    if (_phase == _Phase.wait || _phase == _Phase.hold || _hasWave) {
+      _startPulse();
+      return;
+    }
+    _pulse.stop();
+    if (_phase == _Phase.approach ||
+        _phase == _Phase.travel ||
+        _phase == _Phase.spread ||
+        _phase == _Phase.reveal ||
+        _phase == _Phase.retreat) {
+      if (!_step.isAnimating && _step.value < 1) _step.forward();
+    }
   }
 
   void _stopPulse() {
@@ -491,7 +549,10 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
   double _zoomFor(_Phase phase) => switch (phase) {
     _Phase.approach || _Phase.wait => _nearZoom,
     _Phase.travel || _Phase.spread => _arrivalZoom,
-    _Phase.reveal || _Phase.settled || _Phase.hold || _Phase.idle => 1,
+    _Phase.reveal ||
+    _Phase.settled ||
+    _Phase.hold => _lastPainter?.cameraPose.zoom ?? 1,
+    _Phase.idle => 1,
     _Phase.retreat || _Phase.failed => _nearZoom,
   };
 
@@ -519,39 +580,50 @@ class RouteFieldState extends State<RouteField> with TickerProviderStateMixin {
         width: double.infinity,
         child: FutureBuilder<WorldMapData>(
           future: WorldMapData.load(),
-          builder: (context, snap) => RepaintBoundary(
-            child: CustomPaint(
-              painter: _lastPainter = _MapPainter(
-                map: snap.data,
-                land: c.isDark
-                    ? const Color(0xFF202426)
-                    : const Color(0xFFF9FAFA),
-                border: c.label.withValues(alpha: c.isDark ? 0.17 : 0.18),
-                ocean: c.background,
-                cameraFrom: _cameraFrom,
-                reduceMotion: _reduce,
-                ink: c.label,
-                route: failing ? c.danger : route,
-                danger: c.danger,
-                originCode: _code(_originCode ?? widget.originCode),
-                exitCode: _homeOnly ? null : _landedCode,
-                fromCode: _code(_fromCode),
-                originLat: _originLat ?? widget.originLat,
-                originLon: _originLon ?? widget.originLon,
-                exitLat: _homeOnly ? null : _landedLat,
-                exitLon: _homeOnly ? null : _landedLon,
-                fromLat: _fromLat,
-                fromLon: _fromLon,
-                status: widget.status,
-                phase: _phase,
-                step: _step,
-                pulse: _pulse,
-                zoomFrom: _zoomFrom,
-                homeOnly: _homeOnly,
-              ),
-              child: const SizedBox.expand(),
-            ),
-          ),
+          builder: (context, snap) {
+            final painter = _lastPainter = _MapPainter(
+              map: snap.data,
+              land: c.isDark
+                  ? const Color(0xFF1C292B)
+                  : const Color(0xFFE8EFEB),
+              border: c.label.withValues(alpha: c.isDark ? .15 : .17),
+              ocean: c.background,
+              cameraFrom: _cameraFrom,
+              reduceMotion: _reduce,
+              ink: c.label,
+              route: failing ? c.danger : route,
+              danger: c.danger,
+              originCode: _code(_originCode ?? widget.originCode),
+              exitCode: _homeOnly ? null : _landedCode,
+              fromCode: _code(_fromCode),
+              originLat: _originLat ?? widget.originLat,
+              originLon: _originLon ?? widget.originLon,
+              exitLat: _homeOnly ? null : _landedLat,
+              exitLon: _homeOnly ? null : _landedLon,
+              fromLat: _fromLat,
+              fromLon: _fromLon,
+              status: widget.status,
+              phase: _phase,
+              step: _step,
+              pulse: _pulse,
+              zoomFrom: _zoomFrom,
+              homeOnly: _homeOnly,
+            );
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // Country geometry is rasterised independently: a repeating
+                // wave repaints only the light foreground, never the atlas.
+                RepaintBoundary(
+                  child: CustomPaint(painter: _AtlasPainter(painter)),
+                ),
+                RepaintBoundary(
+                  child: CustomPaint(painter: _CoveragePainter(painter)),
+                ),
+                RepaintBoundary(child: CustomPaint(painter: painter)),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -588,6 +660,8 @@ class WorldMapData {
   final List<MapCountry> countries;
   final Map<String, MapCountry> byCode;
   static final _paths = Expando<Path>();
+  static final _pathBounds = Expando<Rect>();
+  static final _bounds = Expando<List<Rect>>();
 
   static Future<WorldMapData>? _future;
 
@@ -661,6 +735,37 @@ class WorldMapData {
     _paths[country] = path;
     return path;
   }
+
+  static Rect localBounds(MapCountry country, Offset at) {
+    final rings = _bounds[country] ??= [
+      for (final ring in country.rings)
+        Rect.fromLTRB(
+          ring.map((p) => xOf(p.$1)).reduce(math.min),
+          ring.map((p) => yOf(p.$2)).reduce(math.min),
+          ring.map((p) => xOf(p.$1)).reduce(math.max),
+          ring.map((p) => yOf(p.$2)).reduce(math.max),
+        ),
+    ];
+    double distance(Rect r) =>
+        (Offset(at.dx.clamp(r.left, r.right), at.dy.clamp(r.top, r.bottom)) -
+                at)
+            .distanceSquared;
+    var nearest = rings.first;
+    for (final ring in rings.skip(1)) {
+      if (distance(ring) < distance(nearest)) nearest = ring;
+    }
+    // Include neighbouring islands (Japan, the UK), but not far territories.
+    var bounds = nearest;
+    for (final ring in rings) {
+      if (nearest.inflate(.025).overlaps(ring)) {
+        bounds = bounds.expandToInclude(ring);
+      }
+    }
+    return bounds;
+  }
+
+  static Rect pathBounds(MapCountry country) =>
+      _pathBounds[country] ??= unitPath(country).getBounds();
 }
 
 class MapCountry {
@@ -720,6 +825,7 @@ _Cam _cam({
   required Offset dest,
   required double zoomFrom,
   required bool homeOnly,
+  required double destinationZoom,
 }) {
   final e = _ease(t);
   switch (phase) {
@@ -762,12 +868,12 @@ _Cam _cam({
       );
     case _Phase.hold:
       return _Cam(
-        zoom: 1,
-        focus: _world,
+        zoom: homeOnly ? 1 : destinationZoom,
+        focus: homeOnly ? _world : dest,
         signal: dest,
         trailFrom: dest,
         signalOn: false,
-        spread: 0.35,
+        spread: homeOnly ? 0 : 1,
         fail: 0,
         emerge: 0.85 + 0.15 * math.sin(pulse * math.pi * 2).abs(),
         label: true,
@@ -801,8 +907,8 @@ _Cam _cam({
       );
     case _Phase.reveal:
       return _Cam(
-        zoom: ui.lerpDouble(zoomFrom, 1, e)!,
-        focus: Offset.lerp(homeOnly ? origin : dest, _world, e)!,
+        zoom: ui.lerpDouble(zoomFrom, homeOnly ? 1 : destinationZoom, e)!,
+        focus: homeOnly ? Offset.lerp(origin, _world, e)! : dest,
         signal: homeOnly ? origin : dest,
         trailFrom: from,
         signalOn: false,
@@ -813,8 +919,8 @@ _Cam _cam({
       );
     case _Phase.settled:
       return _Cam(
-        zoom: 1,
-        focus: _world,
+        zoom: homeOnly ? 1 : destinationZoom,
+        focus: homeOnly ? _world : dest,
         signal: homeOnly ? origin : dest,
         trailFrom: from,
         signalOn: false,
@@ -894,7 +1000,11 @@ class _MapPainter extends CustomPainter {
     required this.pulse,
     required this.zoomFrom,
     required this.homeOnly,
-  }) : super(repaint: Listenable.merge([step, pulse]));
+  }) : super(
+         repaint: phase == _Phase.wait || phase == _Phase.hold
+             ? Listenable.merge([step, pulse])
+             : step,
+       );
 
   final WorldMapData? map;
   final Color land;
@@ -941,13 +1051,34 @@ class _MapPainter extends CustomPainter {
       dest: dest,
       zoomFrom: zoomFrom,
       homeOnly: homeOnly,
+      destinationZoom: _destinationZoom(dest),
     );
+  }
+
+  double _destinationZoom(Offset dest) {
+    final country = map?.byCode[exitCode];
+    if (country == null) return 3.4;
+    // Fit the nearby landmass, so overseas territories do not zoom Europe
+    // back out to the whole Atlantic. Keep context around very small states.
+    final bounds = WorldMapData.localBounds(country, dest);
+    final dx = math.max(
+      (bounds.left - dest.dx).abs(),
+      (bounds.right - dest.dx).abs(),
+    );
+    final dy = math.max(
+      (bounds.top - dest.dy).abs(),
+      (bounds.bottom - dest.dy).abs(),
+    );
+    return math
+        .min(.38 / math.max(dx, .001), .36 / math.max(dy, .001))
+        .clamp(2.4, 5.6);
   }
 
   _CameraPose get cameraPose {
     final cam = _view(step.value);
     if (reduceMotion) return const _CameraPose(1, _world);
     final previous = cameraFrom;
+    if (phase == _Phase.hold && previous != null) return previous;
     final animated =
         phase == _Phase.approach ||
         phase == _Phase.travel ||
@@ -959,6 +1090,103 @@ class _MapPainter extends CustomPainter {
     return _CameraPose(
       cam.zoom + (previous.zoom - start.zoom) * remaining,
       cam.focus + (previous.focus - start.focus) * remaining,
+    );
+  }
+
+  void paintAtlas(Canvas canvas, Size size) {
+    final data = map;
+    if (data == null || size.isEmpty) return;
+    final originCountry = data.byCode[originCode];
+    final exitCountry = data.byCode[exitCode];
+    final active =
+        status == VpnStatus.connecting ||
+        status == VpnStatus.connected ||
+        status == VpnStatus.error ||
+        phase == _Phase.retreat ||
+        phase == _Phase.failed;
+    final cam = _view(step.value);
+    final pose = cameraPose;
+
+    // Slate water and fine graticules give the country outline room to read.
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(size.width * .52, size.height * .36),
+          size.width * .7,
+          [
+            Color.alphaBlend(
+              route.withValues(alpha: active ? .085 : .035),
+              ocean,
+            ),
+            ocean,
+          ],
+        ),
+    );
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    canvas.scale(pose.zoom);
+    canvas.translate(-pose.focus.dx * size.width, -pose.focus.dy * size.height);
+    canvas.scale(size.width, size.height);
+
+    final hair = .7 / (pose.zoom * math.min(size.width, size.height));
+    final grid = Paint()
+      ..color = ink.withValues(alpha: .055)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = hair * .7;
+    for (var lon = -180; lon <= 180; lon += 15) {
+      final x = WorldMapData.xOf(lon.toDouble());
+      canvas.drawLine(Offset(x, 0), Offset(x, 1), grid);
+    }
+    for (var lat = -45; lat <= 75; lat += 15) {
+      final y = WorldMapData.yOf(lat.toDouble());
+      canvas.drawLine(Offset(0, y), Offset(1, y), grid);
+    }
+    final fill = Paint()
+      ..shader = ui.Gradient.linear(
+        const Offset(.3, .1),
+        const Offset(.7, .9),
+        [Color.alphaBlend(ink.withValues(alpha: .035), land), land],
+      );
+    final stroke = Paint()
+      ..color = border
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = hair
+      ..strokeJoin = StrokeJoin.round;
+    final viewport = Rect.fromCenter(
+      center: pose.focus,
+      width: 1 / pose.zoom,
+      height: 1 / pose.zoom,
+    ).inflate(hair * 3);
+    for (final country in data.countries) {
+      if (!WorldMapData.pathBounds(country).overlaps(viewport)) continue;
+      final path = WorldMapData.unitPath(country);
+      canvas.drawPath(path, fill);
+      canvas.drawPath(path, stroke);
+    }
+    if (active && originCountry != null && cam.fail == 0) {
+      canvas.drawPath(
+        WorldMapData.unitPath(originCountry),
+        Paint()..color = route.withValues(alpha: .06),
+      );
+    }
+    if (active && exitCountry != null && cam.spread > 0) {
+      _fillCountry(canvas, exitCountry, route, cam.spread, hair);
+    }
+    if (active && originCountry != null && cam.fail > 0) {
+      _fillCountry(canvas, originCountry, danger, cam.fail, hair);
+    }
+    canvas.restore();
+    // Feather the viewport edges, especially when the camera is close.
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(size.width * .5, size.height * .46),
+          size.width * .65,
+          [ocean.withValues(alpha: 0), ocean.withValues(alpha: .55)],
+          [.3, 1],
+        ),
     );
   }
 
@@ -977,60 +1205,6 @@ class _MapPainter extends CustomPainter {
         phase == _Phase.failed;
     final cam = _view(step.value);
     final pose = cameraPose;
-
-    // A quiet atlas: geographic grid and land remain behind the route.
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          Offset(size.width * .52, size.height * .36),
-          size.width * .7,
-          [Color.alphaBlend(ink.withValues(alpha: .035), ocean), ocean],
-        ),
-    );
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2);
-    canvas.scale(pose.zoom);
-    canvas.translate(-pose.focus.dx * size.width, -pose.focus.dy * size.height);
-    canvas.scale(size.width, size.height);
-
-    final hair = .7 / (pose.zoom * math.min(size.width, size.height));
-    final grid = Paint()
-      ..color = ink.withValues(alpha: .045)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = hair * .7;
-    for (var lon = -180; lon <= 180; lon += 30) {
-      final x = WorldMapData.xOf(lon.toDouble());
-      canvas.drawLine(Offset(x, 0), Offset(x, 1), grid);
-    }
-    for (var lat = -30; lat <= 60; lat += 30) {
-      final y = WorldMapData.yOf(lat.toDouble());
-      canvas.drawLine(Offset(0, y), Offset(1, y), grid);
-    }
-    final fill = Paint()..color = land;
-    final stroke = Paint()
-      ..color = border
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = hair
-      ..strokeJoin = StrokeJoin.round;
-    for (final country in data.countries) {
-      final path = WorldMapData.unitPath(country);
-      canvas.drawPath(path, fill);
-      canvas.drawPath(path, stroke);
-    }
-    if (active && originCountry != null && cam.fail == 0) {
-      canvas.drawPath(
-        WorldMapData.unitPath(originCountry),
-        Paint()..color = route.withValues(alpha: .06),
-      );
-    }
-    if (active && exitCountry != null && cam.spread > 0) {
-      _fillCountry(canvas, exitCountry, route, cam.spread, hair);
-    }
-    if (active && originCountry != null && cam.fail > 0) {
-      _fillCountry(canvas, originCountry, danger, cam.fail, hair);
-    }
-    canvas.restore();
 
     final originAt = _screen(origin, pose, size);
     if (!active || phase == _Phase.idle) {
@@ -1083,6 +1257,9 @@ class _MapPainter extends CustomPainter {
     if (cam.label && exitCountry != null) {
       _label(canvas, size, head, exitCountry.code);
     }
+    if (landed && !homeOnly && originCode != null && exitCode != null) {
+      _routeCaption(canvas, size);
+    }
   }
 
   void _fillCountry(
@@ -1095,7 +1272,27 @@ class _MapPainter extends CustomPainter {
     final path = WorldMapData.unitPath(country);
     canvas.drawPath(
       path,
-      Paint()..color = color.withValues(alpha: .06 + .19 * amount),
+      Paint()
+        ..shader = ui.Gradient.radial(
+          _point(
+            country,
+            country.code == exitCode ? exitLon : originLon,
+            country.code == exitCode ? exitLat : originLat,
+          )!,
+          .22,
+          [
+            color.withValues(alpha: .1 + .21 * amount),
+            color.withValues(alpha: .04 + .08 * amount),
+          ],
+        ),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color.withValues(alpha: .08 * amount)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = hair * 5
+        ..strokeJoin = StrokeJoin.round,
     );
     canvas.drawPath(
       path,
@@ -1180,6 +1377,95 @@ class _MapPainter extends CustomPainter {
     );
   }
 
+  void _coverageWaves(
+    Canvas canvas,
+    Size size,
+    Offset at,
+    double progress, {
+    double opacity = 1,
+  }) {
+    final reach = math.max(size.width, size.height) * .72;
+    for (var i = 0; i < 2; i++) {
+      final t = (progress + i * .5) % 1;
+      final radius = 10 + reach * t;
+      final fade = _piece(t, 0, .12) * math.pow(1 - t, 1.7) * opacity;
+      canvas.drawCircle(
+        at,
+        radius,
+        Paint()
+          ..shader = ui.Gradient.radial(
+            at,
+            radius,
+            [
+              route.withValues(alpha: 0),
+              route.withValues(alpha: .012 * fade),
+              route.withValues(alpha: .11 * fade),
+              route.withValues(alpha: 0),
+            ],
+            [0, .64, .94, 1],
+          ),
+      );
+      canvas.drawCircle(
+        at,
+        radius * .965,
+        Paint()
+          ..color = route.withValues(alpha: .32 * fade)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = .8,
+      );
+    }
+  }
+
+  void paintCoverage(Canvas canvas, Size size) {
+    if (status != VpnStatus.connected) return;
+    if (map == null || size.isEmpty || homeOnly || reduceMotion) return;
+    if (exitCode == null && (exitLat == null || exitLon == null)) return;
+    if (phase != _Phase.settled && phase != _Phase.reveal) return;
+    _coverageWaves(
+      canvas,
+      size,
+      _screen(_points.$3, cameraPose, size),
+      phase == _Phase.reveal ? 0 : pulse.value,
+      opacity: phase == _Phase.reveal ? _ease(step.value) : 1,
+    );
+  }
+
+  void _routeCaption(Canvas canvas, Size size) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '$originCode  →  $exitCode',
+        style: TextStyle(
+          fontFamily: kUiFamily,
+          fontFamilyFallback: kMonoFallback,
+          fontSize: 10,
+          letterSpacing: 1.1,
+          color: ink.withValues(alpha: .72),
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        12,
+        size.height - tp.height - 24,
+        tp.width + 22,
+        tp.height + 12,
+      ),
+      const Radius.circular(7),
+    );
+    canvas.drawRRect(rect, Paint()..color = ocean.withValues(alpha: .86));
+    canvas.drawRRect(
+      rect,
+      Paint()
+        ..color = border
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = .6,
+    );
+    tp.paint(canvas, Offset(23, size.height - tp.height - 18));
+    tp.dispose();
+  }
+
   void _mark(
     Canvas canvas,
     Offset at,
@@ -1250,6 +1536,7 @@ class _MapPainter extends CustomPainter {
         ..strokeWidth = .6,
     );
     tp.paint(canvas, Offset(dx + 6, dy + 4.5));
+    tp.dispose();
   }
 
   Offset? _point(MapCountry? country, double? lon, double? lat) {
@@ -1289,4 +1576,30 @@ class _MapPainter extends CustomPainter {
       old.phase != phase ||
       old.zoomFrom != zoomFrom ||
       old.homeOnly != homeOnly;
+}
+
+/// Static land and the camera follow transition frames, not the pulse ticker.
+class _AtlasPainter extends CustomPainter {
+  _AtlasPainter(this.scene) : super(repaint: scene.step);
+  final _MapPainter scene;
+
+  @override
+  void paint(Canvas canvas, Size size) => scene.paintAtlas(canvas, size);
+
+  @override
+  bool shouldRepaint(covariant _AtlasPainter old) =>
+      scene.shouldRepaint(old.scene);
+}
+
+class _CoveragePainter extends CustomPainter {
+  _CoveragePainter(this.scene)
+    : super(repaint: Listenable.merge([scene.step, scene.pulse]));
+  final _MapPainter scene;
+
+  @override
+  void paint(Canvas canvas, Size size) => scene.paintCoverage(canvas, size);
+
+  @override
+  bool shouldRepaint(covariant _CoveragePainter old) =>
+      scene.shouldRepaint(old.scene);
 }

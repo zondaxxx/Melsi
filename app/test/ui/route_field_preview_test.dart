@@ -32,6 +32,9 @@ void main() {
       bool light = false,
       double width = 358,
       bool reduced = false,
+      String exitCode = 'JP',
+      double exitLat = 35.68,
+      double exitLon = 139.69,
     }) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -49,9 +52,9 @@ void main() {
                       originCode: 'RU',
                       originLat: 55.75,
                       originLon: 37.62,
-                      exitCode: ready ? 'JP' : null,
-                      exitLat: ready ? 35.68 : null,
-                      exitLon: ready ? 139.69 : null,
+                      exitCode: ready ? exitCode : null,
+                      exitLat: ready ? exitLat : null,
+                      exitLon: ready ? exitLon : null,
                       exitReady: ready,
                     ),
                   ),
@@ -76,18 +79,29 @@ void main() {
       });
     }
 
+    var frame = 0;
+    Future<void> nextFrame() async {
+      await tester.pump(const Duration(milliseconds: 50));
+      await shot('frame-${(frame++).toString().padLeft(3, '0')}');
+    }
+
     await show(VpnStatus.stopped);
     await shot('01-idle');
     await show(VpnStatus.connecting);
-    await tester.pump(const Duration(milliseconds: 950));
-    await tester.pump(const Duration(milliseconds: 350));
+    for (var i = 0; i < 24; i++) {
+      await nextFrame();
+    }
     await shot('02-waiting');
     await show(VpnStatus.connected, ready: true);
-    for (var i = 0; i < 40; i++) {
-      await tester.pump(const Duration(milliseconds: 75));
-      await shot('frame-${i.toString().padLeft(2, '0')}');
-      if (i == 7) await shot('03-travel');
-      if (i == 18) await shot('04-arrival');
+    // Ten seconds at 20 fps: approach, travel, arrival, and multiple
+    // settled wave cycles. This also exposes any jump between the phases.
+    for (var i = 0; i < 176; i++) {
+      await nextFrame();
+      if (i == 12) await shot('03-travel');
+      if (i == 26) await shot('04-arrival');
+      if (i == 80) await shot('09-settled-wave-a');
+      if (i == 104) await shot('10-settled-wave-b');
+      if (i == 144) await shot('11-settled-wave-c');
     }
     await shot('05-connected-dark');
     await show(VpnStatus.connected, ready: true, light: true);
@@ -96,9 +110,20 @@ void main() {
     await show(VpnStatus.connected, ready: true, width: 288);
     await tester.pump(const Duration(milliseconds: 400));
     await shot('07-small-screen');
-    await show(VpnStatus.stopped, reduced: true);
-    await show(VpnStatus.connecting, reduced: true);
+    await show(VpnStatus.connected, ready: true, reduced: true);
     await shot('08-reduced-motion');
+    await show(VpnStatus.stopped);
+    await show(
+      VpnStatus.connected,
+      ready: true,
+      exitCode: 'NL',
+      exitLat: 52.37,
+      exitLon: 4.9,
+    );
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await shot('12-connected-netherlands');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   }, skip: output == null);

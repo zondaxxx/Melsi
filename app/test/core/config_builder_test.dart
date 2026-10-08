@@ -75,7 +75,36 @@ Future<ProcessResult> runCore(String bin, List<String> arguments) async {
   }
 }
 
+// Xray 26.3.27 accepts gRPC but recommends that providers migrate it to XHTTP.
+// This exact advisory does not mean our generated sing-box schema is obsolete.
+const _xrayGrpcAdvisory = '[Warning] common/errors: The feature gRPC transport '
+    '(with unnecessary costs, etc.) is deprecated, not recommended for using '
+    'and might be removed. Please migrate to XHTTP stream-up H2 as soon as possible.';
+
+List<String> unexpectedCoreDeprecations(String output,
+    {required bool embeddedXrayGrpc}) {
+  final timestamp = RegExp(r'^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)? ');
+  return const LineSplitter().convert(output).where((line) {
+    if (!line.toLowerCase().contains('deprecated')) return false;
+    return !embeddedXrayGrpc ||
+        line.trim().replaceFirst(timestamp, '') != _xrayGrpcAdvisory;
+  }).toList();
+}
+
 void main() {
+  test('core validation permits only the current embedded Xray gRPC advisory', () {
+    const warning = '2026/10/07 23:33:54.293876 $_xrayGrpcAdvisory';
+    expect(unexpectedCoreDeprecations(warning, embeddedXrayGrpc: true), isEmpty);
+    expect(unexpectedCoreDeprecations(warning, embeddedXrayGrpc: false), [warning]);
+    const obsoleteSchema = 'WARN legacy DNS servers are deprecated';
+    const anotherXrayWarning = '[Warning] common/errors: other transport is deprecated';
+    expect(
+      unexpectedCoreDeprecations('$warning\n$obsoleteSchema\n$anotherXrayWarning',
+          embeddedXrayGrpc: true),
+      [obsoleteSchema, anotherXrayWarning],
+    );
+  });
+
   group('structure', () {
     test('basic layout, tags, selectors, experimental', () {
       final nodes = allNodes();
@@ -513,7 +542,12 @@ void main() {
       final r = await runCore(bin!, ['check', '-c', f.path]);
       final err = '${r.stdout}${r.stderr}';
       expect(r.exitCode, 0, reason: '$label\n$err\n${f.path}');
-      expect(err.toLowerCase().contains('deprecated'), isFalse,
+      final outbounds = (jsonDecode(b.singBox)['outbounds'] as List)
+          .cast<Map<String, dynamic>>();
+      final embeddedXrayGrpc = outbounds.any((outbound) =>
+          outbound['type'] == 'xray' &&
+          outbound['outbound']?['streamSettings']?['network'] == 'grpc');
+      expect(unexpectedCoreDeprecations(err, embeddedXrayGrpc: embeddedXrayGrpc), isEmpty,
           reason: '$label: deprecation warning\n$err');
     }
 
