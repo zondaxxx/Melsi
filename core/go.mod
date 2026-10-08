@@ -12,6 +12,7 @@ require (
 	github.com/sagernet/sing v0.9.6-0.20260922013354-87c33f17688f
 	github.com/sagernet/sing-box v1.14.2
 	github.com/sagernet/sing-vmess v0.2.8
+	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f
 	github.com/xtls/xray-core v1.260327.0
 )
 
@@ -204,7 +205,7 @@ require (
 	github.com/sagernet/sing-shadowsocks2 v0.2.1 // indirect
 	github.com/sagernet/sing-shadowtls v0.2.1 // indirect
 	github.com/sagernet/sing-snell v0.0.0-20260829071736-20f2eaec77c3 // indirect
-	github.com/sagernet/sing-tun v0.9.6-0.20260924001923-ddaa4ca25e3b // indirect
+	github.com/sagernet/sing-tun v0.9.6 // indirect
 	github.com/sagernet/sing-usbip v0.0.0-20260817040617-28bd42667eca // indirect
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect
 	github.com/sagernet/tailscale v1.102.1-sing-box-1.14-mod.5 // indirect
@@ -233,7 +234,6 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
