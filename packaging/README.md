@@ -47,8 +47,9 @@ Windows arm64 is not built because Flutter needs an arm64 host for it.
 Desktop release jobs run `scripts/fetch-xray.sh` before packaging. It downloads
 the pinned XTLS/Xray-core release, checks the zip SHA256, and installs `xray`
 (or `xray.exe`) next to `melsi-core`, plus `XRAY-LICENSE`. The macOS binary is
-a universal lipo of the arm64 and x64 official builds. Phones do not get a
-binary; the app refuses to connect while Xray is selected.
+a universal lipo of the arm64 and x64 official builds. On iOS and Android,
+Xray is embedded in libbox for REALITY/Vision and XHTTP; no separate executable
+is required. The Xray engine can also be selected on phones.
 
 The same jobs overwrite `melsi-core` in the bundle with the binary
 `scripts/build-core.sh` just produced, so the shipped daemon is the one from
