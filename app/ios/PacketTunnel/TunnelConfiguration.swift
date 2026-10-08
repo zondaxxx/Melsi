@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CoreFoundation
 
 enum TunnelConfiguration {
     /// Official and CI builds declare this group. Re-signed installs (GBox and
@@ -10,6 +11,7 @@ enum TunnelConfiguration {
     static let commandSocketPathCapacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
     private static let lifecycleLock = NSLock()
     static let lifecycleHistoryLimit = 64
+    static let oomEventReadLimit = 128 * 1024
 
     struct SharedContainer: Equatable {
         var group: String
@@ -105,13 +107,73 @@ enum TunnelConfiguration {
         requestedAttempt == currentAttempt && (!enabling || !userStopped)
     }
 
-    static func diagnosticLog(journal: String?, stop: String?, error: String?, maxLines: Int) -> String {
+    static func diagnosticLog(journal: String?, stop: String?, error: String?, maxLines: Int, oomEvents: [String] = []) -> String {
         var lines = (journal ?? "").split(separator: "\n").map(String.init)
+        lines.append(contentsOf: oomEvents.suffix(20))
         for (label, text) in [("[last stop]", stop), ("[last error]", error)] {
             guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
             lines.append(contentsOf: text.split(separator: "\n").map { "\(label) \($0)" })
         }
         return lines.suffix(min(max(maxLines, 1), 400)).joined(separator: "\n")
+    }
+
+    /// Read only the bounded tail of libbox's event metadata. OOM report
+    /// directories also contain configurations and connections; never load
+    /// those files or return an arbitrary JSON field from this one.
+    static func oomResetEvents(in sharedDirectory: URL) -> [String] {
+        let url = sharedDirectory.appendingPathComponent("Library/Caches/Working/oom_draft/events.jsonl")
+        guard let file = try? FileHandle(forReadingFrom: url) else { return [] }
+        defer { try? file.close() }
+        do {
+            let length = try file.seekToEnd()
+            let offset = length > UInt64(oomEventReadLimit) ? length - UInt64(oomEventReadLimit) : 0
+            try file.seek(toOffset: offset)
+            var data = try file.read(upToCount: oomEventReadLimit) ?? Data()
+            if offset > 0 {
+                // The tail can start inside a UTF-8 character or JSON record.
+                guard let newline = data.firstIndex(of: 10) else { return [] }
+                data = data.suffix(from: data.index(after: newline))
+            }
+            return formatOOMResetEvents(data)
+        } catch {
+            return []
+        }
+    }
+
+    static func formatOOMResetEvents(_ data: Data) -> [String] {
+        let timestamp = ISO8601DateFormatter()
+        let fractionalTimestamp = ISO8601DateFormatter()
+        fractionalTimestamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var result: [String] = []
+        for line in data.split(separator: 10) {
+            guard let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  event["t"] as? String == "reset",
+                  let recordedAt = event["at"] as? String, recordedAt.utf8.count <= 40,
+                  let date = timestamp.date(from: recordedAt) ?? fractionalTimestamp.date(from: recordedAt) else { continue }
+            var reportOnly = false
+            if let value = event["reportOnly"] {
+                guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { continue }
+                reportOnly = number.boolValue
+            }
+            let reason = event["reason"] as? String
+            let safeReason = reason == "rate" || reason == "threshold" ? reason! : "unknown"
+            var text = "[memory guard] \(timestamp.string(from: date)): \(reportOnly ? "would reset (report only)" : "reset") (\(safeReason))"
+            for (key, label) in [("memoryBytes", "memory"), ("memoryAfterBytes", "after"), ("memoryLimit", "limit"), ("triggerBytes", "trigger")] {
+                if let bytes = diagnosticUnsignedInteger(event[key]) {
+                    text += String(format: "; %@ %.1f MiB", locale: Locale(identifier: "en_US_POSIX"), label, Double(bytes) / 1_048_576)
+                }
+            }
+            if let connections = diagnosticUnsignedInteger(event["connections"]) {
+                text += "; connections \(connections)"
+            }
+            result.append(text)
+        }
+        return Array(result.suffix(20))
+    }
+
+    private static func diagnosticUnsignedInteger(_ value: Any?) -> UInt64? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return UInt64(number.stringValue)
     }
 
     private static func writeDiagnostic(_ text: String, to url: URL) throws {

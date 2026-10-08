@@ -3,6 +3,52 @@ import XCTest
 import Darwin
 
 final class TunnelConfigurationTests: XCTestCase {
+    func testOOMResetDiagnosticsIncludeOnlyTypedMetadata() {
+        let input = #"{"t":"reset","at":"2026-10-08T10:00:01.123456789Z","reason":"threshold","memoryBytes":48234496,"memoryAfterBytes":31457280,"memoryLimit":52428800,"triggerBytes":47185920,"connections":8,"config":"secret-config","destination":"secret-host","runtime":{"token":"secret-token"}}"#
+        let events = TunnelConfiguration.formatOOMResetEvents(Data(input.utf8))
+        XCTAssertEqual(events, ["[memory guard] 2026-10-08T10:00:01Z: reset (threshold); memory 46.0 MiB; after 30.0 MiB; limit 50.0 MiB; trigger 45.0 MiB; connections 8"])
+        XCTAssertFalse(events.joined().contains("secret"))
+    }
+
+    func testOOMResetDiagnosticsSkipMalformedLinesAndDistinguishReportOnly() {
+        let input = [
+            "partial-json",
+            #"{"t":"snapshot","at":"2026-10-08T10:00:00Z","config":"secret"}"#,
+            #"{"t":"reset","at":"secret-timestamp","reason":"threshold"}"#,
+            #"{"t":"reset","at":"2026-10-08T10:00:00Z","reportOnly":"false"}"#,
+            #"{"t":"reset","at":"2026-10-08T10:00:00Z","reason":"secret-reason","memoryBytes":"secret-size","memoryAfterBytes":true,"connections":-1}"#,
+            #"{"t":"reset","at":"2026-10-08T10:00:01Z","reason":"rate","reportOnly":true,"memoryBytes":41943040}"#,
+        ].joined(separator: "\n")
+        XCTAssertEqual(TunnelConfiguration.formatOOMResetEvents(Data(input.utf8)), [
+            "[memory guard] 2026-10-08T10:00:00Z: reset (unknown)",
+            "[memory guard] 2026-10-08T10:00:01Z: would reset (report only) (rate); memory 40.0 MiB",
+        ])
+    }
+
+    func testOOMResetFileReadIsBoundedAndKeepsLastTwentyEvents() throws {
+        let shared = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: shared) }
+        XCTAssertTrue(TunnelConfiguration.oomResetEvents(in: shared).isEmpty)
+        let directory = shared.appendingPathComponent("Library/Caches/Working/oom_draft")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let events = (0 ..< 25).map { index in
+            String(format: "{\"t\":\"reset\",\"at\":\"2026-10-08T10:00:%02dZ\",\"reason\":\"threshold\"}", index)
+        }.joined(separator: "\n")
+        let oversizedPrefix = String(repeating: "x", count: TunnelConfiguration.oomEventReadLimit + 10)
+        try (oversizedPrefix + "\n" + events + "\n{unfinished").write(to: directory.appendingPathComponent("events.jsonl"), atomically: true, encoding: .utf8)
+        try "secret-config".write(to: directory.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+        let result = TunnelConfiguration.oomResetEvents(in: shared)
+        XCTAssertEqual(result.count, 20)
+        XCTAssertEqual(result.first, "[memory guard] 2026-10-08T10:00:05Z: reset (threshold)")
+        XCTAssertEqual(result.last, "[memory guard] 2026-10-08T10:00:24Z: reset (threshold)")
+        XCTAssertFalse(result.joined().contains("secret"))
+    }
+
+    func testOOMEventsRespectCombinedLogLimitAndKeepErrorVisible() {
+        XCTAssertEqual(TunnelConfiguration.diagnosticLog(journal: "health", stop: "stop reason", error: "core error", maxLines: 3,
+            oomEvents: ["[memory guard] reset"]), "[memory guard] reset\n[last stop] stop reason\n[last error] core error")
+    }
+
     func testRecoveryPolicyRejectsOutdatedStartAndPreservesManualStop() {
         XCTAssertTrue(TunnelConfiguration.mayUpdateOnDemand(enabling: true, requestedAttempt: 1, currentAttempt: 1, userStopped: false))
         XCTAssertFalse(TunnelConfiguration.mayUpdateOnDemand(enabling: true, requestedAttempt: 1, currentAttempt: 2, userStopped: false))

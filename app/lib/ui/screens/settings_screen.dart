@@ -115,6 +115,32 @@ class SettingsScreen extends StatelessWidget {
               ),
           ]),
         ),
+        SliverToBoxAdapter(
+          child: choice(
+            l('settings.pingDisplay'),
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              GroupCard(children: [
+                SwitchRow(
+                  title: l('settings.showPing'),
+                  value: s.showPing,
+                  onChanged: (v) => app.updateSettings((x) => x.showPing = v, affectsConfig: false),
+                ),
+              ]),
+              if (s.showPing) ...[
+                const SizedBox(height: Space.m),
+                Segmented<PingDisplay>(
+                  value: s.pingDisplay,
+                  onChanged: (v) => app.updateSettings((x) => x.pingDisplay = v, affectsConfig: false),
+                  segments: [
+                    for (final mode in PingDisplay.values)
+                      Segment(mode, l('ping.format.${mode.name}')),
+                  ],
+                ),
+              ],
+            ]),
+            l('settings.pingDisplayHint'),
+          ),
+        ),
         ...SettingsSlots.afterSmart(context, app),
         // ------------------------------------------------ DNS
         SliverToBoxAdapter(child: SectionHeader(l('settings.dns'))),

@@ -172,10 +172,11 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
       result(coreVersion())
     case "readLog":
       let arguments = call.arguments as? [String: Any]
+      let oomEvents = (try? sharedContainer().url).map { TunnelConfiguration.oomResetEvents(in: $0) } ?? []
       result(TunnelConfiguration.diagnosticLog(
         journal: readSharedFile("tunnel_lifecycle.jsonl"),
         stop: readSharedFile("last_stop.txt"), error: readSharedFile("last_error.txt"),
-        maxLines: arguments?["maxLines"] as? Int ?? 200))
+        maxLines: arguments?["maxLines"] as? Int ?? 200, oomEvents: oomEvents))
     case "installedApps":
       result([Any]())
     case "appIcon":

@@ -113,6 +113,15 @@ class NetCheckService extends FeatureService {
   int? livePing;
   double? liveDown;
   bool speedFailed = false;
+  SpeedTestException? speedFailure;
+  SpeedPhase? failedPhase;
+
+  String get speedErrorKey => speedFailure == null
+      ? 'speed.failed'
+      : 'speed.error.${speedFailure!.failure.name}';
+  Map<String, String> get speedErrorArgs => {
+    if (speedFailure?.statusCode != null) 'status': '${speedFailure!.statusCode}',
+  };
   final Map<String, List<SpeedResult>> _speedResults = {};
   SpeedTest? _speed;
 
@@ -414,6 +423,8 @@ class NetCheckService extends FeatureService {
     livePing = null;
     liveDown = null;
     speedFailed = false;
+    speedFailure = null;
+    failedPhase = null;
     phase = SpeedPhase.ping;
     _notify();
 
@@ -459,6 +470,8 @@ class NetCheckService extends FeatureService {
     final t = _speed;
     if (t == null) return;
     t.cancel();
+    speedFailure = null;
+    failedPhase = null;
     _speed = null;
     phase = SpeedPhase.idle;
     currentBps = 0;
@@ -476,6 +489,7 @@ class NetCheckService extends FeatureService {
   void _fail(SpeedTest test) {
     if (!identical(_speed, test)) return;
     _speed = null;
+    failedPhase = phase;
     phase = SpeedPhase.idle;
     speedFailed = true;
     currentBps = 0;
@@ -496,10 +510,14 @@ class NetCheckService extends FeatureService {
         if (samples.length > maxSamples) samples.removeAt(0);
         _notify();
       }
-    } catch (_) {
+    } catch (error) {
+      if (!_ended(test)) speedFailure = SpeedTestException.from(error);
       return null;
     }
-    if (last == null || last.bytes == 0) return null;
+    if (last == null || last.bytes == 0) {
+      if (!_ended(test)) speedFailure = const SpeedTestException(SpeedFailure.empty);
+      return null;
+    }
     return last.averageBps;
   }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/app/proxyman"
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
+	XLog "github.com/xtls/xray-core/common/log"
 	X "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/serial"
 	xcore "github.com/xtls/xray-core/core"
@@ -56,6 +57,11 @@ var xrayDialers sync.Map
 var xrayInstanceMu sync.Mutex
 
 func init() {
+	// Unlike the standalone client, embedded Xray has no app/log instance.
+	// Its unfiltered default otherwise writes a debug line for each Vision
+	// payload chunk. Install one process-wide filter, not a logger per node:
+	// closing a probe must not disable logging for the live tunnel.
+	XLog.ReplaceWithSeverityLogger(XLog.Severity_Warning)
 	// Installed once, before any instances exist. Never fall back to an
 	// unprotected OS socket, even for background HTTP/2 pool reconnects.
 	internet.UseAlternativeSystemDialer(xraySystemDialer{})

@@ -240,7 +240,7 @@ void main() {
       final client = MockClient.streaming(
           (req, _) async => http.StreamedResponse(Stream.value(const <int>[]), 503));
       final test = SpeedTest(client: () => client);
-      await expectLater(test.download().toList(), throwsA(isA<http.ClientException>()));
+      await expectLater(test.download().toList(), throwsA(isA<SpeedTestException>().having((error) => error.failure, 'failure', SpeedFailure.server).having((error) => error.statusCode, 'status', 503)));
     });
   });
 

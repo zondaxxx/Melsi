@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/models.dart';
 import '../../l10n/l10n.dart';
+import '../../state/app_scope.dart';
 import '../theme/pressable.dart';
 import '../theme/surfaces.dart';
 import '../theme/theme.dart';
@@ -271,9 +272,8 @@ class ProtocolBadge extends StatelessWidget {
       Text(protocol.label.toUpperCase(), style: context.t.monoSmall);
 }
 
-/// Latency as right-aligned tabular text coloured by quality. Unknown shows
-/// "—" which, when [onTest] is set, is tappable to measure just that node.
-/// Shows a spinner while testing.
+/// Latency in the user's preferred format. Visibility is presentation only;
+/// tapping a visible value still measures that node when [onTest] is set.
 class LatencyChip extends StatelessWidget {
   const LatencyChip({
     super.key,
@@ -283,6 +283,7 @@ class LatencyChip extends StatelessWidget {
     this.label,
     this.onTest,
     this.size = 13,
+    this.alignment = Alignment.centerRight,
   });
   final int? ms;
   final bool testing;
@@ -290,11 +291,23 @@ class LatencyChip extends StatelessWidget {
   final String? label;
   final VoidCallback? onTest;
   final double size;
+  final Alignment alignment;
 
   @override
   Widget build(BuildContext context) {
+    final settings = AppScope.maybeOf(context)?.settings;
+    if (settings?.showPing == false) return const SizedBox.shrink();
+    final format = settings?.pingDisplay ?? PingDisplay.number;
     final c = context.c;
     final l = context.l;
+    final unknown = ms == null && !failed;
+    final description = testing
+        ? l('ping.testing')
+        : failed
+            ? l('ping.timeout')
+            : unknown
+                ? l('ping.unknown')
+                : l('unit.ms', {'n': '$ms'});
     Widget child;
     if (testing) {
       child = const SizedBox(
@@ -302,50 +315,72 @@ class LatencyChip extends StatelessWidget {
           width: 44,
           height: 22,
           child: Center(child: CupertinoActivityIndicator(radius: 6)));
-    } else if (ms == null && !failed) {
-      child = SizedBox(
-        key: const ValueKey('u'),
-        width: 44,
-        height: 22,
-        child: Align(
-          alignment: Alignment.centerRight,
-          // Unmeasured is a dash in muted mono, tappable when [onTest] is
-          // set — the same idiom as every other unknown value.
-          child: Text('—', style: context.t.mono.copyWith(color: c.tertiaryLabel)),
-        ),
-      );
-      if (onTest != null) {
-        child = Tooltip(
-          key: const ValueKey('u'),
-          message: l('ping.test'),
-          child: PressableScale(scale: 0.9, haptic: true, onTap: onTest, child: child),
-        );
-      }
     } else {
-      // Numbers are mono; a *word* ("Нет ответа") is set in the UI sans.
       final color = failed ? c.danger : c.latency(ms);
+      final strength = ms == null || ms! <= 0 ? 0 : ms! < 100 ? 3 : ms! < 250 ? 2 : 1;
       child = SizedBox(
-        key: ValueKey('$ms$failed'),
+        key: ValueKey('$ms-$failed-${format.name}'),
+        width: unknown && format == PingDisplay.number ? 44 : null,
         height: 22,
         child: Align(
-          alignment: Alignment.centerRight,
-          child: Text(
-            failed ? (label ?? '×') : l('unit.ms', {'n': '$ms'}),
-            maxLines: 1,
-            style: failed
-                ? context.t.caption.copyWith(fontSize: size, color: color, fontWeight: FontWeight.w500)
-                : context.t.mono.copyWith(fontSize: size, color: color),
+          alignment: alignment,
+          widthFactor: 1,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: alignment,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (format != PingDisplay.number)
+                failed
+                    ? Icon(Icons.close_rounded, size: 14, color: color)
+                    : Row(
+                        key: ValueKey('ping-indicator-$strength'),
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          for (var i = 0; i < 3; i++)
+                            Container(
+                              width: 3,
+                              height: 4 + i * 3,
+                              margin: EdgeInsets.only(left: i == 0 ? 0 : 2),
+                              decoration: BoxDecoration(
+                                color: i < strength ? color : c.tertiaryLabel.withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(1),
+                              ),
+                            ),
+                        ],
+                      ),
+              if (format == PingDisplay.both) const SizedBox(width: 5),
+              if (format != PingDisplay.indicator)
+                Text(
+                  failed ? (label ?? '×') : unknown ? '—' : l('unit.ms', {'n': '$ms'}),
+                  maxLines: 1,
+                  style: failed
+                      ? context.t.caption.copyWith(fontSize: size, color: color, fontWeight: FontWeight.w500)
+                      : context.t.mono.copyWith(fontSize: size, color: color),
+                ),
+            ]),
           ),
         ),
       );
       if (onTest != null) {
-        child = PressableScale(key: child.key, scale: 0.94, onTap: onTest, child: child);
+        child = PressableScale(key: child.key, scale: 0.94, haptic: unknown, onTap: onTest, child: child);
       }
     }
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 180),
-      transitionBuilder: (w, a) => FadeTransition(opacity: a, child: w),
-      child: child,
+    final semantics = '${l('stat.latency')}: $description';
+    return Semantics(
+      label: semantics,
+      button: onTest != null && !testing,
+      onTap: testing ? null : onTest,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: unknown && onTest != null && !testing ? l('ping.test') : semantics,
+        excludeFromSemantics: true,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          transitionBuilder: (w, a) => FadeTransition(opacity: a, child: w),
+          child: child,
+        ),
+      ),
     );
   }
 }
@@ -357,9 +392,10 @@ class LatencyChip extends StatelessWidget {
 /// unit ("мс", "ГБ") is set in the same mono a step quieter; a lone dash
 /// means "no data" and is tertiary.
 class MetricsRow extends StatelessWidget {
-  const MetricsRow({super.key, required this.items, this.large = false});
+  const MetricsRow({super.key, required this.items, this.large = false, this.valueWidgets = const {}});
   final List<(String, String, Color?)> items;
   final bool large;
+  final Map<int, Widget> valueWidgets;
 
   @override
   Widget build(BuildContext context) {
@@ -384,7 +420,7 @@ class MetricsRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              _metric(items[i].$2, (large ? t.monoLarge : t.mono.copyWith(fontSize: 15)),
+              valueWidgets[i] ?? _metric(items[i].$2, (large ? t.monoLarge : t.mono.copyWith(fontSize: 15)),
                   items[i].$3 ?? c.label, c.tertiaryLabel),
             ]),
           ),

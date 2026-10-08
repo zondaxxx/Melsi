@@ -512,6 +512,9 @@ enum TunStack { system, gvisor, mixed }
 
 enum LogLevel { trace, debug, info, warn, error }
 
+/// Presentation only; measuring latency is independent of its visibility.
+enum PingDisplay { number, indicator, both }
+
 /// Which proxy engine dials the selected servers.
 ///
 /// sing-box always owns TUN, DNS and routing. [mihomo] moves supported
@@ -530,6 +533,8 @@ class AppSettings {
     this.smartMode = SmartMode.balanced,
     this.probeUrl = 'https://www.gstatic.com/generate_204',
     this.probeIntervalSec = 60,
+    this.showPing = true,
+    this.pingDisplay = PingDisplay.number,
     this.remoteDns = 'https://1.1.1.1/dns-query',
     this.directDns = 'https://77.88.8.8/dns-query',
     this.tunStack = TunStack.mixed,
@@ -560,6 +565,8 @@ class AppSettings {
   SmartMode smartMode;
   String probeUrl;
   int probeIntervalSec;
+  bool showPing;
+  PingDisplay pingDisplay;
 
   /// DNS server URLs: `https://…/dns-query`, `tls://1.1.1.1`, `quic://…`,
   /// `udp://8.8.8.8` or a bare IP.
@@ -622,6 +629,8 @@ class AppSettings {
         'smartMode': smartMode.name,
         'probeUrl': probeUrl,
         'probeIntervalSec': probeIntervalSec,
+        'showPing': showPing,
+        'pingDisplay': pingDisplay.name,
         'remoteDns': remoteDns,
         'directDns': directDns,
         'tunStack': tunStack.name,
@@ -654,6 +663,8 @@ class AppSettings {
         probeUrl:
             j['probeUrl'] as String? ?? 'https://www.gstatic.com/generate_204',
         probeIntervalSec: (j['probeIntervalSec'] as num?)?.toInt() ?? 60,
+        showPing: j['showPing'] as bool? ?? true,
+        pingDisplay: _enum(PingDisplay.values, j['pingDisplay'], PingDisplay.number),
         remoteDns: j['remoteDns'] as String? ?? 'https://1.1.1.1/dns-query',
         directDns: j['directDns'] as String? ?? 'https://77.88.8.8/dns-query',
         tunStack: _enum(TunStack.values, j['tunStack'], TunStack.mixed),
