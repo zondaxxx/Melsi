@@ -222,12 +222,12 @@ void main() {
     await shutdownApp(tester, state, features: features);
   });
 
-  for (final size in [const Size(360, 740), const Size(1280, 820)]) {
+  for (final size in [const Size(320, 568), const Size(360, 740), const Size(1280, 820)]) {
     testWidgets('home fits $size at large text scale with reduced motion', (
       tester,
     ) async {
       reducedMotion(tester);
-      tester.platformDispatcher.textScaleFactorTestValue = 1.6;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       final (state, features) = await bootApp(tester, size: size);
       await connect(tester, state);

@@ -113,7 +113,10 @@ class SpeedTestSheet extends StatelessWidget {
                 Text(l('speed.note'), style: t.footnote),
                 if (net.speedFailed && !running) ...[
                   const SizedBox(height: Space.xs),
-                  Text(l('speed.failed'), style: t.caption.copyWith(color: c.warning)),
+                  Text(l('speed.failedAt', {
+                    'phase': l('speed.phase.${net.failedPhase?.name ?? 'down'}'),
+                    'reason': l(net.speedErrorKey, net.speedErrorArgs),
+                  }), style: t.caption.copyWith(color: c.warning)),
                 ],
                 if (quota) ...[
                   const SizedBox(height: Space.xs),

@@ -11,7 +11,6 @@ import (
 
 const (
 	samplesPerRound  = 3
-	maxConcurrency   = 8
 	switchRatio      = 0.8 // best must be >20% better
 	switchMinDeltaMs = 10.0
 )
@@ -48,13 +47,15 @@ type GroupStatus struct {
 
 // Group drives one sing-box selector.
 type Group struct {
-	e        *Engine
-	log      *slog.Logger
-	selector string
-	probeURL string
-	interval time.Duration
-	timeout  int
-	cands    []Candidate
+	e               *Engine
+	log             *slog.Logger
+	selector        string
+	probeURL        string
+	interval        time.Duration
+	timeout         int
+	cands           []Candidate
+	initialSelected string
+	wake            chan struct{}
 
 	probeMu  sync.Mutex // serializes probe rounds
 	selectMu sync.Mutex // serializes decide+PUT so manual and auto picks cannot interleave
@@ -70,16 +71,18 @@ type Group struct {
 
 func newGroup(e *Engine, cfg GroupConfig) *Group {
 	g := &Group{
-		e:        e,
-		log:      e.log.With("group", cfg.Selector),
-		selector: cfg.Selector,
-		probeURL: cfg.ProbeURL,
-		interval: time.Duration(cfg.IntervalSec) * time.Second,
-		timeout:  cfg.TimeoutMs,
-		cands:    cfg.Candidates,
-		auto:     cfg.Auto,
-		mode:     cfg.Mode,
-		stats:    make(map[string]*nodeStats, len(cfg.Candidates)),
+		e:               e,
+		log:             e.log.With("group", cfg.Selector),
+		selector:        cfg.Selector,
+		probeURL:        cfg.ProbeURL,
+		interval:        time.Duration(cfg.IntervalSec) * time.Second,
+		timeout:         cfg.TimeoutMs,
+		cands:           cfg.Candidates,
+		initialSelected: cfg.Selected,
+		wake:            make(chan struct{}, 1),
+		auto:            cfg.Auto,
+		mode:            cfg.Mode,
+		stats:           make(map[string]*nodeStats, len(cfg.Candidates)),
 	}
 	for _, c := range cfg.Candidates {
 		g.stats[c.Tag] = &nodeStats{}
@@ -88,29 +91,50 @@ func newGroup(e *Engine, cfg GroupConfig) *Group {
 }
 
 func (g *Group) run(ctx context.Context) {
-	g.initCurrent(ctx)
-	timer := time.NewTimer(0)
-	defer timer.Stop()
 	for {
-		select {
-		case <-ctx.Done():
+		work := g.e.waitWork(ctx)
+		if work == nil {
 			return
-		case <-timer.C:
 		}
-		g.probeAndEvaluate(ctx)
+		g.initCurrent(work)
+		g.probeAndEvaluate(work, false)
 		wait := g.interval
 		if g.inFailover() {
 			wait = min(wait, g.e.failoverEvery)
 		}
-		timer.Reset(wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-work.Done():
+		case <-g.wake:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
 }
 
-// initCurrent reads the selector's current member, retrying briefly while
-// sing-box finishes starting.
+// initCurrent restores an explicit manual choice before attaching. sing-box
+// restores its own selector cache before considering the config's default;
+// a live A -> B switch can otherwise poison the next manual A session.
 func (g *Group) initCurrent(ctx context.Context) {
+	g.selectMu.Lock()
+	defer g.selectMu.Unlock()
 	for attempt := 0; attempt < 10; attempt++ {
+		g.mu.Lock()
+		auto, current := g.auto, g.current
+		g.mu.Unlock()
+		if current != "" {
+			return // A newer manual selection won the startup race.
+		}
 		now, err := g.e.clash.Now(ctx, g.selector)
+		if err == nil && !auto && g.initialSelected != "" && now != g.initialSelected {
+			err = g.e.clash.Select(ctx, g.selector, g.initialSelected)
+			if err == nil {
+				now = g.initialSelected
+			}
+		}
 		if err == nil {
 			g.mu.Lock()
 			g.current = now
@@ -127,30 +151,39 @@ func (g *Group) initCurrent(ctx context.Context) {
 	}
 }
 
-func (g *Group) probeAndEvaluate(ctx context.Context) {
-	g.probe(ctx)
+func (g *Group) probeAndEvaluate(ctx context.Context, explicit bool) {
+	g.probe(ctx, explicit)
 	if ctx.Err() == nil {
 		g.evaluate(ctx)
 	}
 }
 
-// probe runs one round: samplesPerRound samples per candidate with bounded
-// concurrency across candidates.
-func (g *Group) probe(ctx context.Context) {
+// Automatic rounds compare all candidates. In manual mode only the selected
+// node needs a health/latency check; a user-requested round still checks all.
+func (g *Group) probe(ctx context.Context, explicit bool) {
 	g.probeMu.Lock()
 	defer g.probeMu.Unlock()
-	sem := make(chan struct{}, maxConcurrency)
+	g.mu.Lock()
+	auto, current := g.auto, g.current
+	g.mu.Unlock()
 	var wg sync.WaitGroup
+loop:
 	for _, c := range g.cands {
+		if !explicit && !auto && c.Tag != current {
+			continue
+		}
+		select {
+		case g.e.probeSlots <- struct{}{}:
+		case <-ctx.Done():
+			break loop
+		}
 		wg.Add(1)
 		go func(tag string) {
 			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
+			defer func() { <-g.e.probeSlots }()
+			if ctx.Err() != nil {
 				return
 			}
-			defer func() { <-sem }()
 			g.probeNode(ctx, tag)
 		}(c.Tag)
 	}
@@ -189,6 +222,9 @@ func (g *Group) probeNode(ctx context.Context, tag string) {
 func (g *Group) inFailover() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if !g.auto {
+		return false
+	}
 	if st, ok := g.stats[g.current]; ok && st.dead() {
 		return true
 	}
@@ -364,6 +400,7 @@ func (g *Group) SetAuto(ctx context.Context, auto bool) {
 	if auto {
 		g.evaluate(ctx)
 	}
+	g.wakeLoop()
 }
 
 // SetMode changes the scoring mode and re-evaluates.
@@ -375,7 +412,18 @@ func (g *Group) SetMode(ctx context.Context, mode Mode) {
 }
 
 // Probe forces a probe round now and applies the policy.
-func (g *Group) Probe(ctx context.Context) { g.probeAndEvaluate(ctx) }
+func (g *Group) Probe(ctx context.Context) {
+	ctx, cancel := g.e.runCtx(ctx)
+	defer cancel()
+	g.probeAndEvaluate(ctx, true)
+}
+
+func (g *Group) wakeLoop() {
+	select {
+	case g.wake <- struct{}{}:
+	default:
+	}
+}
 
 // Select manually selects tag and disables auto-select.
 func (g *Group) Select(ctx context.Context, tag string) error {
@@ -392,5 +440,6 @@ func (g *Group) Select(ctx context.Context, tag string) error {
 	}
 	g.mu.Unlock()
 	g.log.Info("manual select", "tag", tag)
+	g.wakeLoop()
 	return nil
 }

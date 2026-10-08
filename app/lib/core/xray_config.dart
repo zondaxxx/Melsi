@@ -10,7 +10,11 @@ import 'dart:convert';
 import 'models.dart';
 
 class XrayMember {
-  const XrayMember({required this.nodeId, required this.tag, required this.port});
+  const XrayMember({
+    required this.nodeId,
+    required this.tag,
+    required this.port,
+  });
 
   final String nodeId;
   final String tag;
@@ -43,16 +47,36 @@ abstract final class XrayConfig {
 
   /// One Xray outbound object, or null when the protocol/transport is not
   /// something this translator will claim.
-  static Map<String, dynamic>? outbound(ProxyNode node, String tag) {
-    final ob = node.outbound;
+  static Map<String, dynamic>? outbound(ProxyNode node, String tag) =>
+      outboundFromMap(node.outbound, tag);
+
+  /// Also accepts an outbound after the caller applies per-node settings.
+  static Map<String, dynamic>? outboundFromMap(
+    Map<String, dynamic> ob,
+    String tag,
+  ) {
+    // Xray 26.3 rejects allowInsecure instead of merely warning. Keep these
+    // nodes on a core that supports their explicitly requested TLS policy.
+    final tls = ob['tls'];
+    final reality = tls is Map ? tls['reality'] : null;
+    if (tls is Map &&
+        tls['insecure'] == true &&
+        !(reality is Map && reality['enabled'] == true)) {
+      return null;
+    }
     final protocol = switch (ob['type']) {
-      'vless' || 'vmess' || 'trojan' || 'shadowsocks' || 'socks' || 'http' => ob['type'] as String,
+      'vless' ||
+      'vmess' ||
+      'trojan' ||
+      'shadowsocks' ||
+      'socks' ||
+      'http' => ob['type'] as String,
       _ => null,
     };
     if (protocol == null) return null;
     final transport = ob['transport'] as Map?;
     final network = transport?['type'] as String? ?? 'tcp';
-    if (network == 'xhttp' || network == 'quic' || network == 'httpupgrade') return null;
+    if (network == 'quic' || network == 'httpupgrade') return null;
     final stream = _stream(ob, network);
     if (stream == null) return null;
     final settings = _settings(ob, protocol);
@@ -103,22 +127,25 @@ abstract final class XrayConfig {
       'log': {'loglevel': _level(logLevel)},
       'inbounds': inbounds,
       'outbounds': outbounds,
-      'routing': {
-        'domainStrategy': 'AsIs',
-        'rules': rules,
-      },
+      'routing': {'domainStrategy': 'AsIs', 'rules': rules},
     };
-    return XrayPlan(json: const JsonEncoder.withIndent('  ').convert(config), members: members);
+    return XrayPlan(
+      json: const JsonEncoder.withIndent('  ').convert(config),
+      members: members,
+    );
   }
 
   static String _level(LogLevel level) => switch (level) {
-        LogLevel.trace || LogLevel.debug => 'debug',
-        LogLevel.info => 'info',
-        LogLevel.warn => 'warning',
-        LogLevel.error => 'error',
-      };
+    LogLevel.trace || LogLevel.debug => 'debug',
+    LogLevel.info => 'info',
+    LogLevel.warn => 'warning',
+    LogLevel.error => 'error',
+  };
 
-  static Map<String, dynamic>? _settings(Map<String, dynamic> ob, String protocol) {
+  static Map<String, dynamic>? _settings(
+    Map<String, dynamic> ob,
+    String protocol,
+  ) {
     final server = ob['server'];
     final port = ob['server_port'];
     if (server is! String || server.isEmpty || port is! num) return null;
@@ -173,7 +200,12 @@ abstract final class XrayConfig {
         if (method is! String || password is! String) return null;
         return {
           'servers': [
-            {'address': server, 'port': port, 'method': method, 'password': password},
+            {
+              'address': server,
+              'port': port,
+              'method': method,
+              'password': password,
+            },
           ],
         };
       case 'socks':
@@ -182,9 +214,10 @@ abstract final class XrayConfig {
             {
               'address': server,
               'port': port,
-              if (ob['username'] != null) 'users': [
-                {'user': ob['username'], 'pass': ob['password'] ?? ''},
-              ],
+              if (ob['username'] != null)
+                'users': [
+                  {'user': ob['username'], 'pass': ob['password'] ?? ''},
+                ],
             },
           ],
         };
@@ -194,9 +227,10 @@ abstract final class XrayConfig {
             {
               'address': server,
               'port': port,
-              if (ob['username'] != null) 'users': [
-                {'user': ob['username'], 'pass': ob['password'] ?? ''},
-              ],
+              if (ob['username'] != null)
+                'users': [
+                  {'user': ob['username'], 'pass': ob['password'] ?? ''},
+                ],
             },
           ],
         };
@@ -205,12 +239,15 @@ abstract final class XrayConfig {
     }
   }
 
-  static Map<String, dynamic>? _stream(Map<String, dynamic> ob, String network) {
+  static Map<String, dynamic>? _stream(
+    Map<String, dynamic> ob,
+    String network,
+  ) {
     final xrayNet = switch (network) {
       'tcp' || 'raw' => 'tcp',
       'ws' => 'ws',
       'grpc' => 'grpc',
-      'http' => 'http',
+      'xhttp' => 'xhttp',
       _ => null,
     };
     if (xrayNet == null) return null;
@@ -224,15 +261,17 @@ abstract final class XrayConfig {
         };
       case 'grpc':
         stream['grpcSettings'] = {
-          if (transport?['service_name'] != null) 'serviceName': transport?['service_name'],
+          if (transport?['service_name'] != null)
+            'serviceName': transport?['service_name'],
+          if (transport?['authority'] != null)
+            'authority': transport?['authority'],
+          if (transport?['multi_mode'] != null)
+            'multiMode': transport?['multi_mode'],
         };
-      case 'http':
-        final host = transport?['host'];
-        stream['httpSettings'] = {
-          'path': transport?['path'] ?? '/',
-          if (host is List) 'host': host,
-          if (host is String && host.isNotEmpty) 'host': [host],
-        };
+      case 'xhttp':
+        final settings = _xhttpSettings(transport!);
+        if (settings == null) return null;
+        stream['xhttpSettings'] = settings;
       default:
         break;
     }
@@ -263,5 +302,68 @@ abstract final class XrayConfig {
       stream['security'] = 'none';
     }
     return stream;
+  }
+
+  /// The parser stores XHTTP options with the shared kebab-case names. Xray
+  /// uses the original camelCase names and calls connection reuse `xmux`.
+  static Map<String, dynamic>? _xhttpSettings(Map transport) {
+    const names = {
+      'headers': 'headers',
+      'no-grpc-header': 'noGRPCHeader',
+      'x-padding-bytes': 'xPaddingBytes',
+      'x-padding-obfs-mode': 'xPaddingObfsMode',
+      'x-padding-key': 'xPaddingKey',
+      'x-padding-header': 'xPaddingHeader',
+      'x-padding-placement': 'xPaddingPlacement',
+      'x-padding-method': 'xPaddingMethod',
+      'uplink-http-method': 'uplinkHTTPMethod',
+      'session-placement': 'sessionPlacement',
+      'session-key': 'sessionKey',
+      'seq-placement': 'seqPlacement',
+      'seq-key': 'seqKey',
+      'uplink-data-placement': 'uplinkDataPlacement',
+      'uplink-data-key': 'uplinkDataKey',
+      'uplink-chunk-size': 'uplinkChunkSize',
+      'sc-max-each-post-bytes': 'scMaxEachPostBytes',
+      'sc-min-posts-interval-ms': 'scMinPostsIntervalMs',
+      'sc-max-buffered-posts': 'scMaxBufferedPosts',
+    };
+    const reuseNames = {
+      'max-concurrency': 'maxConcurrency',
+      'max-connections': 'maxConnections',
+      'c-max-reuse-times': 'cMaxReuseTimes',
+      'h-max-request-times': 'hMaxRequestTimes',
+      'h-max-reusable-secs': 'hMaxReusableSecs',
+      'h-keep-alive-period': 'hKeepAlivePeriod',
+    };
+    final extra = <String, dynamic>{
+      if (transport['headers'] != null) 'headers': transport['headers'],
+    };
+    for (final entry in ((transport['options'] as Map?) ?? const {}).entries) {
+      if (entry.key == 'reuse-settings') {
+        if (entry.value is! Map) return null;
+        final xmux = <String, dynamic>{};
+        for (final setting in (entry.value as Map).entries) {
+          final name = reuseNames[setting.key];
+          if (name == null) return null;
+          final value = setting.value;
+          xmux[name] = value is String ? int.tryParse(value) ?? value : value;
+        }
+        extra['xmux'] = xmux;
+      } else {
+        final name = names[entry.key];
+        // In particular, do not silently discard Mihomo-only options.
+        if (name == null) return null;
+        extra[name] = entry.value;
+      }
+    }
+    return {
+      'path': transport['path'] ?? '/',
+      if (transport['host'] != null) 'host': transport['host'],
+      'mode': transport['mode'] ?? 'auto',
+      // Xray replaces the outer settings with `extra` (except host/path/mode),
+      // so headers must also live inside it when other options are present.
+      if (extra.isNotEmpty) 'extra': extra,
+    };
   }
 }

@@ -10,8 +10,7 @@ import '../theme/surfaces.dart';
 import '../theme/theme.dart';
 import '../widgets/common.dart';
 
-/// Live logs: Clash API `/logs` stream while connected; otherwise (desktop)
-/// the tail of the melsi-core log file.
+/// Saved diagnostics plus the Clash API `/logs` stream while connected.
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key, required this.state});
   final AppState state;
@@ -26,6 +25,7 @@ class _LogsScreenState extends State<LogsScreen> {
   StreamSubscription<ClashLogLine>? _sub;
   Timer? _fileTimer;
   bool _paused = false;
+  bool _fileHistoryLoaded = false;
   String _filter = '';
 
   @override
@@ -57,11 +57,19 @@ class _LogsScreenState extends State<LogsScreen> {
           'info';
       return ClashLogLine(lvl, l, DateTime.now());
     }).toList();
-    if (widget.state.clash != null && _lines.isNotEmpty) return;
+    final live = widget.state.clash != null;
+    if (live && _fileHistoryLoaded) return;
     setState(() {
-      _lines
-        ..clear()
-        ..addAll(lines);
+      if (live) {
+        // A live event can arrive before the native file read finishes. Keep
+        // both so the previous background stop is still visible after recovery.
+        _lines.insertAll(0, lines);
+      } else {
+        _lines
+          ..clear()
+          ..addAll(lines);
+      }
+      _fileHistoryLoaded = true;
     });
     _toEnd();
   }

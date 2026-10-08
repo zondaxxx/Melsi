@@ -1,6 +1,7 @@
 import Flutter
 import Foundation
 import NetworkExtension
+import UIKit
 
 /// Flutter <-> NETunnelProviderManager bridge (docs/CONTRACT.md §5).
 ///
@@ -33,11 +34,14 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
   private var eventSink: FlutterEventSink?
   private var manager: NETunnelProviderManager?
   private var statusObserver: NSObjectProtocol?
+  private var activeObserver: NSObjectProtocol?
   private var lastState: String = "stopped"
   private var userStopped = false
   private var starting = false
   private var lastError: String?
   private var attempt = 0
+  private var recoveryWarning: String?
+  private let preferences = TunnelPreferenceQueue()
 
   init(messenger: FlutterBinaryMessenger) {
     methodChannel = FlutterMethodChannel(name: "app.melsi/vpn", binaryMessenger: messenger)
@@ -57,11 +61,15 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
       }
       self.onStatusChanged()
     }
+    activeObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in await self?.refreshStatus() }
+    }
     // Pick up an already-configured manager (and the current tunnel state).
     Task { @MainActor in
       _ = try? await self.loadManager(create: false)
-      self.lastState = self.currentState()
-      self.emit(self.lastState, message: nil)
+      self.onStatusChanged()
     }
   }
 
@@ -69,13 +77,17 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
     if let statusObserver {
       NotificationCenter.default.removeObserver(statusObserver)
     }
+    if let activeObserver {
+      NotificationCenter.default.removeObserver(activeObserver)
+    }
   }
 
   // MARK: - FlutterStreamHandler
 
   func onListen(withArguments _: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
     eventSink = events
-    events(["state": currentState()])
+    let state = currentState()
+    emit(state, message: state == "error" ? lastError : nil)
     return nil
   }
 
@@ -122,34 +134,49 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
       Task { @MainActor in
         self.userStopped = true
         self.attempt += 1
+        let stopAttempt = self.attempt
         self.starting = false
         self.lastError = nil
+        self.recoveryWarning = nil
         if self.manager == nil {
           _ = try? await self.loadManager(create: false)
         }
         do {
+          guard stopAttempt == self.attempt, self.userStopped else { throw CancellationError() }
           if let connection = self.manager?.connection {
+            // Persist the stop intent before stopping the live provider, so
+            // the system cannot restart it on the next network request.
+            try await self.setRecoveryEnabled(false, attempt: stopAttempt)
+            guard stopAttempt == self.attempt, self.userStopped else { throw CancellationError() }
             connection.stopVPNTunnel()
-            try await self.waitForDisconnect(connection)
+            try await self.waitForDisconnect(connection, attempt: stopAttempt)
           }
+          guard stopAttempt == self.attempt, self.userStopped else { throw CancellationError() }
           self.lastState = "stopped"
           self.emit("stopped", message: nil)
           result(nil)
         } catch {
-          self.lastError = error.localizedDescription
-          self.emit("error", message: self.lastError)
-          result(FlutterError(code: "stop_failed", message: self.lastError, details: nil))
+          if stopAttempt == self.attempt, !(error is CancellationError) {
+            self.lastError = error.localizedDescription
+            self.emit("error", message: self.lastError)
+          }
+          result(FlutterError(code: "stop_failed", message: error.localizedDescription, details: nil))
         }
       }
     case "status":
       Task { @MainActor in
-        if self.manager == nil {
-          _ = try? await self.loadManager(create: false)
-        }
+        await self.refreshStatus()
         result(self.currentState())
       }
     case "coreVersion":
       result(coreVersion())
+    case "readLog":
+      let arguments = call.arguments as? [String: Any]
+      let oomEvents = (try? sharedContainer().url).map { TunnelConfiguration.oomResetEvents(in: $0) } ?? []
+      result(TunnelConfiguration.diagnosticLog(
+        journal: readSharedFile("tunnel_lifecycle.jsonl"),
+        stop: readSharedFile("last_stop.txt"), error: readSharedFile("last_error.txt"),
+        maxLines: arguments?["maxLines"] as? Int ?? 200, oomEvents: oomEvents))
     case "installedApps":
       result([Any]())
     case "appIcon":
@@ -163,6 +190,11 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
 
   @MainActor
   private func loadManager(create: Bool) async throws -> NETunnelProviderManager? {
+    try await preferences.perform { try await self.loadManagerPreferences(create: create) }
+  }
+
+  @MainActor
+  private func loadManagerPreferences(create: Bool) async throws -> NETunnelProviderManager? {
     if create && Self.packetTunnelBundle == nil {
       throw bridgeError("PacketTunnel extension is missing from this installation. The extension must be embedded and signed together with Melsi.")
     }
@@ -179,6 +211,12 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
     if proto.providerBundleIdentifier != Self.providerBundleIdentifier || proto.serverAddress != "Melsi" {
       proto.providerBundleIdentifier = Self.providerBundleIdentifier
       proto.serverAddress = "Melsi"
+      dirty = true
+    }
+    // Preserve the VPN when the device locks, including an older saved
+    // configuration whose sleep policy may differ from the default.
+    if proto.disconnectOnSleep {
+      proto.disconnectOnSleep = false
       dirty = true
     }
     if target.protocolConfiguration !== proto {
@@ -206,58 +244,132 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
   private func start(config: String, engine: String, name _: String?) async throws {
     userStopped = false
     lastError = nil
+    recoveryWarning = nil
     attempt += 1
     let currentAttempt = attempt
     starting = true
     defer { if currentAttempt == attempt { starting = false } }
-    // Best effort: the payload also travels in the start options; the files are
-    // what on-demand / system restarts and hot reloads use.
-    let container = try? sharedContainer()
-    try? writeSharedFile("config.json", config)
-    try? writeSharedFile("engine.json", engine)
-    try? writeSharedFile("last_error.txt", "")
-
-    guard let manager = try await loadManager(create: true) else {
-      throw bridgeError("VPN configuration is not available")
-    }
-    let connection = manager.connection
-    guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
-    switch connection.status {
-    case .connected, .reasserting:
-      // Hot reload: the extension re-reads config.json / engine.json.
-      if let session = connection as? NETunnelProviderSession {
-        try await reload(session, config: config, engine: engine)
-        lastState = "connected"
-        emit("connected", message: nil)
-        return
-      }
-    case .connecting:
-      if currentAttempt == attempt { connection.stopVPNTunnel() }
-      try await waitForDisconnect(connection)
-    case .disconnecting:
-      try await waitForDisconnect(connection)
-    default:
-      break
-    }
-    guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
-    lastState = "connecting"
-    emit("connecting", message: nil)
-    var options: [String: NSObject] = [
-      "configContent": config as NSString,
-      "engineContent": engine as NSString,
-    ]
-    if let group = container?.group {
-      options["appGroup"] = group as NSString
-    }
-    try connection.startVPNTunnel(options: options)
     do {
-      try await waitForConnection(connection, attempt: currentAttempt)
+      // Best effort: the payload also travels in the start options; the files are
+      // what on-demand / system restarts and hot reloads use.
+      let container = try? sharedContainer()
+      var recoveryPayloadPersisted = false
+      do {
+        try writeSharedFile("config.json", config)
+        try writeSharedFile("engine.json", engine)
+        recoveryPayloadPersisted = true
+      } catch { /* The inline payload can still start the current session. */ }
+      try? writeSharedFile("last_error.txt", "")
+      try? writeSharedFile("last_stop.txt", "")
+
+      guard let manager = try await loadManager(create: true) else {
+        throw bridgeError("VPN configuration is not available")
+      }
+      let connection = manager.connection
+      guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+      switch connection.status {
+      case .connected, .reasserting:
+        // Hot reload: the extension re-reads config.json / engine.json.
+        if let session = connection as? NETunnelProviderSession {
+          try await reload(session, config: config, engine: engine)
+          guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+          await enableRecoveryAfterConnection(attempt: currentAttempt, payloadPersisted: recoveryPayloadPersisted)
+          guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+          lastState = "connected"
+          emit("connected", message: nil)
+          return
+        }
+      case .connecting:
+        try await setRecoveryEnabled(false, attempt: currentAttempt)
+        guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+        connection.stopVPNTunnel()
+        try await waitForDisconnect(connection, attempt: currentAttempt)
+      case .disconnecting:
+        try await setRecoveryEnabled(false, attempt: currentAttempt)
+        guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+        try await waitForDisconnect(connection, attempt: currentAttempt)
+      default:
+        break
+      }
+      guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+      lastState = "connecting"
+      emit("connecting", message: nil)
+      var options: [String: NSObject] = [
+        "configContent": config as NSString,
+        "engineContent": engine as NSString,
+      ]
+      if let group = container?.group {
+        options["appGroup"] = group as NSString
+      }
+      do {
+        // An older session may have enabled recovery. Do not let that policy
+        // retry a replacement configuration until this start has succeeded.
+        try await setRecoveryEnabled(false, attempt: currentAttempt)
+        guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+        try connection.startVPNTunnel(options: options)
+        try await waitForConnection(connection, attempt: currentAttempt)
+      } catch {
+        if currentAttempt == attempt {
+          do {
+            try await setRecoveryEnabled(false, attempt: currentAttempt)
+          } catch let recoveryError {
+            guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+            connection.stopVPNTunnel()
+            throw bridgeError("VPN startup failed and automatic reconnect could not be disabled: \(recoveryError.localizedDescription)")
+          }
+          guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+          connection.stopVPNTunnel()
+        }
+        guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+        throw error
+      }
+      await enableRecoveryAfterConnection(attempt: currentAttempt, payloadPersisted: recoveryPayloadPersisted)
+      guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
+      lastState = "connected"
+      emit("connected", message: nil)
     } catch {
-      if currentAttempt == attempt { connection.stopVPNTunnel() }
+      guard currentAttempt == attempt, !userStopped else { throw CancellationError() }
       throw error
     }
-    lastState = "connected"
-    emit("connected", message: nil)
+  }
+
+  @MainActor
+  private func enableRecoveryAfterConnection(attempt currentAttempt: Int, payloadPersisted: Bool) async {
+    do {
+      try await setRecoveryEnabled(payloadPersisted, attempt: currentAttempt)
+      if !payloadPersisted { throw bridgeError("The configuration could not be saved in the shared container.") }
+    } catch {
+      guard currentAttempt == attempt, !userStopped else { return }
+      recoveryWarning = "VPN is connected, but automatic reconnect could not be enabled: \(error.localizedDescription)"
+    }
+  }
+
+  @MainActor
+  private func setRecoveryEnabled(_ enabled: Bool, attempt requestedAttempt: Int) async throws {
+    try await preferences.perform {
+      // Preference saves are asynchronous. Serialize them so an older start
+      // cannot finish its save after a newer explicit stop has disabled it.
+      guard TunnelConfiguration.mayUpdateOnDemand(enabling: enabled, requestedAttempt: requestedAttempt,
+          currentAttempt: self.attempt, userStopped: self.userStopped) else { throw CancellationError() }
+      guard let manager = self.manager else { throw self.bridgeError("VPN configuration is not available") }
+      if enabled {
+        let rule = NEOnDemandRuleConnect()
+        rule.interfaceTypeMatch = .any
+        manager.onDemandRules = [rule]
+      }
+      manager.isOnDemandEnabled = enabled
+      do {
+        try await manager.saveToPreferences()
+        try await manager.loadFromPreferences()
+      } catch {
+        // Restore the actual stored state where possible; callers report the
+        // failure rather than pretending that recovery was changed.
+        try? await manager.loadFromPreferences()
+        throw error
+      }
+      guard TunnelConfiguration.mayUpdateOnDemand(enabling: enabled, requestedAttempt: requestedAttempt,
+          currentAttempt: self.attempt, userStopped: self.userStopped) else { throw CancellationError() }
+    }
   }
 
   @MainActor
@@ -286,15 +398,19 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
 
   @MainActor
   private func disconnectMessage(_ connection: NEVPNConnection) async -> String? {
-    let file = readSharedFile("last_error.txt").flatMap { $0.isEmpty ? nil : $0 }
-    guard #available(iOS 16.0, *) else { return file }
+    let coreError = readSharedFile("last_error.txt")
+    let stopReason = readSharedFile("last_stop.txt")
+    guard #available(iOS 16.0, *) else {
+      return TunnelConfiguration.disconnectMessage(tunnelError: coreError, systemError: stopReason)
+    }
     return await withCheckedContinuation { continuation in
       var completed = false
       let finish: (String?) -> Void = { message in
         DispatchQueue.main.async {
           guard !completed else { return }
           completed = true
-          continuation.resume(returning: message ?? file)
+          continuation.resume(returning: TunnelConfiguration.disconnectMessage(tunnelError: coreError,
+            systemError: TunnelConfiguration.disconnectMessage(tunnelError: message, systemError: stopReason)))
         }
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) { finish(nil) }
@@ -337,8 +453,9 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
   }
 
   @MainActor
-  private func waitForDisconnect(_ connection: NEVPNConnection) async throws {
+  private func waitForDisconnect(_ connection: NEVPNConnection, attempt currentAttempt: Int) async throws {
     for _ in 0 ..< 50 {
+      guard currentAttempt == attempt else { throw CancellationError() }
       if connection.status == .disconnected || connection.status == .invalid {
         return
       }
@@ -348,6 +465,21 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
   }
 
   // MARK: - Status
+
+  @MainActor
+  private func refreshStatus() async {
+    let currentAttempt = attempt
+    if manager == nil {
+      _ = try? await loadManager(create: false)
+    } else if !starting {
+      try? await preferences.perform {
+        guard currentAttempt == self.attempt, !self.starting else { return }
+        try await self.manager?.loadFromPreferences()
+      }
+    }
+    guard currentAttempt == attempt else { return }
+    onStatusChanged()
+  }
 
   private func currentState() -> String {
     guard let status = manager?.connection.status else {
@@ -375,32 +507,40 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
   private func onStatusChanged() {
     let state = currentState()
     if starting && state == "stopped" { return }
+    if state == "connected" { lastError = nil }
     if state == "error" {
       emit(state, message: lastError)
       return
     }
     let previous = lastState
     lastState = state
-    guard state == "stopped", previous != "stopped", !userStopped else {
+    let journal = readSharedFile("tunnel_lifecycle.jsonl")
+    let unreportedStop = manager != nil && TunnelConfiguration.hasUnreportedTunnelStop(journal)
+    guard state == "stopped", previous != "stopped" || unreportedStop,
+          !userStopped, !TunnelConfiguration.isExpectedTunnelStop(journal) else {
       emit(state, message: nil)
       return
     }
     // Unexpected stop: surface the extension's error, if any.
-    let fileError = readSharedFile("last_error.txt")
+    let fileError = TunnelConfiguration.disconnectMessage(
+      tunnelError: readSharedFile("last_error.txt"), systemError: readSharedFile("last_stop.txt"))
     let stoppedAttempt = attempt
     let report: (String?) -> Void = { [weak self] message in
       guard let self, self.attempt == stoppedAttempt, !self.userStopped,
             Self.mapStatus(self.manager?.connection.status ?? .disconnected) == "stopped" else { return }
       self.lastError = message.flatMap { $0.isEmpty ? nil : $0 } ?? "The VPN extension stopped unexpectedly."
+      if let summary = TunnelConfiguration.lifecycleSummary(self.readSharedFile("tunnel_lifecycle.jsonl")) {
+        self.lastError = "\(self.lastError!) \(summary)"
+      }
       self.lastState = "error"
       self.emit("error", message: self.lastError)
     }
-    if #available(iOS 16.0, *), let connection = manager?.connection {
-      connection.fetchLastDisconnectError { [weak self] error in
-        DispatchQueue.main.async {
-          guard self != nil else { return }
-          report(error?.localizedDescription ?? fileError)
-        }
+    if let connection = manager?.connection {
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        // Reuse the bounded fetch, so a missing system callback cannot leave
+        // an unexpected background stop without an error event forever.
+        report(await self.disconnectMessage(connection))
       }
     } else {
       report(fileError)
@@ -410,7 +550,7 @@ final class MelsiVpnBridge: NSObject, FlutterStreamHandler {
   private func emit(_ state: String, message: String?) {
     guard let eventSink else { return }
     var event: [String: Any] = ["state": state]
-    if let message, !message.isEmpty {
+    if let message = message ?? (state == "connected" ? recoveryWarning : nil), !message.isEmpty {
       event["message"] = message
     }
     eventSink(event)

@@ -73,15 +73,30 @@ class ConfigBuilder {
   static const httpClientTag = 'direct-http';
 
   static const _reservedTags = {
-    tagProxy, tagGame, tagDirect, tagTun, tagMixed, dnsLocal, dnsDirect,
-    dnsRemote, 'block', 'dns', 'dns-out', 'GLOBAL', 'REJECT', 'DIRECT',
+    tagProxy,
+    tagGame,
+    tagDirect,
+    tagTun,
+    tagMixed,
+    dnsLocal,
+    dnsDirect,
+    dnsRemote,
+    'block',
+    'dns',
+    'dns-out',
+    'GLOBAL',
+    'REJECT',
+    'DIRECT',
   };
 
   /// Rule-sets shipped in `assets/rulesets/` (see [build]'s
   /// `bundledRuleSetDir`).
   static const bundledRuleSets = {
-    'geosite-category-ads-all', 'geosite-category-ru', 'geoip-ru',
-    'geosite-ru-blocked', 'geoip-ru-blocked',
+    'geosite-category-ads-all',
+    'geosite-category-ru',
+    'geoip-ru',
+    'geosite-ru-blocked',
+    'geoip-ru-blocked',
   };
 
   /// Not compiled into the desktop `melsi-core` (naive needs cronet/cgo).
@@ -99,8 +114,16 @@ class ConfigBuilder {
   ];
 
   static const _tcpTypes = {
-    'shadowsocks', 'vmess', 'vless', 'trojan', 'anytls', 'shadowtls',
-    'http', 'socks', 'ssh', 'snell',
+    'shadowsocks',
+    'vmess',
+    'vless',
+    'trojan',
+    'anytls',
+    'shadowtls',
+    'http',
+    'socks',
+    'ssh',
+    'snell',
   };
 
   /// sing-box multiplex exists on these four. Vision, REALITY, and every
@@ -119,7 +142,8 @@ class ConfigBuilder {
     String? bundledRuleSetDir,
     ChainSettings? chain,
   }) {
-    final isDesktop = platform == PlatformKind.windows ||
+    final isDesktop =
+        platform == PlatformKind.windows ||
         platform == PlatformKind.macos ||
         platform == PlatformKind.linux;
     final isAndroid = platform == PlatformKind.android;
@@ -128,9 +152,11 @@ class ConfigBuilder {
 
     // ---------------------------------------------------------- nodes
     final usable = nodes
-        .where((n) =>
-            !(isDesktop && desktopUnsupportedTypes.contains(n.type)) &&
-            n.type != 'unknown')
+        .where(
+          (n) =>
+              !(isDesktop && desktopUnsupportedTypes.contains(n.type)) &&
+              n.type != 'unknown',
+        )
         .toList();
     final nodeTags = <String, String>{};
     final usedTags = <String>{..._reservedTags};
@@ -151,10 +177,12 @@ class ConfigBuilder {
     }
 
     // ---------------------------------------------------------- chain
-    final entryTag =
-        chain?.enabled == true ? nodeTags[chain!.entryNodeId] : null;
+    final entryTag = chain?.enabled == true
+        ? nodeTags[chain!.entryNodeId]
+        : null;
     final entryNode = entryTag == null ? null : tagToNode[entryTag];
-    final chainActive = entryNode != null &&
+    final chainActive =
+        entryNode != null &&
         !entryNode.protocol.isEndpoint &&
         ordered.length > 1;
     // Xray dials from outside the TUN. A chain detour would have to live
@@ -180,7 +208,9 @@ class ConfigBuilder {
         }
         for (final h in [ob, ...helpers]) {
           final det = h['detour'];
-          if (det is String && renamed.containsKey(det)) h['detour'] = renamed[det];
+          if (det is String && renamed.containsKey(det)) {
+            h['detour'] = renamed[det];
+          }
         }
       }
       if (chainActive && tag != entryTag) {
@@ -193,12 +223,30 @@ class ConfigBuilder {
         nodeOutbounds.add(CompatibilityCore.wrap(h));
       }
       _tune(ob, settings, lowLatency && !isIos);
-      final handToXray = useXray &&
+      // Multiplex is a server capability, not a client-only optimization.
+      // Forcing h2mux onto an ordinary Xray/WS peer leaves TCP pings working
+      // while every proxy request fails. Only keep provider-declared options.
+      if (!settings.multiplex ||
+          settings.memorySaver ||
+          CompatibilityCore.realityOrVision(ob) ||
+          !_muxTypes.contains(ob['type'])) {
+        ob.remove('multiplex');
+      }
+      final handToXray =
+          useXray &&
           (n.chain == null || n.chain!.isEmpty) &&
           XrayConfig.outbound(n, tag) != null;
       if (handToXray) {
         xrayCandidates.add((node: n, tag: tag));
         continue;
+      }
+      // On phones Xray runs inside libbox and uses its protected dialer.
+      if (settings.core == VpnCore.xray && !useXray) {
+        final embedded = CompatibilityCore.wrapXray(ob);
+        if (embedded != null) {
+          outbounds.add(embedded);
+          continue;
+        }
       }
       if (useMihomo && helpers.isEmpty) {
         final clash = CompatibilityCore.clashProxy(ob);
@@ -213,21 +261,8 @@ class ConfigBuilder {
           continue;
         }
       }
-      if (settings.multiplex &&
-          !settings.memorySaver &&
-          !n.protocol.isEndpoint &&
-          !CompatibilityCore.needsMihomo(ob) &&
-          !CompatibilityCore.realityOrVision(ob) &&
-          _muxTypes.contains(ob['type'])) {
-        ob['multiplex'] = {
-          'enabled': true,
-          'protocol': 'h2mux',
-          'max_connections': 4,
-          'min_streams': 4,
-          'padding': false,
-        };
-      }
-      if (CompatibilityCore.needsMihomo(ob)) {
+      if (CompatibilityCore.needsMihomo(ob) ||
+          CompatibilityCore.needsXray(ob)) {
         outbounds.add(CompatibilityCore.wrap(ob));
       } else if (n.protocol.isEndpoint) {
         endpointsList.add(ob);
@@ -253,13 +288,15 @@ class ConfigBuilder {
 
     // Selectable members: every node but the entry. The entry is a hop, not
     // a destination — offering it as an exit would loop it onto itself.
-    final exitTags =
-        chainActive ? allTags.where((t) => t != entryTag).toList() : allTags;
+    final exitTags = chainActive
+        ? allTags.where((t) => t != entryTag).toList()
+        : allTags;
 
     // ---------------------------------------------------------- selectors
     final proxyMembers = exitTags.isEmpty ? [tagDirect] : exitTags;
-    final selectedTag =
-        selectedNodeId == null ? null : nodeTags[selectedNodeId];
+    final selectedTag = selectedNodeId == null
+        ? null
+        : nodeTags[selectedNodeId];
     final proxySelector = <String, dynamic>{
       'type': 'selector',
       'tag': tagProxy,
@@ -285,13 +322,14 @@ class ConfigBuilder {
         gameOrder = [...udp, ...rest];
       }
       final members = gameOrder.isEmpty ? [tagDirect] : gameOrder;
-      final pinned =
-          game.gameNodeId == null ? null : nodeTags[game.gameNodeId];
+      final pinned = game.gameNodeId == null ? null : nodeTags[game.gameNodeId];
       gameSelector = {
         'type': 'selector',
         'tag': tagGame,
         'outbounds': members,
-        'default': pinned != null && members.contains(pinned) ? pinned : members.first,
+        'default': pinned != null && members.contains(pinned)
+            ? pinned
+            : members.first,
         'interrupt_exist_connections': false,
       };
     }
@@ -307,10 +345,10 @@ class ConfigBuilder {
     // ---------------------------------------------------------- game data
     final presets = game.enabled
         ? game.gameIds
-            .map(gamePresetById)
-            .whereType<GamePreset>()
-            .where((preset) => preset.supportsPlatform(platform))
-            .toList()
+              .map(gamePresetById)
+              .whereType<GamePreset>()
+              .where((preset) => preset.supportsPlatform(platform))
+              .toList()
         : <GamePreset>[];
     final gameProcesses = <String>{};
     final gamePackages = <String>{};
@@ -407,16 +445,10 @@ class ConfigBuilder {
         });
       }
       if (isAndroid && gamePackages.isNotEmpty) {
-        rules.add({
-          'package_name': gamePackages.toList(),
-          'outbound': tagGame,
-        });
+        rules.add({'package_name': gamePackages.toList(), 'outbound': tagGame});
       }
       if (gameDomains.isNotEmpty) {
-        rules.add({
-          'domain_suffix': gameDomains.toList(),
-          'outbound': tagGame,
-        });
+        rules.add({'domain_suffix': gameDomains.toList(), 'outbound': tagGame});
       }
       if (gameGeosites.isNotEmpty) {
         rules.add({
@@ -433,9 +465,8 @@ class ConfigBuilder {
         .where((a) => a.isNotEmpty)
         .toSet()
         .toList();
-    final desktopProcessRules = isDesktop &&
-        routing.appMode != AppRoutingMode.off &&
-        appIds.isNotEmpty;
+    final desktopProcessRules =
+        isDesktop && routing.appMode != AppRoutingMode.off && appIds.isNotEmpty;
     if (desktopProcessRules) {
       if (routing.appMode == AppRoutingMode.onlySelected) {
         rules.add({
@@ -526,12 +557,19 @@ class ConfigBuilder {
     final strategy = settings.ipv6 ? 'prefer_ipv4' : 'ipv4_only';
     final dnsServers = <Map<String, dynamic>>[
       {'type': 'local', 'tag': dnsLocal},
-      _dnsServer(settings.directDns, dnsDirect,
-          fallback: 'https://77.88.8.8/dns-query', resolver: dnsLocal),
-      _dnsServer(settings.remoteDns, dnsRemote,
-          fallback: 'https://1.1.1.1/dns-query',
-          resolver: dnsDirect,
-          detour: tagProxy),
+      _dnsServer(
+        settings.directDns,
+        dnsDirect,
+        fallback: 'https://77.88.8.8/dns-query',
+        resolver: dnsLocal,
+      ),
+      _dnsServer(
+        settings.remoteDns,
+        dnsRemote,
+        fallback: 'https://1.1.1.1/dns-query',
+        resolver: dnsDirect,
+        detour: tagProxy,
+      ),
     ];
     if (block.isNotEmpty) {
       dnsRules.add({'domain_suffix': block, 'action': 'reject'});
@@ -614,8 +652,9 @@ class ConfigBuilder {
             if (game.enabled) ...gamePackages,
           }.toList();
         } else {
-          final excluded =
-              appIds.where((a) => !gamePackages.contains(a)).toList();
+          final excluded = appIds
+              .where((a) => !gamePackages.contains(a))
+              .toList();
           if (excluded.isNotEmpty) tun['exclude_package'] = excluded;
         }
       }
@@ -633,9 +672,11 @@ class ConfigBuilder {
     }
 
     // ---------------------------------------------------------- route
-    final usesProcess = xrayPlan != null ||
+    final usesProcess =
+        xrayPlan != null ||
         (isDesktop &&
-            (desktopProcessRules || (game.enabled && gameProcesses.isNotEmpty)));
+            (desktopProcessRules ||
+                (game.enabled && gameProcesses.isNotEmpty)));
     final route = <String, dynamic>{
       'rules': rules,
       if (ruleSets.isNotEmpty) 'rule_set': ruleSets.values.toList(),
@@ -666,7 +707,9 @@ class ConfigBuilder {
           'path': _joinPath(cacheDir, 'cache.db'),
           // Selector memory is keyed by this id. A manual pick gets its own
           // namespace so a previous outbound cannot be restored over `default`.
-          'cache_id': settings.autoSelect ? 'auto' : 'manual:${selectedNodeId ?? 'none'}',
+          'cache_id': settings.autoSelect
+              ? 'auto'
+              : 'manual:${selectedNodeId ?? 'none'}',
           if (!settings.memorySaver) 'store_dns': true,
         },
       },
@@ -693,6 +736,8 @@ class ConfigBuilder {
         {
           'selector': tagProxy,
           'auto': settings.autoSelect,
+          if (!settings.autoSelect && exitTags.isNotEmpty)
+            'selected': proxySelector['default'],
           'mode': settings.smartMode.name,
           'probe_url': settings.probeUrl,
           'interval_sec': settings.probeIntervalSec,
@@ -702,8 +747,12 @@ class ConfigBuilder {
         if (game.enabled)
           {
             'selector': tagGame,
-            'auto': game.gameNodeId == null ||
+            'auto':
+                game.gameNodeId == null ||
                 !nodeTags.containsKey(game.gameNodeId),
+            if (game.gameNodeId != null &&
+                gameOrder.contains(nodeTags[game.gameNodeId]))
+              'selected': nodeTags[game.gameNodeId],
             'mode': SmartMode.game.name,
             'probe_url': settings.probeUrl,
             'interval_sec': settings.probeIntervalSec,
@@ -748,7 +797,9 @@ class ConfigBuilder {
   /// That is where a chain entry detour belongs — one hop below and the
   /// helper would dial around the entry.
   static Map<String, dynamic> _outermost(
-      Map<String, dynamic> ob, List<Map<String, dynamic>> helpers) {
+    Map<String, dynamic> ob,
+    List<Map<String, dynamic>> helpers,
+  ) {
     final byTag = {for (final h in helpers) h['tag'] as String: h};
     var cur = ob;
     final seen = <String>{};
@@ -764,8 +815,7 @@ class ConfigBuilder {
   /// fragmentation (anti-DPI) for TCP-based nodes. Neither applies to a
   /// detoured dial: TFO needs a real socket, and the ClientHello of a
   /// connection inside another tunnel is invisible to DPI anyway.
-  static void _tune(
-      Map<String, dynamic> ob, AppSettings settings, bool tfo) {
+  static void _tune(Map<String, dynamic> ob, AppSettings settings, bool tfo) {
     final type = ob['type'];
     if (!_tcpTypes.contains(type)) return;
     final hasDetour = ob['detour'] is String;
@@ -797,8 +847,13 @@ class ConfigBuilder {
     return out.toList();
   }
 
-  static Map<String, dynamic> _dnsServer(String spec, String tag,
-      {required String fallback, String? resolver, String? detour}) {
+  static Map<String, dynamic> _dnsServer(
+    String spec,
+    String tag, {
+    required String fallback,
+    String? resolver,
+    String? detour,
+  }) {
     var s = spec.trim();
     if (s.isEmpty) s = fallback;
     final server = <String, dynamic>{'tag': tag};
@@ -892,10 +947,13 @@ class ConfigBuilder {
   /// Converts non-ASCII labels (e.g. `рф`, `пример.рф`) to punycode, as
   /// sing-box matches the ASCII form of domains.
   static String _punycodeDomain(String domain) {
-    return domain.split('.').map((label) {
-      if (label.codeUnits.every((c) => c < 0x80)) return label;
-      return 'xn--${_punycodeEncode(label)}';
-    }).join('.');
+    return domain
+        .split('.')
+        .map((label) {
+          if (label.codeUnits.every((c) => c < 0x80)) return label;
+          return 'xn--${_punycodeEncode(label)}';
+        })
+        .join('.');
   }
 
   // RFC 3492 punycode encoder.
@@ -911,8 +969,7 @@ class ConfigBuilder {
     var h = b;
     if (b > 0) out.write('-');
     var n = initialN, delta = 0, bias = initialBias;
-    String digit(int d) =>
-        String.fromCharCode(d < 26 ? d + 97 : d - 26 + 48);
+    String digit(int d) => String.fromCharCode(d < 26 ? d + 97 : d - 26 + 48);
     int adapt(int delta, int numPoints, bool first) {
       delta = first ? delta ~/ damp : delta ~/ 2;
       delta += delta ~/ numPoints;
@@ -935,7 +992,7 @@ class ConfigBuilder {
         if (c < n) delta++;
         if (c == n) {
           var q = delta;
-          for (var k = base;; k += base) {
+          for (var k = base; ; k += base) {
             final t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
             if (q < t) break;
             out.write(digit(t + (q - t) % (base - t)));

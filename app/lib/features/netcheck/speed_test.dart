@@ -9,13 +9,18 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 /// One progress reading: total [bytes] so far, [elapsed] since the request
 /// started and the instantaneous [bps] over the last interval.
 class SpeedSample {
-  const SpeedSample({required this.bytes, required this.elapsed, required this.bps});
+  const SpeedSample({
+    required this.bytes,
+    required this.elapsed,
+    required this.bps,
+  });
 
   final int bytes;
   final Duration elapsed;
@@ -28,7 +33,26 @@ class SpeedSample {
       elapsed.inMicroseconds == 0 ? 0 : bytes * 1e6 / elapsed.inMicroseconds;
 
   @override
-  String toString() => 'SpeedSample($bytes B, ${elapsed.inMilliseconds} ms, $bps B/s)';
+  String toString() =>
+      'SpeedSample($bytes B, ${elapsed.inMilliseconds} ms, $bps B/s)';
+}
+
+enum SpeedFailure { timeout, server, connection, empty }
+
+class SpeedTestException implements Exception {
+  const SpeedTestException(this.failure, {this.statusCode});
+  final SpeedFailure failure;
+  final int? statusCode;
+
+  static SpeedTestException from(Object error) => switch (error) {
+    SpeedTestException() => error,
+    TimeoutException() => const SpeedTestException(SpeedFailure.timeout),
+    _ => const SpeedTestException(SpeedFailure.connection),
+  };
+
+  @override
+  String toString() =>
+      'Speed test ${failure.name}${statusCode == null ? '' : ' (HTTP $statusCode)'}';
 }
 
 class SpeedTest {
@@ -38,146 +62,208 @@ class SpeedTest {
     Uri? uploadUrl,
     this.cap = const Duration(seconds: 8),
     this.uploadCap = const Duration(seconds: 6),
+    this.requestTimeout = const Duration(seconds: 10),
+    this.responseTimeout = const Duration(seconds: 5),
     this.interval = const Duration(milliseconds: 250),
     Random? random,
-  })  : _newClient = client,
-        downloadUrl = downloadUrl ?? defaultDownloadUrl,
-        uploadUrl = uploadUrl ?? defaultUploadUrl,
-        _random = random ?? Random();
+  }) : _newClient = client,
+       downloadUrl = downloadUrl ?? defaultDownloadUrl,
+       uploadUrl = uploadUrl ?? defaultUploadUrl,
+       _random = random ?? Random();
 
-  static final Uri defaultDownloadUrl =
-      Uri.parse('https://speed.cloudflare.com/__down?bytes=50000000');
-  static final Uri defaultUploadUrl = Uri.parse('https://speed.cloudflare.com/__up');
-
-  /// Upload chunk size.
+  static final Uri defaultDownloadUrl = Uri.parse(
+    'https://speed.cloudflare.com/__down?bytes=50000000',
+  );
+  static final Uri defaultUploadUrl = Uri.parse(
+    'https://speed.cloudflare.com/__up',
+  );
   static const int chunkSize = 64 << 10;
 
   final http.Client Function() _newClient;
   final Uri downloadUrl;
   final Uri uploadUrl;
-
-  /// Longest a download runs before the stream completes.
   final Duration cap;
-
-  /// Longest an upload pushes data.
   final Duration uploadCap;
-
-  /// Sampling cadence.
+  final Duration requestTimeout;
+  final Duration responseTimeout;
   final Duration interval;
   final Random _random;
-
-  http.Client? _client;
-  void Function()? _abort;
+  _Transfer? _active;
   bool _cancelled = false;
 
-  /// True once [cancel] was called; a run that ends afterwards is void.
   bool get cancelled => _cancelled;
 
-  /// Stops whatever is running and closes the client, which aborts the
-  /// socket. The active stream completes (without error) shortly after.
+  /// Explicit cancellation invalidates the whole run, including a pending
+  /// request that has not returned headers yet.
   void cancel() {
     _cancelled = true;
-    _abort?.call();
-    _client?.close();
-    _client = null;
+    _active?.abort();
   }
 
-  /// Streams download progress every [interval] until [cap] or EOF.
-  Stream<SpeedSample> download() {
-    final ctrl = StreamController<SpeedSample>();
-    ctrl.onListen = () => _runDownload(ctrl);
+  Stream<SpeedSample> download() => _stream(_download);
+
+  Stream<SpeedSample> upload({int bytes = 5 << 20}) =>
+      _stream((transfer) => _upload(transfer, bytes));
+
+  Stream<SpeedSample> _stream(Future<void> Function(_Transfer) run) {
+    late StreamController<SpeedSample> ctrl;
+    _Transfer? transfer;
+    ctrl = StreamController<SpeedSample>(
+      onListen: () async {
+        try {
+          if (_cancelled) return;
+          final current = transfer = _Transfer(_newClient(), ctrl, interval);
+          _active = current;
+          await run(current);
+        } catch (error, stack) {
+          if (!_cancelled && !(transfer?.aborted ?? false) && !ctrl.isClosed) {
+            ctrl.addError(SpeedTestException.from(error), stack);
+          }
+        } finally {
+          transfer?.close();
+          if (identical(_active, transfer)) _active = null;
+          unawaited(ctrl.close());
+        }
+      },
+      // Cancelling a progress subscription must also stop network work. It
+      // does not mark the test as user-cancelled: await-for also cancels on
+      // an error, and the service still needs to report that failure.
+      onCancel: () => transfer?.abort(),
+    );
     return ctrl.stream;
   }
 
-  /// Streams upload progress every [interval] until [bytes] were sent or
-  /// [uploadCap] elapsed.
-  Stream<SpeedSample> upload({int bytes = 5 << 20}) {
-    final ctrl = StreamController<SpeedSample>();
-    ctrl.onListen = () => _runUpload(ctrl, bytes);
-    return ctrl.stream;
-  }
-
-  Future<void> _runDownload(StreamController<SpeedSample> ctrl) async {
-    final client = _client = _newClient();
-    final meter = _Meter(ctrl, interval);
+  Future<void> _download(_Transfer transfer) async {
+    final request = http.Request('GET', downloadUrl)
+      ..headers['Cache-Control'] = 'no-cache'
+      ..headers['Accept-Encoding'] = 'identity';
+    final response = await transfer.wait(
+      transfer.client.send(request),
+      requestTimeout,
+    );
+    _checkStatus(response);
+    final meter = transfer.meter..start();
     final done = Completer<void>();
     void finish() {
       if (!done.isCompleted) done.complete();
     }
 
-    _abort = finish;
-    StreamSubscription<List<int>>? sub;
-    Timer? capTimer;
+    final capTimer = Timer(cap, finish);
+    final sub = response.stream.listen(
+      (chunk) {
+        if (!transfer.aborted) meter.bytes += chunk.length;
+      },
+      onError: (Object error, StackTrace stack) {
+        if (!done.isCompleted) done.completeError(error, stack);
+      },
+      onDone: finish,
+      cancelOnError: true,
+    );
     try {
-      final res = await client.send(http.Request('GET', downloadUrl));
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw http.ClientException('HTTP ${res.statusCode}', downloadUrl);
-      }
-      meter.start();
-      capTimer = Timer(cap, finish);
-      sub = res.stream.listen(
-        (chunk) => meter.bytes += chunk.length,
-        onError: (Object e, StackTrace st) {
-          if (!done.isCompleted) done.completeError(e, st);
-        },
-        onDone: finish,
-        cancelOnError: true,
-      );
-      await done.future;
-      if (!_cancelled) meter.emitFinal();
-    } catch (e, st) {
-      if (!_cancelled && !ctrl.isClosed) ctrl.addError(e, st);
+      await transfer.wait(done.future);
+      if (meter.bytes == 0) throw const SpeedTestException(SpeedFailure.empty);
+      meter.emitFinal();
     } finally {
-      capTimer?.cancel();
-      meter.stop();
-      // Not awaited: closing the client tears the socket down anyway, and
-      // a cancel that settles late must not hold the progress stream open.
-      unawaited(sub?.cancel());
-      _abort = null;
-      client.close();
-      if (identical(_client, client)) _client = null;
-      await ctrl.close();
+      capTimer.cancel();
+      // A transport whose cancel Future settles late must not hold the
+      // user-facing progress stream open; close() also tears down its socket.
+      unawaited(sub.cancel());
     }
   }
 
-  Future<void> _runUpload(StreamController<SpeedSample> ctrl, int total) async {
-    final client = _client = _newClient();
-    final meter = _Meter(ctrl, interval);
-    // One random block, reused: the point is to defeat nothing but a
-    // trivially compressible body, and Random() is fast enough for that.
-    final block = List<int>.generate(chunkSize, (_) => _random.nextInt(256), growable: false);
-    var stop = false;
-    _abort = () => stop = true;
-
+  Future<void> _upload(_Transfer transfer, int total) async {
+    // Typed storage keeps this buffer at 64 KiB rather than one boxed int
+    // per byte. Its contents remain fixed while the socket consumes it.
+    final block = Uint8List(chunkSize);
+    for (var i = 0; i < block.length; i++) {
+      block[i] = _random.nextInt(256);
+    }
+    final meter = transfer.meter;
     Stream<List<int>> body() async* {
-      while (!stop && !_cancelled && meter.bytes < total && meter.elapsed < uploadCap) {
+      // A transport may listen late, after timeout has already closed this
+      // transfer. Do not restart its sampler or send any more bytes.
+      if (transfer.closed) return;
+      meter.start();
+      while (!transfer.closed &&
+          meter.bytes < total &&
+          meter.elapsed < uploadCap) {
         final n = min(chunkSize, total - meter.bytes);
-        yield n == chunkSize ? block : block.sublist(0, n);
-        // Counted once the consumer took the chunk (back-pressure keeps
-        // the generator from running ahead of the socket).
-        meter.bytes += n;
+        yield n == chunkSize ? block : Uint8List.sublistView(block, 0, n);
+        if (!transfer.closed) meter.bytes += n;
       }
     }
 
+    final request = _ChunkedRequest('POST', uploadUrl, body());
+    final response = await transfer.wait(
+      transfer.client.send(request),
+      requestTimeout + uploadCap,
+    );
+    _checkStatus(response);
+    // A server response confirms the upload. Never report success for a
+    // 403/429/5xx response or wait forever for its trailing response body.
+    final done = Completer<void>();
+    final sub = response.stream.listen(
+      (_) {},
+      onError: (Object error, StackTrace stack) {
+        if (!done.isCompleted) done.completeError(error, stack);
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete();
+      },
+      cancelOnError: true,
+    );
     try {
-      meter.start();
-      final req = _ChunkedRequest('POST', uploadUrl, body());
-      // Headers arrive only after the body was consumed; a slow ack is not
-      // our measurement, so it gets a short grace.
-      final res = await client.send(req).timeout(uploadCap + const Duration(seconds: 5));
-      await res.stream.drain<void>();
-      if (!_cancelled) meter.emitFinal();
-    } catch (e, st) {
-      stop = true;
-      if (!_cancelled && !ctrl.isClosed) ctrl.addError(e, st);
+      await transfer.wait(done.future, responseTimeout);
     } finally {
-      meter.stop();
-      _abort = null;
-      client.close();
-      if (identical(_client, client)) _client = null;
-      await ctrl.close();
+      unawaited(sub.cancel());
+    }
+    if (meter.bytes == 0) throw const SpeedTestException(SpeedFailure.empty);
+    meter.emitFinal();
+  }
+
+  static void _checkStatus(http.StreamedResponse response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw SpeedTestException(
+        SpeedFailure.server,
+        statusCode: response.statusCode,
+      );
     }
   }
+}
+
+class _Transfer {
+  _Transfer(this.client, StreamController<SpeedSample> ctrl, Duration interval)
+    : meter = _Meter(ctrl, interval);
+  final http.Client client;
+  final _Meter meter;
+  final _aborted = Completer<void>();
+  bool get aborted => _aborted.isCompleted;
+  bool _closed = false;
+  bool get closed => _closed;
+
+  Future<T> wait<T>(Future<T> pending, [Duration? timeout]) {
+    final result = Future.any<T>([
+      pending,
+      _aborted.future.then<T>((_) => throw const _AbortedTransfer()),
+    ]);
+    return timeout == null ? result : result.timeout(timeout);
+  }
+
+  void abort() {
+    if (!aborted) _aborted.complete();
+    close();
+  }
+
+  void close() {
+    meter.stop();
+    if (_closed) return;
+    _closed = true;
+    client.close();
+  }
+}
+
+class _AbortedTransfer implements Exception {
+  const _AbortedTransfer();
 }
 
 /// Periodic sampler shared by both directions.
@@ -202,7 +288,9 @@ class _Meter {
     if (ctrl.isClosed) return;
     final el = _sw.elapsed;
     final dt = el - _lastAt;
-    final bps = dt.inMicroseconds == 0 ? 0.0 : (bytes - _lastBytes) * 1e6 / dt.inMicroseconds;
+    final bps = dt.inMicroseconds == 0
+        ? 0.0
+        : (bytes - _lastBytes) * 1e6 / dt.inMicroseconds;
     _lastBytes = bytes;
     _lastAt = el;
     ctrl.add(SpeedSample(bytes: bytes, elapsed: el, bps: bps));
@@ -210,7 +298,7 @@ class _Meter {
 
   /// One last reading so the consumer sees the final byte count.
   void emitFinal() {
-    if (bytes > _lastBytes || _lastAt == Duration.zero) _emit();
+    _emit();
   }
 
   void stop() {

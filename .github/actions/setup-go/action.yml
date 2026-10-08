@@ -1,0 +1,33 @@
+name: Set up Go with platform build caches
+description: Keep each job's compiled packages instead of sharing the first job's cache.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: core/go.mod
+        cache: false
+
+    - name: Resolve Go cache paths
+      id: go
+      shell: bash
+      run: |
+        echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Go modules
+      uses: actions/cache@v5
+      with:
+        path: ${{ steps.go.outputs.modules }}
+        key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}
+
+    - name: Cache compiled Go packages
+      uses: actions/cache@v5
+      with:
+        path: ${{ steps.go.outputs.build }}
+        # Native architectures, CGO and build tags differ between jobs. A single
+        # immutable setup-go key let the fastest job strand the others' caches.
+        key: go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}-

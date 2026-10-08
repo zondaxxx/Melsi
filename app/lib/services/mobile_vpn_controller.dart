@@ -8,8 +8,8 @@ import 'vpn_controller.dart';
 /// Bridge to the native tunnel (CONTRACT §5).
 class MobileVpnController extends VpnController {
   MobileVpnController({MethodChannel? channel, EventChannel? events})
-      : _ch = channel ?? const MethodChannel('app.melsi/vpn'),
-        _ev = events ?? const EventChannel('app.melsi/vpn/events');
+    : _ch = channel ?? const MethodChannel('app.melsi/vpn'),
+      _ev = events ?? const EventChannel('app.melsi/vpn/events');
 
   final MethodChannel _ch;
   final EventChannel _ev;
@@ -20,8 +20,10 @@ class MobileVpnController extends VpnController {
       .receiveBroadcastStream()
       .map((e) {
         final m = (e as Map?) ?? const {};
-        return VpnState(VpnState.parseStatus(m['state'] as String?),
-            m['message'] as String?);
+        return VpnState(
+          VpnState.parseStatus(m['state'] as String?),
+          m['message'] as String?,
+        );
       })
       .handleError((Object _) {})
       .asBroadcastStream();
@@ -68,6 +70,19 @@ class MobileVpnController extends VpnController {
     try {
       return await _ch.invokeMethod<String>('coreVersion');
     } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<String?> readLog({int maxLines = 400}) async {
+    try {
+      return await _ch.invokeMethod<String>('readLog', {
+        'maxLines': maxLines.clamp(1, 400),
+      });
+    } on MissingPluginException {
+      return null; // Older native bridges and Android have no saved journal.
+    } on PlatformException {
       return null;
     }
   }

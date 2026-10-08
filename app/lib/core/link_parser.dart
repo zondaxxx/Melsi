@@ -326,6 +326,8 @@ class _V2 {
   String? host;
   String? path;
   String? serviceName;
+  String? grpcAuthority;
+  bool? grpcMultiMode;
   String? method;
   int? maxEarlyData;
   String? earlyDataHeader;
@@ -426,6 +428,8 @@ class _V2 {
           'type': 'grpc',
           if ((serviceName ?? path ?? '').isNotEmpty)
             'service_name': serviceName ?? path,
+          if (grpcAuthority != null && grpcAuthority!.isNotEmpty) 'authority': grpcAuthority,
+          if (grpcMultiMode != null) 'multi_mode': grpcMultiMode,
         };
       case 'h2':
       case 'http':
@@ -688,6 +692,7 @@ _Parsed? _v2Url(String link, String type) {
     ..host = u.q('host')
     ..path = u.q('path')
     ..serviceName = u.q('serviceName', ['servicename'])
+    ..grpcAuthority = u.q('authority')
     ..security =
         u.q('security') ?? (type == 'trojan' ? 'tls' : 'none')
     ..sni = u.q('sni', ['peer', 'servername'])
@@ -714,6 +719,11 @@ _Parsed? _v2Url(String link, String type) {
   }
   if (ed != null) v.maxEarlyData = _int(ed);
   if (v.network == 'grpc' && v.serviceName == null) v.serviceName = v.path;
+  if (v.network == 'grpc' || v.network == 'gun') {
+    final mode = u.q('mode');
+    if (mode == 'multi') v.grpcMultiMode = true;
+    if (mode == 'gun') v.grpcMultiMode = false;
+  }
   final ob = v.build();
   return ob == null ? null : _Parsed(v.name, ob);
 }
@@ -1329,6 +1339,7 @@ Map<String, dynamic> _xhttpExtra(Map<String, dynamic> extra) {
     'uplinkChunkSize': 'uplink-chunk-size',
     'scMaxEachPostBytes': 'sc-max-each-post-bytes',
     'scMinPostsIntervalMs': 'sc-min-posts-interval-ms',
+    'scMaxBufferedPosts': 'sc-max-buffered-posts',
     'headers': 'headers',
   };
   final result = <String, dynamic>{};
@@ -2009,14 +2020,24 @@ _Parsed? _xrayOutbound(Map<String, dynamic> o, String? remarks) {
           v.path = _str(options['path']);
           v.host = _str(options['host']);
           v.xhttpMode = _str(options['mode']);
-          v.xhttpOptions = _xhttpExtra(Map<String, dynamic>.from((options['extra'] as Map?) ?? {}));
+          // Xray's `extra` replaces outer options, except host/path/mode.
+          final extra = options['extra'] as Map?;
+          v.xhttpOptions = _xhttpExtra(extra != null
+              ? Map<String, dynamic>.from(extra)
+              : {
+                  for (final entry in options.entries)
+                    if (!const {'path', 'host', 'mode'}.contains(entry.key)) entry.key: entry.value,
+                });
         case 'ws':
           final w = s('wsSettings');
           v.path = _str(w['path']);
           final h = Map<String, dynamic>.from((w['headers'] as Map?) ?? {});
           v.host = _str(w['host']) ?? _str(h['Host']) ?? _str(h['host']);
         case 'grpc':
-          v.serviceName = _str(s('grpcSettings')['serviceName']);
+          final grpc = s('grpcSettings');
+          v.serviceName = _str(grpc['serviceName']);
+          v.grpcAuthority = _str(grpc['authority']);
+          if (grpc['multiMode'] != null) v.grpcMultiMode = _truthy(grpc['multiMode']);
         case 'httpupgrade':
           final w = s('httpupgradeSettings');
           v.path = _str(w['path']);

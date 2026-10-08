@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CoreFoundation
 
 enum TunnelConfiguration {
     /// Official and CI builds declare this group. Re-signed installs (GBox and
@@ -8,10 +9,182 @@ enum TunnelConfiguration {
     static let preferredAppGroup = "group.app.melsi"
     static let rememberedAppGroupKey = "melsi.sharedAppGroup"
     static let commandSocketPathCapacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+    private static let lifecycleLock = NSLock()
+    static let lifecycleHistoryLimit = 64
+    static let oomEventReadLimit = 128 * 1024
 
     struct SharedContainer: Equatable {
         var group: String
         var url: URL
+    }
+
+    /// The extension records the underlying core failure. iOS often reports
+    /// only that its provider disconnected, so preserve the more useful cause.
+    static func disconnectMessage(tunnelError: String?, systemError: String?) -> String? {
+        for message in [tunnelError, systemError] {
+            guard let message = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !message.isEmpty else { continue }
+            return message
+        }
+        return nil
+    }
+
+    static func stopReasonMessage(_ reason: Int) -> String {
+        let descriptions = [
+            0: "no reason reported", 1: "stopped by user", 2: "provider failed",
+            3: "network unavailable", 4: "network changed", 5: "provider disabled",
+            6: "authentication canceled", 7: "configuration failed", 8: "idle timeout",
+            9: "configuration disabled", 10: "configuration removed", 11: "another VPN started",
+            12: "user logged out", 13: "user switched", 14: "connection failed",
+            15: "device sleep", 16: "app update", 17: "iOS network extension error",
+        ]
+        return "VPN stopped: \(descriptions[reason] ?? "unknown system reason") (\(reason))."
+    }
+
+    /// Persists only lifecycle metadata, never configuration or server keys.
+    /// A missing stop callback is evidence of an unreported termination, not
+    /// proof of any particular cause such as a memory-pressure kill.
+    static func recordTunnelEvent(_ event: String, in directory: URL, stopReason: Int? = nil, memoryBytes: UInt64? = nil, date: Date = Date()) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        var entry: [String: Any] = ["event": event, "at": ISO8601DateFormatter().string(from: date)]
+        if let stopReason { entry["stop_reason"] = stopReason }
+        if let memoryBytes { entry["physical_footprint_bytes"] = memoryBytes }
+        let line = String(decoding: try JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]), as: UTF8.self)
+        let url = directory.appendingPathComponent("tunnel_lifecycle.jsonl")
+        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        var lines = existing.split(separator: "\n").suffix(lifecycleHistoryLimit - 1).map(String.init)
+        lines.append(line)
+        try writeDiagnostic(lines.joined(separator: "\n") + "\n", to: url)
+        if let stopReason {
+            try writeDiagnostic(stopReasonMessage(stopReason), to: directory.appendingPathComponent("last_stop.txt"))
+        }
+    }
+
+    static func physicalFootprint() -> UInt64? {
+        var info = task_vm_info_data_t()
+        let capacity = MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size
+        var count = mach_msg_type_number_t(capacity)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: capacity) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? info.phys_footprint : nil
+    }
+
+    static func lifecycleSummary(_ journal: String?) -> String? {
+        guard let line = journal?.split(separator: "\n").last,
+              let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              let event = object["event"] as? String,
+              let date = object["at"] as? String else { return nil }
+        var result = "Last tunnel event: \(event) at \(date)"
+        if let bytes = object["physical_footprint_bytes"] as? NSNumber {
+            result += String(format: "; memory %.1f MiB", bytes.doubleValue / 1_048_576)
+        }
+        return result + "."
+    }
+
+    static func hasUnreportedTunnelStop(_ journal: String?) -> Bool {
+        guard let line = journal?.split(separator: "\n").last,
+              let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              let event = object["event"] as? String else { return false }
+        if event == "stopped", let reason = object["stop_reason"] as? Int {
+            return ![1, 5, 9, 10, 11, 12, 13, 16].contains(reason)
+        }
+        return ["starting", "started", "sleep", "wake", "health"].contains(event)
+    }
+
+    static func isExpectedTunnelStop(_ journal: String?) -> Bool {
+        guard let line = journal?.split(separator: "\n").last,
+              let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              object["event"] as? String == "stopped",
+              let reason = object["stop_reason"] as? Int else { return false }
+        return [1, 5, 9, 10, 11, 12, 13, 16].contains(reason)
+    }
+
+    static func mayUpdateOnDemand(enabling: Bool, requestedAttempt: Int, currentAttempt: Int, userStopped: Bool) -> Bool {
+        requestedAttempt == currentAttempt && (!enabling || !userStopped)
+    }
+
+    static func diagnosticLog(journal: String?, stop: String?, error: String?, maxLines: Int, oomEvents: [String] = []) -> String {
+        var lines = (journal ?? "").split(separator: "\n").map(String.init)
+        lines.append(contentsOf: oomEvents.suffix(20))
+        for (label, text) in [("[last stop]", stop), ("[last error]", error)] {
+            guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+            lines.append(contentsOf: text.split(separator: "\n").map { "\(label) \($0)" })
+        }
+        return lines.suffix(min(max(maxLines, 1), 400)).joined(separator: "\n")
+    }
+
+    /// Read only the bounded tail of libbox's event metadata. OOM report
+    /// directories also contain configurations and connections; never load
+    /// those files or return an arbitrary JSON field from this one.
+    static func oomResetEvents(in sharedDirectory: URL) -> [String] {
+        let url = sharedDirectory.appendingPathComponent("Library/Caches/Working/oom_draft/events.jsonl")
+        guard let file = try? FileHandle(forReadingFrom: url) else { return [] }
+        defer { try? file.close() }
+        do {
+            let length = try file.seekToEnd()
+            let offset = length > UInt64(oomEventReadLimit) ? length - UInt64(oomEventReadLimit) : 0
+            try file.seek(toOffset: offset)
+            var data = try file.read(upToCount: oomEventReadLimit) ?? Data()
+            if offset > 0 {
+                // The tail can start inside a UTF-8 character or JSON record.
+                guard let newline = data.firstIndex(of: 10) else { return [] }
+                data = data.suffix(from: data.index(after: newline))
+            }
+            return formatOOMResetEvents(data)
+        } catch {
+            return []
+        }
+    }
+
+    static func formatOOMResetEvents(_ data: Data) -> [String] {
+        let timestamp = ISO8601DateFormatter()
+        let fractionalTimestamp = ISO8601DateFormatter()
+        fractionalTimestamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var result: [String] = []
+        for line in data.split(separator: 10) {
+            guard let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  event["t"] as? String == "reset",
+                  let recordedAt = event["at"] as? String, recordedAt.utf8.count <= 40,
+                  let date = timestamp.date(from: recordedAt) ?? fractionalTimestamp.date(from: recordedAt) else { continue }
+            var reportOnly = false
+            if let value = event["reportOnly"] {
+                guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { continue }
+                reportOnly = number.boolValue
+            }
+            let reason = event["reason"] as? String
+            let safeReason = reason == "rate" || reason == "threshold" ? reason! : "unknown"
+            var text = "[memory guard] \(timestamp.string(from: date)): \(reportOnly ? "would reset (report only)" : "reset") (\(safeReason))"
+            for (key, label) in [("memoryBytes", "memory"), ("memoryAfterBytes", "after"), ("memoryLimit", "limit"), ("triggerBytes", "trigger")] {
+                if let bytes = diagnosticUnsignedInteger(event[key]) {
+                    text += String(format: "; %@ %.1f MiB", locale: Locale(identifier: "en_US_POSIX"), label, Double(bytes) / 1_048_576)
+                }
+            }
+            if let connections = diagnosticUnsignedInteger(event["connections"]) {
+                text += "; connections \(connections)"
+            }
+            result.append(text)
+        }
+        return Array(result.suffix(20))
+    }
+
+    private static func diagnosticUnsignedInteger(_ value: Any?) -> UInt64? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return UInt64(number.stringValue)
+    }
+
+    private static func writeDiagnostic(_ text: String, to url: URL) throws {
+        let data = Data(text.utf8)
+        #if os(iOS)
+        // Keep diagnostics writable/readable after the first unlock, including
+        // when the system stops a tunnel while the screen is locked.
+        try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #else
+        try data.write(to: url, options: .atomic)
+        #endif
     }
 
     /// Directory that will hold `command.sock`.
@@ -468,6 +641,23 @@ enum TunnelConfiguration {
             return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
         }
         return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    }
+}
+
+/// NE preference reads and writes must share the same queue: a concurrent
+/// load can otherwise replace an in-memory policy while it is being saved.
+final class TunnelPreferenceQueue {
+    private var pending: Task<Void, Error>?
+
+    @MainActor
+    func perform<Value>(_ operation: @escaping @MainActor () async throws -> Value) async throws -> Value {
+        let previous = pending
+        let next = Task { @MainActor in
+            _ = try? await previous?.value
+            return try await operation()
+        }
+        pending = Task { @MainActor in _ = try await next.value }
+        return try await next.value
     }
 }
 

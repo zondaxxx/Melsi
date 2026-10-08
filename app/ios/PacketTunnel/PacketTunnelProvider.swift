@@ -30,6 +30,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private(set) var commandServer: LibboxCommandServer?
     private lazy var platformInterface = MelsiPlatformInterface(self)
     private var engineRunning = false
+    private let healthQueue = DispatchQueue(label: "app.melsi.tunnel-health", qos: .utility)
+    private var healthTimer: DispatchSourceTimer?
 
     // MARK: - Paths
 
@@ -80,6 +82,27 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func startTunnel(options: [String: NSObject]?) async throws {
         Self.adoptSharedContainer(hint: options?["appGroup"] as? String)
+        clearLastError()
+        try? FileManager.default.removeItem(at: Self.sharedDirectory.appendingPathComponent("last_stop.txt"))
+        recordLifecycle("starting")
+        MelsicoreResumeEngine()
+        do {
+            try startTunnelService(options: options)
+        } catch {
+            // iOS need not call stopTunnel after a failed start. Release the
+            // listener and any partially started service before the next try.
+            let startupError = fail(error.localizedDescription)
+            stopEngine()
+            stopService()
+            stopHealthMonitor()
+            commandServer?.close()
+            commandServer = nil
+            recordLifecycle("start_failed")
+            throw startupError
+        }
+    }
+
+    private func startTunnelService(options: [String: NSObject]?) throws {
         let fileManager = FileManager.default
         let sandboxDirectory = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         let commandDirectory = try TunnelConfiguration.commandBaseDirectory(
@@ -99,8 +122,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         if let group = Self.activeAppGroup {
             os_log("shared app group %{public}@", log: Self.log, type: .default, group)
         }
-        clearLastError()
-
         let setupOptions = LibboxSetupOptions()
         setupOptions.basePath = basePath
         setupOptions.workingPath = workingPath
@@ -137,10 +158,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let payload = try loadPayload(options)
         try startService(payload)
         writeVersionFile()
+        recordLifecycle("started")
+        startHealthMonitor()
         writeMessage("(packet-tunnel) started")
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
+        stopHealthMonitor()
+        recordLifecycle("stopped", stopReason: reason.rawValue)
         writeMessage("(packet-tunnel) stopping, reason: \(reason.rawValue)")
         stopEngine()
         stopService()
@@ -163,7 +188,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 try startService(payload)
                 return nil
             } catch {
-                return error.localizedDescription.data(using: .utf8)
+                return fail(error.localizedDescription).localizedDescription.data(using: .utf8)
             }
         }
         let message = String(data: messageData, encoding: .utf8) ?? ""
@@ -176,7 +201,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 try startService(payload)
                 return nil
             } catch {
-                return error.localizedDescription.data(using: .utf8)
+                return fail(error.localizedDescription).localizedDescription.data(using: .utf8)
             }
         case "version":
             return versionJSON().data(using: .utf8)
@@ -188,11 +213,15 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func sleep() async {
+        recordLifecycle("sleep")
+        MelsicorePauseEngine()
         commandServer?.pause()
     }
 
     override func wake() {
         commandServer?.wake()
+        MelsicoreResumeEngine()
+        recordLifecycle("wake")
     }
 
     // MARK: - Service
@@ -238,6 +267,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         } catch {
             throw fail("start service: \(error.localizedDescription)")
         }
+        clearLastError()
         if !payload.engine.isEmpty {
             var engineError: NSError?
             MelsicoreStartEngine(payload.engine, &engineError)
@@ -245,7 +275,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 // The tunnel itself works without the engine (manual selection),
                 // so report but do not tear the VPN down.
                 writeMessage("(packet-tunnel) start engine: \(engineError.localizedDescription)")
-                saveLastError("engine: \(engineError.localizedDescription)")
             } else {
                 engineRunning = true
             }
@@ -278,6 +307,42 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     // MARK: - Helpers
+
+    private func startHealthMonitor() {
+        stopHealthMonitor()
+        healthQueue.sync {
+            let timer = DispatchSource.makeTimerSource(queue: healthQueue)
+            timer.schedule(deadline: .now() + 30, repeating: 30, leeway: .seconds(5))
+            timer.setEventHandler { [weak self] in
+                guard let self, self.healthTimer != nil else { return }
+                self.recordLifecycle("health")
+            }
+            healthTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func stopHealthMonitor() {
+        // Wait for an active sample before persisting the terminal stop event;
+        // a late health sample must not make a clean stop look like a crash.
+        healthQueue.sync {
+            healthTimer?.cancel()
+            healthTimer = nil
+        }
+    }
+
+    private func recordLifecycle(_ event: String, stopReason: Int? = nil) {
+        do {
+            let memory = TunnelConfiguration.physicalFootprint()
+            try FileManager.default.createDirectory(at: Self.sharedDirectory, withIntermediateDirectories: true)
+            try TunnelConfiguration.recordTunnelEvent(event, in: Self.sharedDirectory, stopReason: stopReason, memoryBytes: memory)
+            if let memory, memory >= 40 * 1024 * 1024 {
+                writeMessage("(packet-tunnel) \(event): physical footprint \(memory / 1024 / 1024) MiB")
+            }
+        } catch {
+            os_log("record lifecycle: %{public}@", log: Self.log, type: .error, error.localizedDescription)
+        }
+    }
 
     func writeMessage(_ message: String) {
         os_log("%{public}@", log: Self.log, type: .default, message)

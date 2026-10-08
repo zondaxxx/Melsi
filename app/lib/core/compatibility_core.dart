@@ -1,31 +1,65 @@
 import 'models.dart';
+import 'xray_config.dart';
 
 abstract final class CompatibilityCore {
   static const xhttpOptionNames = {
-    'headers', 'no-grpc-header', 'x-padding-bytes', 'x-padding-obfs-mode',
-    'x-padding-key', 'x-padding-header', 'x-padding-placement', 'x-padding-method',
-    'uplink-http-method', 'session-placement', 'session-key', 'session-table',
-    'session-length', 'seq-placement', 'seq-key', 'uplink-data-placement',
-    'uplink-data-key', 'uplink-chunk-size', 'sc-max-each-post-bytes',
-    'sc-min-posts-interval-ms', 'reuse-settings',
+    'headers',
+    'no-grpc-header',
+    'x-padding-bytes',
+    'x-padding-obfs-mode',
+    'x-padding-key',
+    'x-padding-header',
+    'x-padding-placement',
+    'x-padding-method',
+    'uplink-http-method',
+    'session-placement',
+    'session-key',
+    'session-table',
+    'session-length',
+    'seq-placement',
+    'seq-key',
+    'uplink-data-placement',
+    'uplink-data-key',
+    'uplink-chunk-size',
+    'sc-max-each-post-bytes',
+    'sc-min-posts-interval-ms',
+    'sc-max-buffered-posts',
+    'reuse-settings',
   };
 
   static void validateXhttpOptions(Map options) {
     for (final key in options.keys) {
-      if (!xhttpOptionNames.contains(key)) throw FormatException('Unsupported XHTTP option: $key');
+      if (!xhttpOptionNames.contains(key)) {
+        throw FormatException('Unsupported XHTTP option: $key');
+      }
     }
   }
 
   static bool needsMihomo(Map<String, dynamic> outbound) =>
       outbound['type'] == 'shadowsocksr' ||
       outbound['type'] == 'amneziawg' ||
-      (outbound['transport'] as Map?)?['type'] == 'xhttp';
+      _legacyXhttp(outbound);
 
-  /// REALITY and xtls-rprx-vision stay native sing-box outbounds.
-  ///
-  /// Mihomo 1.19 finishes the TCP dial and then rejects the ClientHello
-  /// (`REALITY authentication failed`) for ordinary VLESS REALITY servers.
-  /// Vision also cannot share a connection with multiplex.
+  // Xray removed allowInsecure. Keep explicitly unverified, non-REALITY
+  // XHTTP on its existing adapter instead of rejecting the whole VPN config.
+  static bool _legacyXhttp(Map<String, dynamic> outbound) {
+    final tls = outbound['tls'] as Map?;
+    return (outbound['transport'] as Map?)?['type'] == 'xhttp' &&
+        tls?['insecure'] == true && !realityOrVision(outbound);
+  }
+
+  static bool needsXray(Map<String, dynamic> outbound) {
+    if (_legacyXhttp(outbound)) return false;
+    final transport = outbound['transport'] as Map?;
+    return realityOrVision(outbound) ||
+        transport?['type'] == 'xhttp' ||
+        (transport?['type'] == 'grpc' &&
+            (transport?['authority'] != null ||
+                transport?['multi_mode'] == true));
+  }
+
+  /// REALITY must use the current Xray handshake. Older sing-box/Mihomo
+  /// client versions are rejected by current Xray server version gates.
   static bool realityOrVision(Map<String, dynamic> outbound) {
     final flow = outbound['flow'];
     if (flow is String && flow.isNotEmpty) return true;
@@ -37,9 +71,9 @@ abstract final class CompatibilityCore {
 
   /// Clash/Mihomo proxy object for a sing-box outbound the embedded adapter
   /// can dial, or null when the node should stay a native sing-box outbound
-  /// (unknown transport, REALITY/vision, or a protocol [wrap] already owns).
+  /// (unknown transport, REALITY/Vision, or a protocol [wrap] already owns).
   static Map<String, dynamic>? clashProxy(Map<String, dynamic> outbound) {
-    if (needsMihomo(outbound) || realityOrVision(outbound)) return null;
+    if (needsMihomo(outbound) || needsXray(outbound)) return null;
     final type = outbound['type'];
     final server = outbound['server'];
     final port = outbound['server_port'];
@@ -149,7 +183,8 @@ abstract final class CompatibilityCore {
         };
       case 'grpc':
         proxy['grpc-opts'] = {
-          if (transport['service_name'] != null) 'grpc-service-name': transport['service_name'],
+          if (transport['service_name'] != null)
+            'grpc-service-name': transport['service_name'],
         };
       case 'http':
         final host = transport['host'];
@@ -161,7 +196,10 @@ abstract final class CompatibilityCore {
     }
   }
 
-  static void _clashTls(Map<String, dynamic> proxy, Map<String, dynamic> outbound) {
+  static void _clashTls(
+    Map<String, dynamic> proxy,
+    Map<String, dynamic> outbound,
+  ) {
     final tls = outbound['tls'];
     if (tls is! Map || tls['enabled'] != true) return;
     proxy['tls'] = true;
@@ -181,32 +219,57 @@ abstract final class CompatibilityCore {
     }
   }
 
-  static String nameFor(ProxyNode node) => needsMihomo(node.outbound) ? 'Mihomo' : 'sing-box';
+  static String nameFor(ProxyNode node) => needsXray(node.outbound)
+      ? 'Xray'
+      : needsMihomo(node.outbound)
+      ? 'Mihomo'
+      : 'sing-box';
+
+  static Map<String, dynamic>? wrapXray(Map<String, dynamic> outbound) {
+    final translated = XrayConfig.outboundFromMap(
+      outbound,
+      outbound['tag'] as String,
+    );
+    if (translated == null) return null;
+    return {
+      'type': 'xray',
+      'tag': outbound['tag'],
+      'domain_resolver': {'server': 'dns-direct'},
+      if (outbound['detour'] != null) 'detour': outbound['detour'],
+      'outbound': translated,
+    };
+  }
 
   static Map<String, dynamic> wrap(Map<String, dynamic> outbound) {
+    if (needsXray(outbound)) {
+      final wrapped = wrapXray(outbound);
+      if (wrapped != null) return wrapped;
+      throw const FormatException('Unsupported Xray transport');
+    }
     if (!needsMihomo(outbound)) return outbound;
     final proxy = switch (outbound['type']) {
       'shadowsocksr' => {
-          'type': 'ssr',
-          'server': outbound['server'],
-          'port': outbound['server_port'],
-          'cipher': outbound['method'],
-          'password': outbound['password'],
-          'protocol': outbound['protocol'] ?? 'origin',
-          'obfs': outbound['obfs'] ?? 'plain',
-          'protocol-param': outbound['protocol_param'] ?? '',
-          'obfs-param': outbound['obfs_param'] ?? outbound['server'],
-        },
+        'type': 'ssr',
+        'server': outbound['server'],
+        'port': outbound['server_port'],
+        'cipher': outbound['method'],
+        'password': outbound['password'],
+        'protocol': outbound['protocol'] ?? 'origin',
+        'obfs': outbound['obfs'] ?? 'plain',
+        'protocol-param': outbound['protocol_param'] ?? '',
+        'obfs-param': outbound['obfs_param'] ?? outbound['server'],
+      },
       'amneziawg' => _amnezia(outbound),
       'vless' => _xhttp(outbound),
-      _ => throw const FormatException('XHTTP requires VLESS with the bundled Mihomo core'),
+      _ => throw const FormatException('Unsupported Mihomo protocol'),
     };
     return {
       'type': 'mihomo',
       'tag': outbound['tag'],
       'domain_resolver': {'server': 'dns-direct'},
       if (outbound['detour'] != null) 'detour': outbound['detour'],
-      if (outbound['tcp_fast_open'] != null) 'tcp_fast_open': outbound['tcp_fast_open'],
+      if (outbound['tcp_fast_open'] != null)
+        'tcp_fast_open': outbound['tcp_fast_open'],
       'proxy': {...proxy, 'name': outbound['tag'], 'udp': true},
     };
   }
@@ -253,8 +316,10 @@ abstract final class CompatibilityCore {
       'private-key': outbound['private_key'],
       if (outbound['mtu'] != null) 'mtu': outbound['mtu'],
       for (final address in addresses)
-        if (address.contains(':')) 'ipv6': address.split('/').first
-        else 'ip': address.split('/').first,
+        if (address.contains(':'))
+          'ipv6': address.split('/').first
+        else
+          'ip': address.split('/').first,
       'amnezia-wg-option': outbound['amnezia'],
       'persistent-keepalive': peers.first['persistent_keepalive_interval'] ?? 0,
       'peers': [
@@ -264,7 +329,8 @@ abstract final class CompatibilityCore {
             'port': peer['port'],
             'public-key': peer['public_key'],
             'allowed-ips': peer['allowed_ips'],
-            if (peer['pre_shared_key'] != null) 'pre-shared-key': peer['pre_shared_key'],
+            if (peer['pre_shared_key'] != null)
+              'pre-shared-key': peer['pre_shared_key'],
             if (peer['reserved'] != null) 'reserved': peer['reserved'],
           },
       ],

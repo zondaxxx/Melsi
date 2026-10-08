@@ -116,6 +116,7 @@ class AppState extends ChangeNotifier {
   bool loaded = false;
   int onboardingRevision = 0;
   VpnState vpnState = VpnState.stopped;
+  final Set<String> _shownVpnWarnings = {};
   DateTime? connectedAt;
   final Map<String, Latency> latencies = {};
   final Set<String> pinging = {};
@@ -1127,11 +1128,6 @@ class AppState extends ChangeNotifier {
       notice('notice.addServerFirst', kind: NoticeKind.error);
       return;
     }
-    if (settings.core == VpnCore.xray && isMobilePlatform) {
-      _setVpn(const VpnState(VpnStatus.error, 'xray-mobile'));
-      notice('notice.xrayDesktopOnly', kind: NoticeKind.error);
-      return;
-    }
     final attempt = ++_connectAttempt;
     _setVpn(const VpnState(VpnStatus.connecting));
     try {
@@ -1201,8 +1197,13 @@ class AppState extends ChangeNotifier {
       case VpnStatus.connected:
         connectedAt ??= DateTime.now();
         if (prev != VpnStatus.connected) _startRuntime();
+        final warning = s.message?.trim();
+        if (warning != null && warning.isNotEmpty && _shownVpnWarnings.add(warning)) {
+          notice('notice.vpnWarning', kind: NoticeKind.info, detail: warning);
+        }
       case VpnStatus.stopped:
       case VpnStatus.error:
+        _shownVpnWarnings.clear();
         if (!applying && disconnectAt != null) scheduleDisconnect(null);
         connectedAt = null;
         if (!applying) {

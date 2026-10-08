@@ -41,55 +41,129 @@ void main() {
   for (final mode in ['auto', 'packet-up', 'stream-up', 'stream-one']) {
     test('VLESS XHTTP $mode retains transport and TLS', () {
       final node = LinkParser.parseLink(xhttpLink(mode))!;
-      final proxy = CompatibilityCore.wrap({...node.outbound, 'tag': mode})['proxy'];
-      expect(proxy['network'], 'xhttp');
-      expect(proxy['xhttp-opts'], {'path': '/tunnel', 'host': 'cdn.example.com', 'mode': mode});
-      expect(proxy['servername'], 'cdn.example.com');
-      expect(proxy['tls'], true);
-      expect(proxy['skip-cert-verify'], false);
-      expect(proxy['uuid'], kUuid);
+      final wrapped = CompatibilityCore.wrap({...node.outbound, 'tag': mode});
+      expect(wrapped['type'], 'xray');
+      final proxy = wrapped['outbound'];
+      final stream = proxy['streamSettings'];
+      expect(stream['network'], 'xhttp');
+      expect(stream['xhttpSettings']['path'], '/tunnel');
+      expect(stream['xhttpSettings']['host'], 'cdn.example.com');
+      expect(stream['xhttpSettings']['mode'], mode);
+      expect(stream['security'], 'tls');
+      expect(stream['tlsSettings']['serverName'], 'cdn.example.com');
+      expect(stream['tlsSettings']['allowInsecure'], false);
+      expect(proxy['settings']['vnext'][0]['users'][0]['id'], kUuid);
     });
   }
 
   test('XHTTP extra and XMUX preserve explicit options', () {
-    final node = LinkParser.parseLink(xhttpLink('packet-up', extra: {
-      'noGRPCHeader': true,
-      'xPaddingBytes': '100-200',
-      'headers': {'X-Test': 'value'},
-      'xmux': {'maxConcurrency': '8-16', 'hMaxRequestTimes': 100, 'hKeepAlivePeriod': 30},
-    }))!;
-    final transport = CompatibilityCore.wrap({...node.outbound, 'tag': 'test'})['proxy']['xhttp-opts'];
-    expect(transport['no-grpc-header'], true);
-    expect(transport['x-padding-bytes'], '100-200');
-    expect(transport['headers'], {'X-Test': 'value'});
-    expect(transport['reuse-settings'], {'max-concurrency': '8-16', 'h-max-request-times': '100', 'h-keep-alive-period': 30});
+    final node = LinkParser.parseLink(
+      xhttpLink(
+        'packet-up',
+        extra: {
+          'noGRPCHeader': true,
+          'xPaddingBytes': '100-200',
+          'headers': {'X-Test': 'value'},
+          'xmux': {
+            'maxConcurrency': '8-16',
+            'hMaxRequestTimes': 100,
+            'hKeepAlivePeriod': 30,
+          },
+        },
+      ),
+    )!;
+    final transport = CompatibilityCore.wrap({
+      ...node.outbound,
+      'tag': 'test',
+    })['outbound']['streamSettings']['xhttpSettings'];
+    final extra = transport['extra'] as Map;
+    expect(extra['noGRPCHeader'], true);
+    expect(extra['xPaddingBytes'], '100-200');
+    expect(extra['headers'], {'X-Test': 'value'});
+    expect(extra['xmux'], {
+      'maxConcurrency': '8-16',
+      'hMaxRequestTimes': 100,
+      'hKeepAlivePeriod': 30,
+    });
+  });
+
+  test('explicitly unverified XHTTP TLS keeps its compatible adapter', () {
+    final node = LinkParser.parseLink('${xhttpLink('stream-up').split('#').first}&allowInsecure=1#SelfSigned')!;
+    final wrapped = CompatibilityCore.wrap({...node.outbound, 'tag': 'SelfSigned'});
+    expect(wrapped['type'], 'mihomo');
+    expect(wrapped['proxy']['skip-cert-verify'], true);
+    expect(wrapped['proxy']['network'], 'xhttp');
   });
 
   test('unsupported XHTTP variants fail instead of silently using TCP', () {
     expect(LinkParser.parseLink(xhttpLink('unknown')), isNull);
-    expect(LinkParser.parseLink(xhttpLink('auto').replaceFirst('vless:', 'trojan:')), isNull);
-    expect(LinkParser.parseLink(xhttpLink('auto', extra: {'downloadSettings': {'address': 'other.example.com'}})), isNull);
-    expect(LinkParser.parseLink(xhttpLink('auto', extra: {'unknown': true})), isNull);
+    expect(
+      LinkParser.parseLink(xhttpLink('auto').replaceFirst('vless:', 'trojan:')),
+      isNull,
+    );
+    expect(
+      LinkParser.parseLink(
+        xhttpLink(
+          'auto',
+          extra: {
+            'downloadSettings': {'address': 'other.example.com'},
+          },
+        ),
+      ),
+      isNull,
+    );
+    expect(
+      LinkParser.parseLink(xhttpLink('auto', extra: {'unknown': true})),
+      isNull,
+    );
   });
 
-  test('Clash XHTTP import preserves settings and rejects unsupported downloads', () {
-    final proxy = {
-      'name': 'XHTTP', 'type': 'vless', 'server': 'edge.example.com', 'port': 443,
-      'uuid': kUuid, 'tls': true, 'network': 'xhttp',
-      'xhttp-opts': {'path': '/tunnel', 'mode': 'stream-up', 'x-padding-bytes': '20-50'},
-    };
-    final node = LinkParser.parseContent(jsonEncode({'proxies': [proxy]})).single;
-    expect(node.outbound['transport']['mode'], 'stream-up');
-    expect(node.outbound['transport']['options']['x-padding-bytes'], '20-50');
-    proxy['xhttp-opts'] = {'download-settings': {'server': 'elsewhere.example.com'}};
-    expect(LinkParser.parseContent(jsonEncode({'proxies': [proxy]})), isEmpty);
-  });
+  test(
+    'Clash XHTTP import preserves settings and rejects unsupported downloads',
+    () {
+      final proxy = {
+        'name': 'XHTTP',
+        'type': 'vless',
+        'server': 'edge.example.com',
+        'port': 443,
+        'uuid': kUuid,
+        'tls': true,
+        'network': 'xhttp',
+        'xhttp-opts': {
+          'path': '/tunnel',
+          'mode': 'stream-up',
+          'x-padding-bytes': '20-50',
+        },
+      };
+      final node = LinkParser.parseContent(
+        jsonEncode({
+          'proxies': [proxy],
+        }),
+      ).single;
+      expect(node.outbound['transport']['mode'], 'stream-up');
+      expect(node.outbound['transport']['options']['x-padding-bytes'], '20-50');
+      proxy['xhttp-opts'] = {
+        'download-settings': {'server': 'elsewhere.example.com'},
+      };
+      expect(
+        LinkParser.parseContent(
+          jsonEncode({
+            'proxies': [proxy],
+          }),
+        ),
+        isEmpty,
+      );
+    },
+  );
 
   test('AmneziaWG conf keeps range headers and does not become plain WG', () {
     final node = LinkParser.parseContent(amneziaConf).single;
     expect(node.protocol, ProxyProtocol.amneziawg);
     expect(node.protocol.isEndpoint, true);
-    final proxy = CompatibilityCore.wrap({...node.outbound, 'tag': 'AWG'})['proxy'];
+    final proxy = CompatibilityCore.wrap({
+      ...node.outbound,
+      'tag': 'AWG',
+    })['proxy'];
     expect(proxy['type'], 'wireguard');
     expect(proxy['amnezia-wg-option']['h1'], '11-12');
     expect(proxy['amnezia-wg-option']['i1'], '<r 32>');
@@ -97,7 +171,12 @@ void main() {
     expect(proxy['private-key'], kWgPriv);
     expect(proxy['peers'], isNotEmpty);
     expect(proxy['ip'], isNot(contains('/')));
-    expect(LinkParser.parseContent(amneziaConf.replaceFirst('Jc = 4', 'Jc = invalid')), isEmpty);
+    expect(
+      LinkParser.parseContent(
+        amneziaConf.replaceFirst('Jc = 4', 'Jc = invalid'),
+      ),
+      isEmpty,
+    );
   });
 
   test('AWG aliases require parameters; ordinary WireGuard stays native', () {
@@ -108,19 +187,37 @@ void main() {
       final node = LinkParser.parseLink('$link&Jc=4&H1=11-12')!;
       expect(node.type, 'amneziawg');
     }
-    expect(LinkParser.parseLink(source.replaceFirst('wireguard:', 'awg:')), isNull);
+    expect(
+      LinkParser.parseLink(source.replaceFirst('wireguard:', 'awg:')),
+      isNull,
+    );
     final plain = LinkParser.parseLink(original)!;
     expect(plain.protocol, ProxyProtocol.wireguard);
     expect(CompatibilityCore.needsMihomo(plain.outbound), false);
   });
 
   test('Clash AmneziaWG keeps explicit version and custom headers', () {
-    final nodes = LinkParser.parseContent(jsonEncode({'proxies': [{
-      'name': 'AWG', 'type': 'wireguard', 'server': '127.0.0.1', 'port': 51820,
-      'private-key': kWgPriv, 'public-key': kWgPub, 'ip': '10.0.0.2',
-      'amnezia-wg-option': {'version': 2, 'jc': 4, 'h1': '11-12'},
-    }]}));
-    expect(nodes.single.outbound['amnezia'], {'version': 2, 'jc': 4, 'h1': '11-12'});
+    final nodes = LinkParser.parseContent(
+      jsonEncode({
+        'proxies': [
+          {
+            'name': 'AWG',
+            'type': 'wireguard',
+            'server': '127.0.0.1',
+            'port': 51820,
+            'private-key': kWgPriv,
+            'public-key': kWgPub,
+            'ip': '10.0.0.2',
+            'amnezia-wg-option': {'version': 2, 'jc': 4, 'h1': '11-12'},
+          },
+        ],
+      }),
+    );
+    expect(nodes.single.outbound['amnezia'], {
+      'version': 2,
+      'jc': 4,
+      'h1': '11-12',
+    });
   });
 
   for (final platform in PlatformKind.values) {
@@ -131,12 +228,22 @@ void main() {
         LinkParser.parseContent(amneziaConf).single,
       ];
       late BuiltConfig built;
-      final config = buildJson(nodes: nodes, platform: platform, inspect: (value) => built = value);
+      final config = buildJson(
+        nodes: nodes,
+        platform: platform,
+        inspect: (value) => built = value,
+      );
       expect(built.nodeTags.length, 3);
       for (final node in nodes) {
-        expect(outboundByTag(config, built.nodeTags[node.id]!)['type'], 'mihomo');
+        expect(
+          outboundByTag(config, built.nodeTags[node.id]!)['type'],
+          node.outbound['transport']?['type'] == 'xhttp' ? 'xray' : 'mihomo',
+        );
       }
-      expect(outboundByTag(config, 'proxy')['outbounds'], containsAll(built.nodeTags.values));
+      expect(
+        outboundByTag(config, 'proxy')['outbounds'],
+        containsAll(built.nodeTags.values),
+      );
     });
   }
 
@@ -144,11 +251,15 @@ void main() {
     final entry = LinkParser.parseLink(kSampleLinks['ssr']!)!;
     final exit = LinkParser.parseLink(xhttpLink('stream-up'))!;
     late BuiltConfig built;
-    final config = buildJson(nodes: [entry, exit], selected: exit.id,
-      chain: ChainSettings(enabled: true, entryNodeId: entry.id), inspect: (value) => built = value);
+    final config = buildJson(
+      nodes: [entry, exit],
+      selected: exit.id,
+      chain: ChainSettings(enabled: true, entryNodeId: entry.id),
+      inspect: (value) => built = value,
+    );
     expect(built.chainActive, true);
     final outbound = outboundByTag(config, built.nodeTags[exit.id]!);
-    expect(outbound['type'], 'mihomo');
+    expect(outbound['type'], 'xray');
     expect(outbound['detour'], isNotNull);
     expect(outbound['tcp_fast_open'], isNull);
   });

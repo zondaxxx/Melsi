@@ -127,14 +127,14 @@ packaging/ установщики (deb, AppImage, DMG, Inno Setup)
 
 ## Сборка
 
-Нужны Flutter 3.47.5, Go 1.25.5+ и JDK 17. Для Android также нужен NDK, для iOS и macOS — Xcode. Команды каждого варианта запускаются из корня репозитория.
+Нужны Flutter 3.47.5, Go 1.26+ и JDK 17. Для Android также нужен NDK, для iOS и macOS — Xcode. Команды каждого варианта запускаются из корня репозитория.
 
 ```bash
 # Android
 scripts/build-libbox.sh android          # → app/android/app/libs/libbox.aar
 (cd app && flutter build apk --split-per-abi)
 
-# iOS (только macOS)
+# iOS: физический iPhone/iPad (только macOS)
 scripts/build-libbox.sh apple            # → app/ios/Frameworks/Libbox.xcframework
 (cd app && flutter build ios --no-codesign)
 
@@ -142,6 +142,10 @@ scripts/build-libbox.sh apple            # → app/ios/Frameworks/Libbox.xcframe
 scripts/build-core.sh darwin universal   # или: windows amd64 / linux amd64
 (cd app && flutter build macos)          # или: windows / linux
 ```
+
+По умолчанию libbox для Apple собирается только для `ios/arm64`: симулятор и macOS не нужны для IPA. Для разработки с симулятором задайте `APPLE_TARGET=ios/arm64,iossimulator` перед `scripts/build-libbox.sh apple`. macOS использует отдельный `melsi-core`. Android собирает только ABI, которые поддерживает Flutter: ARMv7, ARM64 и x86_64; полный набор gomobile можно вернуть через `ANDROID_TARGET=android`.
+
+CI повторно использует готовые `.aar` и `.xcframework`, если исходники ядра, скрипт сборки и SDK/NDK не изменились. Поэтому изменения интерфейса не запускают повторную компиляцию libbox. В CI версия `melsicore` имеет вид `core-<хеш исходников>`; версия приложения и имя релиза остаются прежними. При локальной сборке можно задать её через `LIBBOX_VERSION`, по умолчанию используется `MELSI_VERSION`. Кэши скомпилированных Go-пакетов разделены по заданиям и обновляются на каждом коммите, чтобы быстрые десктопные сборки не подменяли мобильный кэш.
 
 Тесты:
 
@@ -167,11 +171,11 @@ MELSI_SHOTS=/tmp/melsi-shots flutter test test/ui/screenshots_test.dart
 - **Windows.** Приложение запускается от имени администратора: это нужно для TUN.
 - **macOS.** DMG подписан ad-hoc, при первом запуске откройте его через ПКМ → «Открыть».
 - **Naive** работает только на мобильных: на десктопе ядро собрано без cronet.
-- **ShadowsocksR, VLESS XHTTP и AmneziaWG** используют встроенные адаптеры Mihomo 1.19.32. Ядро выбирается автоматически для каждого сервера; маршрутизация, DNS и системный VPN остаются в sing-box.
+- **REALITY/Vision и XHTTP** используют встроенный Xray-core v26.3.27, включая iOS и Android. **ShadowsocksR и AmneziaWG** используют адаптеры Mihomo 1.19.32. Ядро выбирается автоматически для каждого сервера; маршрутизация, DNS и системный VPN остаются в sing-box.
 - **XHTTP:** поддерживаются `auto`, `packet-up`, `stream-up`, `stream-one` и XMUX. Отдельный сервер загрузки (`downloadSettings` / `download-settings`) пока не поддерживается; такие настройки отклоняются при импорте.
 
 ## Обратная связь
 
 Нашли проблему? [Создайте issue](https://github.com/zondaxxx/Melsi/issues/new/choose): укажите платформу, версию клиента и шаги воспроизведения. Не публикуйте ссылки подписок, UUID, пароли, полные резервные копии или логи с секретами.
 
-Melsi построен на Flutter, sing-box и адаптерах Mihomo. Знак, палитра и обложка репозитория — в [наборе оформления](docs/brand/README.md).
+Melsi построен на Flutter, sing-box, [Xray-core](https://github.com/XTLS/Xray-core/tree/v26.3.27) и адаптерах Mihomo. Знак, палитра и обложка репозитория — в [наборе оформления](docs/brand/README.md).

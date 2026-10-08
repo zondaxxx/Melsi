@@ -451,7 +451,7 @@ class _NodePanel extends StatelessWidget {
                             ],
                           ),
                         ),
-                        if (!connected && (lat != null || failed)) ...[
+                        if (!connected && app.settings.showPing && (lat != null || failed)) ...[
                           const SizedBox(width: Space.m),
                           LatencyChip(ms: lat, failed: failed, label: l('ping.timeout')),
                         ],
@@ -463,8 +463,12 @@ class _NodePanel extends StatelessWidget {
                 const Hairline(),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(Space.l, Space.m, Space.l, Space.m + 2),
-                  child: MetricsRow(items: [
-                    (l('stat.latency'), formatMs(lat, l), lat == null ? null : c.latency(lat)),
+                  child: MetricsRow(valueWidgets: {
+                    if (app.settings.showPing && app.settings.pingDisplay != PingDisplay.number)
+                      0: LatencyChip(ms: lat, failed: failed, size: 15, alignment: Alignment.centerLeft),
+                  }, items: [
+                    if (app.settings.showPing)
+                      (l('stat.latency'), formatMs(lat, l), lat == null ? null : c.latency(lat)),
                     (l('stat.jitter'), formatMs(stat?.jitterMs, l), null),
                     (
                       l('stat.loss'),

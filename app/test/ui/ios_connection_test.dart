@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:melsi/core/models.dart';
 import 'package:melsi/services/mobile_vpn_controller.dart';
 import 'package:melsi/services/vpn_controller.dart';
+import 'package:melsi/state/app_state.dart';
 
 import 'fakes.dart';
 import 'harness.dart';
@@ -15,7 +17,64 @@ class PendingPermissionVpn extends FakeVpn {
   Future<bool> prepare() => permission.future;
 }
 
+class WarningVpn extends FakeVpn {
+  final events = StreamController<VpnState>.broadcast();
+
+  @override
+  Stream<VpnState> get states => events.stream;
+
+  void emit(VpnState value) {
+    state = value;
+    events.add(value);
+  }
+}
+
 void main() {
+  test('connected warnings preserve VPN and are shown once per message', () async {
+    final vpn = WarningVpn();
+    final state = testState(vpn: vpn, platform: PlatformKind.ios);
+    await state.load();
+    await Future<void>.delayed(Duration.zero);
+    final notices = <Notice>[];
+    final subscription = state.notices.listen(notices.add);
+    const warning =
+        'VPN is connected, but automatic reconnect could not be enabled: denied';
+    const other =
+        'VPN is connected, but automatic reconnect could not be enabled: save failed';
+    for (final message in <String?>[
+      warning,
+      warning,
+      null,
+      other,
+      warning,
+      '  ',
+      ' $other ',
+    ]) {
+      vpn.emit(VpnState(VpnStatus.connected, message));
+      await Future<void>.delayed(Duration.zero);
+      expect(state.vpnState.status, VpnStatus.connected);
+      expect(state.connectedAt, isNotNull);
+    }
+    expect(notices.map((notice) => notice.key), [
+      'notice.vpnWarning',
+      'notice.vpnWarning',
+    ]);
+    expect(notices.map((notice) => notice.detail), [warning, other]);
+    expect(notices.every((notice) => notice.kind == NoticeKind.info), isTrue);
+
+    // A new session may have a fresh failure; clean repeated connected
+    // events within the current session must not reset deduplication.
+    vpn.emit(VpnState.stopped);
+    await Future<void>.delayed(Duration.zero);
+    vpn.emit(const VpnState(VpnStatus.connected, warning));
+    await Future<void>.delayed(Duration.zero);
+    expect(notices.length, 3);
+    expect(state.vpnState.status, VpnStatus.connected);
+    state.dispose();
+    await subscription.cancel();
+    await vpn.events.close();
+  });
+
   testWidgets('cancelling while creating the profile cannot start VPN later', (
     tester,
   ) async {

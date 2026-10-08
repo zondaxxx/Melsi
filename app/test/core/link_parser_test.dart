@@ -89,7 +89,7 @@ void main() {
       expect(wsNode.name, 'Франкфурт WS');
       expect(wsNode.countryCode, 'DE');
       final g = ob('vless_grpc_reality');
-      expect(g['transport'], {'type': 'grpc', 'service_name': 'grpcsvc'});
+      expect(g['transport'], {'type': 'grpc', 'service_name': 'grpcsvc', 'multi_mode': false});
       expect(g['tls']['reality']['short_id'], 'a1');
       expect(g['tls']['utls']['fingerprint'], 'safari');
       final h2 = ob('vless_h2');

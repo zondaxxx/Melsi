@@ -10,11 +10,13 @@
 #
 # Env:
 #   MELSI_VERSION     version embedded in melsicore (default: scripts/version.sh)
+#   LIBBOX_VERSION    override the native core version (CI uses a source hash so
+#                     UI-only changes can reuse the native library)
 #   ANDROID_HOME      Android SDK (or ANDROID_SDK_ROOT); needs platforms/android-*
 #   ANDROID_NDK_HOME  Android NDK (default: newest $ANDROID_HOME/ndk/*)
 #   ANDROID_API       min API for the bind (default: 24 = app minSdk; naive needs >= 23)
-#   ANDROID_TARGET    gomobile target (default: android = arm, arm64, 386, amd64)
-#   APPLE_TARGET      gomobile targets (default: ios,iossimulator,macos)
+#   ANDROID_TARGET    gomobile targets (default: android/arm,android/arm64,android/amd64)
+#   APPLE_TARGET      gomobile targets (default: ios/arm64, physical iOS devices)
 #   LIBBOX_OUT        override the output path (.aar / .xcframework)
 #   LIBBOX_DEBUG=1    keep symbols (drops -s -w)
 set -euo pipefail
@@ -54,7 +56,7 @@ if [[ -z "${MELSI_VERSION:-}" ]]; then
 fi
 
 LDFLAGS="-X github.com/sagernet/sing-box/constant.Version=${SING_BOX_VERSION}"
-LDFLAGS+=" -X github.com/zondaxxx/melsi/core/version.Melsi=${MELSI_VERSION}"
+LDFLAGS+=" -X github.com/zondaxxx/melsi/core/version.Melsi=${LIBBOX_VERSION:-$MELSI_VERSION}"
 LDFLAGS+=" -X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0"
 if [[ "${LIBBOX_DEBUG:-0}" != "1" ]]; then
   LDFLAGS+=" -s -w -buildid="
@@ -99,7 +101,7 @@ build_android() {
   mkdir -p "$(dirname "$out")"
   rm -f "$out" "${out%.aar}-sources.jar"
   gomobile bind "${COMMON[@]}" \
-    -target "${ANDROID_TARGET:-android}" \
+    -target "${ANDROID_TARGET:-android/arm,android/arm64,android/amd64}" \
     -androidapi "${ANDROID_API:-24}" \
     -javapkg=io.nekohasekai \
     -tags "$TAGS" \
@@ -119,7 +121,7 @@ build_apple() {
   mkdir -p "$(dirname "$out")"
   rm -rf "$out"
   gomobile bind "${COMMON[@]}" \
-    -target "${APPLE_TARGET:-ios,iossimulator,macos}" \
+    -target "${APPLE_TARGET:-ios/arm64}" \
     -tags-not-macos=with_low_memory \
     -iosversion=15.0 \
     -macosversion=13.0 \

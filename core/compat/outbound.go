@@ -32,6 +32,7 @@ type Options struct {
 func OutboundRegistry() *outbound.Registry {
 	registry := include.OutboundRegistry()
 	outbound.Register[Options](registry, "mihomo", NewOutbound)
+	outbound.Register[XrayOptions](registry, "xray", NewXrayOutbound)
 	return registry
 }
 

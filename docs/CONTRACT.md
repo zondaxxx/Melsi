@@ -30,7 +30,7 @@ If you change a seam, change this file in the same commit.
 | iOS/macOS app bundle id | `app.melsi` |
 | iOS Packet Tunnel extension bundle id | `app.melsi.PacketTunnel` |
 | App Group (iOS) | `group.app.melsi`, or another group from the signed entitlements |
-| Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.25.5` |
+| Go module | `github.com/zondaxxx/melsi/core` (dir `core/`), `go 1.26.0` |
 | sing-box | `github.com/sagernet/sing-box v1.14.2` |
 | Compatibility adapters | `github.com/metacubex/mihomo v1.19.32` |
 | Clash API default | `127.0.0.1:9790` |
@@ -93,7 +93,7 @@ class ConfigBuilder {
 
 ### sing-box config conventions (produced by `ConfigBuilder`)
 
-- SSR, VLESS XHTTP and AmneziaWG are emitted as `type: "mihomo"` outbounds
+- SSR and AmneziaWG are emitted as `type: "mihomo"` outbounds
   with a `proxy` object in Mihomo format. Core choice is automatic per node.
   Plain WireGuard remains a sing-box endpoint. AmneziaWG remains ineligible
   as a chain entry but can be a selectable exit.
@@ -101,9 +101,23 @@ class ConfigBuilder {
   socket protection and detours. Server names resolve through `dns-direct`;
   UDP/WireGuard destinations use the sing-box DNS router. Missing resolvers
   fail instead of falling back to a separate Mihomo resolver.
-- XHTTP modes are `auto`, `packet-up`, `stream-up`, `stream-one`; XMUX maps to
-  `reuse-settings`. Unknown extras and separate download settings are rejected.
-  sing-box-specific TLS record fragmentation is unavailable on XHTTP.
+- REALITY/Vision and XHTTP use embedded Xray-core v26.3.27 on every platform:
+  `type: "xray"`, `outbound: {protocol, settings, streamSettings}` and sing-box
+  dialer options. This avoids the old REALITY client version advertised by
+  sing-box/Mihomo, which current Xray servers can reject. Xray owns only the
+  proxy protocol; sing-box still owns TUN, DNS, routing and selection.
+- XHTTP modes are `auto`, `packet-up`, `stream-up`, `stream-one`; normalized
+  options and XMUX are restored to Xray's `xhttpSettings.extra` / `xmux`.
+  Unknown extras and separate download settings are rejected. sing-box-specific
+  TLS record fragmentation is unavailable on XHTTP. Non-REALITY XHTTP with
+  explicit `insecure: true` stays on Mihomo because Xray removed `allowInsecure`;
+  ordinary TLS nodes with that option remain native instead of breaking startup.
+- Embedded Xray UDP preserves packet boundaries and deadlines. Payloads above
+  7526 bytes are rejected explicitly: the upstream XUDP writer otherwise silently
+  drops them. Closed destination streams are evicted and recreated on the next
+  datagram. The adapter closes physical sockets and unregisters its protected
+  dialer on shutdown; upstream Xray's process-global HTTP pool metadata cannot
+  be purged through its public API.
 
 - Node outbound tags: sanitized unique display names; mapping returned in
   `BuiltConfig.nodeTags`.
@@ -122,20 +136,26 @@ class ConfigBuilder {
 - `experimental.clash_api`: `external_controller` = `endpoints.clashApi`,
   `secret` = `endpoints.secret`. `experimental.cache_file` enabled at
   `<cacheDir>/cache.db` with `cache_id` `auto` or `manual:<selectedNodeId>`
-  so a new manual server is not restored from the previous selector entry.
+  as separate auto/manual cache namespaces. The engine explicitly restores
+  `groups[].selected` in manual mode: a live A→B switch can store B in A's
+  namespace, and sing-box prefers that cached selection over `default`.
   `store_dns` is on unless memory saver is set. Memory saver also sets
   the TUN `udp_timeout` to `30s`. `routing.blockQuic` adds a `quic` reject
-  rule after sniff. `settings.multiplex` adds h2mux only on native
-  shadowsocks, vmess, vless, and trojan outbounds that have neither a flow
-  nor REALITY.
+  rule after sniff. `settings.multiplex` allows provider-declared multiplex
+  options on shadowsocks, vmess, vless, and trojan without flow or REALITY;
+  it never invents h2mux support for an ordinary server. Memory saver and
+  disabling the setting remove imported multiplex options too.
 - `settings.core`: `singBox` (default), `mihomo` (supported proxies become
-  `type: mihomo` outbounds; SSR/XHTTP/AmneziaWG always do; REALITY and
-  xtls-rprx-vision stay native sing-box), or `xray`.
-  Xray is desktop-only: translatable nodes become local SOCKS outbounds and
-  `BuiltConfig.xray` is the original Xray JSON. The desktop runner starts
-  `xray` (`MELSI_XRAY`, the binary next to `melsi-core`, or `xray` on `PATH`) before the
-  tunnel and excludes the `xray` process from the TUN. Phones refuse to
-  connect while Xray is selected. A double-VPN chain stays on sing-box.
+  `type: mihomo` outbounds), or `xray`. REALITY/Vision, XHTTP and gRPC with
+  explicit authority use embedded Xray regardless of this preference.
+  On mobile, selecting Xray uses the embedded adapter for every translatable
+  node, with no additional process or localhost port. Embedded outbounds also
+  preserve chain detours through the sing-box protected dialer.
+  On desktop without a chain, explicitly selecting Xray keeps the existing
+  bundled process: translatable nodes become local SOCKS outbounds and
+  `BuiltConfig.xray` contains Xray JSON. The desktop runner starts `xray`
+  (`MELSI_XRAY`, adjacent to `melsi-core`, or on `PATH`) before the tunnel and
+  excludes its process from the TUN.
 - Inbound `tun` tag `tun-in` (address `172.19.0.1/30` (+ `fdfe:dcba:9876::1/126` if ipv6),
   `auto_route: true`, `strict_route: settings.killSwitch`, `stack`).
   Android per-app → `include_package` / `exclude_package`.
@@ -195,6 +215,7 @@ class ConfigBuilder {
     {
       "selector": "proxy",
       "auto": true,
+      "selected": "🇩🇪 DE-1",          // optional; enforced at startup only when auto=false
       "mode": "balanced",              // latency | balanced | stability | game
       "probe_url": "https://www.gstatic.com/generate_204",
       "interval_sec": 60,
@@ -266,6 +287,7 @@ MethodChannel `app.melsi/vpn`:
 | `stop` | – | `null` |
 | `status` | – | `"stopped" \| "connecting" \| "connected" \| "stopping"` |
 | `coreVersion` | – | `String` (libbox version) |
+| `readLog` | `{"maxLines": int}` (1–400) | iOS: saved tunnel lifecycle/stop diagnostics; other mobile bridges may return no implementation |
 | `installedApps` | – | Android: `List<Map>` `{"package","label","system":bool}` ; iOS: `[]` |
 | `appIcon` | `{"package": String}` | Android: PNG `Uint8List` (≤96px) or null |
 
@@ -274,6 +296,16 @@ EventChannel `app.melsi/vpn/events` emits maps
 
 Native side lifecycle: start libbox `CommandServer` + `StartOrReloadService(config)`,
 then `Melsicore.startEngine(engineJson)`; on stop call `Melsicore.stopEngine()` first.
+On iOS device sleep, pause both libbox and the engine; wake resumes both.
+Engine pause cancels probe work without marking nodes dead or stopping the
+tunnel. The mobile bridge preserves this pause across a service reload.
+Automatic rounds in manual mode check only the selected server; explicit
+probe requests still check every candidate. Concurrent probes share one limit
+across proxy/game groups: two on mobile, eight on desktop.
+iOS enables system On Demand recovery only after a successful user connection.
+An explicit stop persists recovery disabled before stopping the provider.
+Preference updates are serialized and checked against the connection attempt,
+so an older connect cannot re-enable recovery after a newer stop.
 
 ### gomobile
 
@@ -303,6 +335,8 @@ Android `app/android/app/libs/libbox.aar` (Java: `io.nekohasekai.libbox.*`,
 ```go
 func StartEngine(engineJSON string) error
 func StopEngine()
+func PauseEngine()           // suspend probes, retain tunnel and selection
+func ResumeEngine()          // resume probes, safe when stopped
 func EngineStatus() string   // same JSON as GET /status
 func Version() string        // melsi version
 ```
@@ -327,8 +361,13 @@ app and the PacketTunnel extension; discovery uses that group for
 `command.sock`.
 
 The app writes `config.json` and `engine.json`. The extension writes
-`version.json` (core versions) and `last_error.txt` (reason for the last
-unexpected stop). The app sends the provider message `"reload"` to hot-reload
+`version.json` (core versions), `last_error.txt` (core failure), and `last_stop.txt`
+(system stop reason). `tunnel_lifecycle.jsonl` keeps at most 64 lifecycle/health
+events, including physical memory samples every 30 seconds, without server
+configuration or credentials. It remains writable after the first device
+unlock and is available through `readLog` on the existing Logs screen.
+A missing stop callback does not prove a memory-pressure kill. The app sends
+the provider message `"reload"` to hot-reload
 a connected tunnel; `"version"` and `"engineStatus"` are also answered.
 `command.sock` stays in the shared container when the path fits `sockaddr_un`.
 The one-character fallback directory is created only when that directory is
