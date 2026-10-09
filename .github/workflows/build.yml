@@ -462,6 +462,20 @@ jobs:
       - name: Fetch Xray-core (windows amd64)
         run: bash scripts/fetch-xray.sh windows amd64
 
+      - name: Windows transport and logging regressions
+        working-directory: core
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go test -tags with_utls,with_clash_api,badlinkname,tfogo_checklinkname0 -ldflags=-checklinkname=0 ./cmd/melsi-core
+          go test -tags with_utls,with_clash_api,badlinkname,tfogo_checklinkname0 -ldflags=-checklinkname=0 ./compat -run TestXray
+
+      - name: Desktop lifecycle regression tests
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter test test/core/desktop_vpn_controller_test.dart test/ui/logs_screen_test.dart
+
       - name: flutter build windows
         working-directory: app
         run: |
