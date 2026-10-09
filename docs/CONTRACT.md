@@ -156,6 +156,9 @@ class ConfigBuilder {
   `BuiltConfig.xray` contains Xray JSON. The desktop runner starts `xray`
   (`MELSI_XRAY`, adjacent to `melsi-core`, or on `PATH`) before the tunnel and
   excludes its process from the TUN.
+  An unexpected exit of that Xray process fails the desktop session and stops
+  its tunnel. A cancelled or timed-out configuration check cannot launch a
+  daemon afterward; validation timeouts are failures, not successful checks.
 - Inbound `tun` tag `tun-in` (address `172.19.0.1/30` (+ `fdfe:dcba:9876::1/126` if ipv6),
   `auto_route: true`, `strict_route: settings.killSwitch`, `stack`).
   Android per-app → `include_package` / `exclude_package`.
@@ -202,6 +205,10 @@ class ConfigBuilder {
 - IP lookups are tied to the connection generation and active node. Switching
   servers clears the old exit verdict immediately; refreshes are throttled.
   Desktop system-proxy probes and speed tests use the local mixed proxy.
+- The daemon's `/health` confirms process availability, not internet access.
+  Failed URL probes retain `last_error`; Logs displays changes for the selected
+  node without repeating an unchanged error on every status poll. Desktop
+  saved diagnostics include bounded core and Xray log tails.
 
 ## 2. Engine config JSON (Dart → Go)
 
@@ -267,6 +274,8 @@ melsi-core version                           # prints JSON {"melsi":..,"sing_box
   macOS: `osascript … with administrator privileges`; Linux: `pkexec`).
 - Starts sing-box, then engine; `POST /stop` or SIGTERM/SIGINT stops both.
 - Writes a pid file next to `--config` (`melsi-core.pid`).
+- `--log` is the primary log destination; an unavailable console cannot stop
+  file logging. Startup errors are saved before the log sink closes.
 - Binary shipped: Windows `melsi-core.exe` next to `melsi.exe`;
   macOS `Melsi.app/Contents/Resources/melsi-core`; Linux `bundle/melsi-core`
   (next to the `melsi` executable). Dart finds it via `Platform.resolvedExecutable`.

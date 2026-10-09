@@ -23,7 +23,7 @@ const (
 	clashReadyLimit = 20 * time.Second
 )
 
-func cmdRun(args []string) error {
+func cmdRun(args []string) (resultErr error) {
 	fs := newFlagSet("run")
 	configPath := fs.String("config", "", "sing-box config path")
 	enginePath := fs.String("engine", "", "engine config path")
@@ -47,7 +47,14 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer logs.Close()
+	defer func() {
+		// main prints returned errors after this sink has closed. Persist the
+		// startup failure first, since detached processes have no console.
+		if resultErr != nil {
+			_, _ = fmt.Fprintln(logs.pw, "melsi-core:", resultErr)
+		}
+		resultErr = errors.Join(resultErr, logs.Close())
+	}()
 	initStdLogger()
 	logger := engine.NewLogger(os.Stderr, engineCfg.LogLevel)
 	logger.Info("melsi-core starting", "melsi", version.Melsi, "sing_box", version.SingBox(), "pid", os.Getpid())
@@ -122,13 +129,37 @@ func cmdRun(args []string) error {
 	return nil
 }
 
-// logSink tees everything written to os.Stderr (sing-box's default log
-// writer, and the engine logger) to stdout and an optional file.
+// logSink captures os.Stderr (sing-box and the engine logger). With a log
+// file, stdout is only a best-effort mirror: losing a console must not stop
+// the pipe reader or discard subsequent diagnostics.
 type logSink struct {
 	origStderr *os.File
 	pw         *os.File
 	file       *os.File
 	done       chan struct{}
+	copyErr    error // read only after done has closed
+	closeOnce  sync.Once
+	closeErr   error
+}
+
+type logMirrorWriter struct {
+	primary io.Writer
+	mirror  io.Writer
+}
+
+func (w *logMirrorWriter) Write(p []byte) (int, error) {
+	n, err := w.primary.Write(p)
+	if w.mirror != nil {
+		if copied, mirrorErr := w.mirror.Write(p); mirrorErr != nil || copied != len(p) {
+			// The writer has one owner, io.Copy. Do not retry a broken mirror
+			// on every subsequent log line.
+			w.mirror = nil
+		}
+	}
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }
 
 func redirectLogs(path string) (*logSink, error) {
@@ -143,7 +174,7 @@ func redirectLogs(path string) (*logSink, error) {
 			return nil, fmt.Errorf("open log file: %w", err)
 		}
 		s.file = f
-		dst = io.MultiWriter(os.Stdout, f)
+		dst = &logMirrorWriter{primary: f, mirror: os.Stdout}
 	}
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -156,20 +187,30 @@ func redirectLogs(path string) (*logSink, error) {
 	os.Stderr = pw
 	go func() {
 		defer close(s.done)
-		_, _ = io.Copy(dst, pr)
+		_, s.copyErr = io.Copy(dst, pr)
 		pr.Close()
 	}()
 	return s, nil
 }
 
-func (s *logSink) Close() {
-	os.Stderr = s.origStderr
-	s.pw.Close()
-	select {
-	case <-s.done:
-	case <-time.After(2 * time.Second):
-	}
-	if s.file != nil {
-		s.file.Close()
-	}
+func (s *logSink) Close() error {
+	s.closeOnce.Do(func() {
+		if os.Stderr == s.pw {
+			os.Stderr = s.origStderr
+		}
+		pipeErr := s.pw.Close()
+		var copyErr error
+		select {
+		case <-s.done:
+			copyErr = s.copyErr
+		case <-time.After(2 * time.Second):
+			copyErr = errors.New("timed out flushing logs")
+		}
+		var fileErr error
+		if s.file != nil {
+			fileErr = s.file.Close()
+		}
+		s.closeErr = errors.Join(pipeErr, copyErr, fileErr)
+	})
+	return s.closeErr
 }
