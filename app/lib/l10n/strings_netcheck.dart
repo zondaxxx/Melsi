@@ -6,6 +6,19 @@ import 'strings.dart';
 const StringTable kNetcheckStrings = StringTable(
   prefixes: ['geo.', 'speed.'],
   ru: <String, String>{
+    'speed.error.dns':
+        'Не удалось разрешить имя сервера теста. Проверьте DNS и соединение.',
+    'speed.error.tls':
+        'Не удалось установить защищённое соединение с сервером теста.',
+    'speed.error.proxy':
+        'Локальный VPN-прокси недоступен. Переподключитесь и повторите тест.',
+    'speed.error.notReady':
+        'Подключение ещё не готово. Повторите тест после подключения.',
+    'speed.interrupted.connection':
+        'Соединение изменилось — запустите новый тест.',
+    'speed.interrupted.background':
+        'Тест остановлен после сворачивания приложения.',
+
     // «Где я»: public IP panel
     'geo.title': 'Сеть',
     'geo.yours': 'Ваш IP',
@@ -43,6 +56,18 @@ const StringTable kNetcheckStrings = StringTable(
     'speed.previous': 'Предыдущие',
   },
   en: <String, String>{
+    'speed.error.dns':
+        'Could not resolve the test server. Check DNS and your connection.',
+    'speed.error.tls':
+        'Could not establish a secure connection to the test server.',
+    'speed.error.proxy':
+        'The local VPN proxy is unavailable. Reconnect and try again.',
+    'speed.error.notReady':
+        'The connection is not ready. Try again after connecting.',
+    'speed.interrupted.connection': 'The connection changed. Start a new test.',
+    'speed.interrupted.background':
+        'The test stopped when the app went into the background.',
+
     'geo.title': 'Network',
     'geo.yours': 'Your IP',
     'geo.exit': 'Exit',

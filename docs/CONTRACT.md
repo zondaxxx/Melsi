@@ -156,8 +156,20 @@ class ConfigBuilder {
   `BuiltConfig.xray` contains Xray JSON. The desktop runner starts `xray`
   (`MELSI_XRAY`, adjacent to `melsi-core`, or on `PATH`) before the tunnel and
   excludes its process from the TUN.
-  An unexpected exit of that Xray process fails the desktop session and stops
-  its tunnel. A cancelled or timed-out configuration check cannot launch a
+  An unexpected exit of that Xray process triggers bounded desktop recovery.
+  Three consecutive local health failures also trigger recovery; a fresh API
+  connection is checked before restarting. Up to three restarts use 1/2/4-second
+  backoff for each explicit connection session; exhaustion reports an error.
+  URL-probe failures never trigger this process recovery. The app provides a
+  rebuilt config from the latest settings/manual selection, keeping the current
+  session API credentials. Explicit stop/new start/dispose invalidate pending
+  recovery; disposing a UI attached to a healthy daemon leaves it running.
+  Reattached companion processes are checked by PID and executable basename;
+  an inconclusive OS query is not treated as death, and companion cleanup never
+  kills a PID whose expected executable identity cannot be confirmed. If an
+  attached core is unreachable and its shutdown cannot be confirmed, recovery
+  reports an error instead of starting a second tunnel. A cancelled or timed-out
+  configuration check cannot launch a
   daemon afterward; validation timeouts are failures, not successful checks.
 - Inbound `tun` tag `tun-in` (address `172.19.0.1/30` (+ `fdfe:dcba:9876::1/126` if ipv6),
   `auto_route: true`, `strict_route: settings.killSwitch`, `stack`).
@@ -208,7 +220,28 @@ class ConfigBuilder {
 - The daemon's `/health` confirms process availability, not internet access.
   Failed URL probes retain `last_error`; Logs displays changes for the selected
   node without repeating an unchanged error on every status poll. Desktop
-  saved diagnostics include bounded core and Xray log tails.
+  saved diagnostics include bounded core and Xray log tails. Logs rebinds when
+  the runtime API changes; obsolete stream events/file reads are discarded, and
+  saved-file polling resumes when a live stream is unavailable.
+- Desktop recovery uses the existing `connecting` state with message
+  `reconnecting`; UI localizes this as recovery progress. Old runtime/selection
+  responses are discarded after a session or selection change. Latency samples
+  are scoped to the runtime: connected views use engine/URL measurements,
+  disconnected views use TCP measurements, and late samples cannot cross sessions.
+- Network diagnostics preserve safe URL-probe error categories. A failed
+  primary probe is checked against a second HTTPS endpoint through the same
+  `proxy` selector, never direct. Diagnostic reports stop and discard partial
+  results if their connection scope changes. Raw server messages stay in Logs;
+  the copyable doctor report contains categorical setup/error information.
+  sing-box may return only a generic delay-test failure; it remains unknown,
+  rather than being presented as a confirmed DNS/TLS fault.
+  The DoH step measures endpoint reachability, not the device DNS configuration.
+- A speed run captures its connection scope and HTTP route at start. Node,
+  session, config or capture-mode changes invalidate current results and cancel
+  owned requests; per-node history remains. Mobile backgrounding cancels the
+  measurement, while desktop minimization keeps it running. Manual cancellation
+  is neutral. Pending latency and transfer requests belong to the run and cannot
+  close the shared application API client.
 
 ## 2. Engine config JSON (Dart → Go)
 
@@ -381,3 +414,19 @@ a connected tunnel; `"version"` and `"engineStatus"` are also answered.
 `command.sock` stays in the shared container when the path fits `sockaddr_un`.
 The one-character fallback directory is created only when that directory is
 writable.
+
+## 6. Build workflow and caches
+
+- Manual builds accept `platform=all|android|ios|macos|windows|linux`; shared
+  Go/Flutter checks always run. Push/PR builds and tagged/manual releases still
+  build all platforms.
+- `scripts/native-cache-key.py` derives native library keys from production
+  core sources, package assets (including embedded/platform files), module
+  manifests, prepare-mobile and build-libbox. Desktop CLI, test sources,
+  generated dist and top-level docs do not invalidate mobile libraries.
+  SDK/NDK remain separate key inputs.
+- Compiled Go caches include tests and build settings instead of the commit
+  SHA; module caches contain verified download archives. Desktop tests/builds
+  share tags, trimpath and CGO_ENABLED=0. Mobile registry has a separate check.
+- Windows installs the Flutter SDK and caches pub dependencies only, avoiding
+  the expensive SDK archive upload observed in previous builds.

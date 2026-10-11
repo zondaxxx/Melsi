@@ -3,159 +3,17 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:melsi/core/models.dart';
 import 'package:melsi/services/desktop_vpn_controller.dart';
 import 'package:melsi/services/vpn_controller.dart';
 
-class _Process extends Fake implements Process {
-  _Process(this.pid);
-  @override
-  final int pid;
-  bool exitOnKill = true;
-  final output = StreamController<List<int>>();
-  final errors = StreamController<List<int>>();
-  final exited = Completer<int>();
-  final signals = <ProcessSignal>[];
-
-  @override
-  Stream<List<int>> get stdout => output.stream;
-  @override
-  Stream<List<int>> get stderr => errors.stream;
-  @override
-  Future<int> get exitCode => exited.future;
-
-  void finish(int code, {String? error}) {
-    if (exited.isCompleted) return;
-    if (error != null) errors.add(utf8.encode(error));
-    exited.complete(code);
-    unawaited(output.close());
-    unawaited(errors.close());
-  }
-
-  @override
-  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
-    if (exited.isCompleted) return false;
-    signals.add(signal);
-    if (exitOnKill) finish(-1);
-    return true;
-  }
-}
-
-/// No installed core, elevated shell, TUN, system proxy, or remote server.
-/// Processes are controllable fakes; the control API uses a real local socket.
-class _Harness {
-  late Directory directory;
-  late HttpServer server;
-  late DesktopVpnController vpn;
-  final states = <VpnState>[];
-  final checks = <_Process>[];
-  final cores = <_Process>[];
-  final xrays = <_Process>[];
-  final checkStarted = Completer<void>();
-  final coreRequested = Completer<void>();
-  Completer<void>? launchGate;
-  Completer<void>? cleanupGate;
-  bool holdCheck = false;
-  bool coreReady = true;
-  bool alive = false;
-  int checkCode = 0;
-  int stops = 0;
-  int _pid = 100000000;
-
-  Future<void> open({
-    Duration timeout = const Duration(seconds: 2),
-    Duration cleanupTimeout = const Duration(seconds: 2),
-  }) async {
-    directory = await Directory.systemTemp.createTemp('melsi-desktop-test-');
-    server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen((request) async {
-      if (request.uri.path == '/stop' && alive) {
-        stops++;
-        alive = false;
-        final process = cores.last;
-        if (cleanupGate == null) {
-          await finishCleanup(process);
-        } else {
-          unawaited(cleanupGate!.future.then((_) => finishCleanup(process)));
-        }
-        request.response.write('{"ok":true}');
-      } else if (alive) {
-        request.response.write('{"ok":true}');
-      } else {
-        request.response.statusCode = HttpStatus.serviceUnavailable;
-        request.response.write('{"ok":false}');
-      }
-      await request.response.close();
-    });
-    vpn = DesktopVpnController(
-      supportDir: () async => directory,
-      coreLocator: () => 'test-core',
-      xrayLocator: () => 'test-xray',
-      startProcess: launch,
-      configCheckTimeout: timeout,
-      cleanupTimeout: cleanupTimeout,
-    );
-    vpn.states.listen(states.add);
-  }
-
-  BuiltConfig config({bool xray = false}) => BuiltConfig(
-    singBox: '{"inbounds":[]}',
-    engine: jsonEncode({
-      'control_listen': '127.0.0.1:${server.port}',
-      'secret': 'local-test',
-    }),
-    nodeTags: const {},
-    xray: xray ? '{}' : null,
-  );
-
-  Future<Process> launch(
-    String executable,
-    List<String> args, {
-    ProcessStartMode mode = ProcessStartMode.normal,
-  }) async {
-    final process = _Process(++_pid);
-    if (args.first == 'check') {
-      checks.add(process);
-      if (!checkStarted.isCompleted) checkStarted.complete();
-      if (!holdCheck) process.finish(checkCode, error: 'config diagnostic');
-    } else if (executable == 'test-xray') {
-      xrays.add(process);
-    } else {
-      expect(mode, ProcessStartMode.detached);
-      if (!coreRequested.isCompleted) coreRequested.complete();
-      await launchGate?.future;
-      cores.add(process);
-      await File('${directory.path}/melsi-core.pid')
-          .writeAsString('${process.pid}');
-      alive = coreReady;
-    }
-    return process;
-  }
-
-  Future<void> finishCleanup(_Process process) async {
-    final file = File('${directory.path}/melsi-core.pid');
-    if (await file.exists() && await file.readAsString() == '${process.pid}') {
-      await file.delete();
-    }
-    process.finish(0);
-  }
-
-  Future<void> close() async {
-    vpn.dispose();
-    for (final process in [...checks, ...cores, ...xrays]) {
-      process.finish(0);
-    }
-    await server.close(force: true);
-    await directory.delete(recursive: true);
-  }
-}
+import 'support/desktop_test_harness.dart';
 
 void main() {
-  Future<_Harness> harness({
+  Future<DesktopTestHarness> harness({
     Duration? timeout,
     Duration? cleanupTimeout,
   }) async {
-    final h = _Harness();
+    final h = DesktopTestHarness();
     await h.open(
       timeout: timeout ?? const Duration(seconds: 2),
       cleanupTimeout: cleanupTimeout ?? const Duration(seconds: 2),
@@ -243,7 +101,7 @@ void main() {
       final state = await error.timeout(const Duration(seconds: 3));
       expect(state.message, contains('exit 23'));
       expect(state.message, contains('REALITY connection failed'));
-      expect(h.states.any((s) => s.status == VpnStatus.stopping), isTrue);
+      expect(h.states.any((s) => s.message == 'reconnecting'), isTrue);
       expect(h.stops, 1);
       expect(h.alive, isFalse);
       expect(h.cores.single.signals, isEmpty);

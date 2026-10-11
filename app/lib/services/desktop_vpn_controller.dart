@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/models.dart';
 import 'engine_api.dart';
+import 'process_identity.dart';
 import 'vpn_controller.dart';
 
 typedef DesktopProcessStarter = Future<Process> Function(
@@ -27,19 +28,36 @@ class DesktopVpnController extends VpnController {
     String? Function()? coreLocator,
     String? Function()? xrayLocator,
     DesktopProcessStarter? startProcess,
+    DesktopProcessProbe? processProbe,
+    EngineApi Function(String, String)? apiFactory,
     this.configCheckTimeout = const Duration(seconds: 20),
     this.cleanupTimeout = const Duration(seconds: 12),
+    this.healthInterval = const Duration(seconds: 2),
+    this.healthTimeout = const Duration(seconds: 2),
+    this.startupTimeout = const Duration(seconds: 25),
+    this.recoveryBackoff = const [
+      Duration(seconds: 1), Duration(seconds: 2), Duration(seconds: 4),
+    ],
   }) : _supportDirFn = supportDir ?? getApplicationSupportDirectory,
        _coreLocator = coreLocator ?? locateCore,
        _xrayLocator = xrayLocator ?? locateXray,
+       _processProbe = processProbe ?? desktopProcessMatches,
+       _apiFactory = apiFactory ?? _newApi,
        _startProcess = startProcess ?? Process.start;
 
   final Future<Directory> Function() _supportDirFn;
   final String? Function() _coreLocator;
   final String? Function() _xrayLocator;
   final DesktopProcessStarter _startProcess;
+  final DesktopProcessProbe _processProbe;
+  final EngineApi Function(String, String) _apiFactory;
+  static EngineApi _newApi(String endpoint, String secret) => EngineApi(endpoint: endpoint, secret: secret);
   final Duration configCheckTimeout;
   final Duration cleanupTimeout;
+  final Duration healthInterval;
+  final Duration healthTimeout;
+  final Duration startupTimeout;
+  final List<Duration> recoveryBackoff;
   final _ctrl = StreamController<VpnState>.broadcast();
   VpnState _state = VpnState.stopped;
   EngineApi? _api;
@@ -52,9 +70,35 @@ class DesktopVpnController extends VpnController {
   Process? _coreProcess;
   Process? _checking;
   int? _pendingCleanupPid;
+  int? _unconfirmedCorePid;
   int _generation = 0;
   bool _disposed = false;
   Future<void> _operation = Future<void>.value();
+  Future<void>? _healthCheck;
+  int? _healthGeneration;
+  bool _desiredRunning = false;
+  bool _recovering = false;
+  int _restarts = 0;
+  Timer? _retryTimer;
+  Completer<void>? _retryWait;
+  BuiltConfig? _lastConfig;
+  Future<BuiltConfig> Function()? _recoveryConfig;
+  String? _xrayFailure;
+  int? _attachedXrayPid;
+  String? _attachedXrayExecutable;
+
+  @override
+  void setRecoveryConfigProvider(Future<BuiltConfig> Function() provider) {
+    _recoveryConfig = provider;
+  }
+
+  void _cancelRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final wait = _retryWait;
+    _retryWait = null;
+    if (wait != null && !wait.isCompleted) wait.complete();
+  }
 
   Future<void> _serialize(Future<void> Function() action) {
     final next = _operation.then((_) => action());
@@ -63,7 +107,7 @@ class DesktopVpnController extends VpnController {
   }
 
   void _ensureCurrent(int generation) {
-    if (generation != _generation || _stopping) {
+    if (generation != _generation || _stopping || _disposed) {
       throw const _CancelledStart();
     }
   }
@@ -160,7 +204,13 @@ class DesktopVpnController extends VpnController {
 
   @override
   Future<void> start(BuiltConfig cfg, {required String name}) {
+    if (_disposed) return Future<void>.value();
     final generation = ++_generation;
+    _cancelRetry();
+    _desiredRunning = true;
+    _recovering = false;
+    _restarts = 0;
+    _lastConfig = cfg;
     _stopping = false;
     _monitor?.cancel();
     _emit(const VpnState(VpnStatus.connecting));
@@ -170,17 +220,25 @@ class DesktopVpnController extends VpnController {
         await _start(cfg, generation);
       } on _CancelledStart {
         // The queued stop/new start owns cleanup, before it can launch again.
+        if (_disposed) await _stopSession();
       } catch (e) {
         if (generation != _generation) return;
-        await _stopSession();
+        _desiredRunning = false;
+        Object failure = e;
+        try {
+          await _stopSession();
+        } catch (cleanupError) {
+          failure = cleanupError;
+        }
         if (generation != _generation) return;
-        _emit(VpnState(VpnStatus.error, e.toString()));
-        rethrow;
+        _emit(VpnState(VpnStatus.error, failure.toString()));
+        throw failure;
       }
     });
   }
 
   Future<void> _start(BuiltConfig cfg, int generation) async {
+    _ensureCurrent(generation);
     final core = _coreLocator();
     if (core == null) {
       throw const DesktopVpnException(
@@ -189,10 +247,13 @@ class DesktopVpnController extends VpnController {
     }
 
     // Stop a daemon left over from a previous session (it holds the ports).
+    // A previously unreachable attached daemon may have regained its API.
+    if (_unconfirmedCorePid != null) await _stopStale();
     await _stopSession();
     await _stopStale();
     await _waitForCleanup(generation);
     _ensureCurrent(generation);
+    _xrayFailure = null;
 
     final configPath = await _path('config.json');
     final enginePath = await _path('engine.json');
@@ -212,9 +273,9 @@ class DesktopVpnController extends VpnController {
 
     final engine = (jsonDecode(cfg.engine) as Map).cast<String, dynamic>();
     _api?.close();
-    _api = EngineApi(
-      endpoint: engine['control_listen'] as String? ?? '127.0.0.1:9791',
-      secret: engine['secret'] as String? ?? '',
+    _api = _apiFactory(
+      engine['control_listen'] as String? ?? '127.0.0.1:9791',
+      engine['secret'] as String? ?? '',
     );
 
     if (cfg.xray != null) {
@@ -278,7 +339,7 @@ class DesktopVpnController extends VpnController {
     _ensureCurrent(generation);
 
     // Wait for the engine to answer.
-    final deadline = DateTime.now().add(const Duration(seconds: 25));
+    final deadline = DateTime.now().add(startupTimeout);
     while (true) {
       _ensureCurrent(generation);
       try {
@@ -298,6 +359,8 @@ class DesktopVpnController extends VpnController {
       }
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
+    if (_xrayFailure != null) throw DesktopVpnException(_xrayFailure!);
+    _lastConfig = cfg;
     _emit(const VpnState(VpnStatus.connected));
     _startMonitor(generation);
   }
@@ -382,34 +445,158 @@ class DesktopVpnController extends VpnController {
   void _startMonitor(int generation) {
     _monitor?.cancel();
     _failures = 0;
-    _monitor = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (_stopping || _disposed || generation != _generation || _api == null) {
-        return;
-      }
-      try {
-        final h = await _api!.health();
-        if (_stopping || _disposed || generation != _generation) return;
-        if (h.ok) {
-          _failures = 0;
-          return;
-        }
-      } catch (_) {}
-      if (_stopping || _disposed || generation != _generation) return;
-      if (++_failures >= 3 &&
-          !_stopping &&
-          !_disposed &&
-          generation == _generation) {
-        _monitor?.cancel();
-        final tail = await _logTail(10);
-        if (_stopping || _disposed || generation != _generation) return;
-        _emit(
-          VpnState(
-            VpnStatus.error,
-            'melsi-core stopped unexpectedly${tail.isEmpty ? '' : ':\n$tail'}',
-          ),
-        );
+    _scheduleHealth(generation);
+  }
+
+  bool _canRecover(int generation) =>
+      !_disposed && !_stopping && _desiredRunning && generation == _generation;
+
+  void _scheduleHealth(int generation) {
+    late final Timer monitor;
+    monitor = Timer(healthInterval, () async {
+      await _checkHealth(generation);
+      if (identical(_monitor, monitor) && _canRecover(generation) && _state.status == VpnStatus.connected) {
+        _scheduleHealth(generation);
       }
     });
+    _monitor = monitor;
+  }
+
+  Future<void> _checkHealth(int generation) {
+    if (!_canRecover(generation) || _state.status != VpnStatus.connected) {
+      return Future<void>.value();
+    }
+    if (_healthGeneration == generation && _healthCheck != null) return _healthCheck!;
+    _healthGeneration = generation;
+    late Future<void> check;
+    check = _pollHealth(generation).whenComplete(() {
+      if (identical(_healthCheck, check)) _healthCheck = null;
+    });
+    return _healthCheck = check;
+  }
+
+  Future<void> _pollHealth(int generation) async {
+    final api = _api;
+    final pid = _attachedXrayPid;
+    final executable = _attachedXrayExecutable;
+    if (pid != null && executable != null) {
+      final alive = await _processProbe(pid, executable);
+      if (!_canRecover(generation) || !identical(api, _api) || pid != _attachedXrayPid) return;
+      if (alive == false) _xrayFailure = 'The attached Xray process stopped unexpectedly.';
+    }
+    if (_xrayFailure != null) {
+      if (_canRecover(generation)) _beginRecovery(_xrayFailure!);
+      return;
+    }
+    try {
+      final health = await api?.health(timeout: healthTimeout);
+      if (!_canRecover(generation) || !identical(api, _api)) return;
+      if (health?.ok == true) {
+        _failures = 0;
+        return;
+      }
+    } catch (_) {}
+    if (!_canRecover(generation) || !identical(api, _api)) return;
+    if (++_failures >= 3) _beginRecovery('The local VPN core stopped responding.');
+  }
+
+  void _beginRecovery(String reason) {
+    if (!_canRecover(_generation) || _recovering) return;
+    final generation = _generation;
+    _recovering = true;
+    _monitor?.cancel();
+    _emit(const VpnState(VpnStatus.connecting, 'reconnecting'));
+    unawaited(_recover(generation, reason).whenComplete(() {
+      if (generation == _generation) _recovering = false;
+    }));
+  }
+
+  Future<void> _waitToRetry(Duration delay, int generation) async {
+    _ensureCurrent(generation);
+    final wait = _retryWait = Completer<void>();
+    _retryTimer = Timer(delay, () { if (!wait.isCompleted) wait.complete(); });
+    await wait.future;
+    if (identical(_retryWait, wait)) _retryWait = null;
+    _ensureCurrent(generation);
+  }
+
+  Future<bool> _reattachHealthyApi(int generation) async {
+    final current = _api;
+    if (current == null || _xrayFailure != null) return false;
+    final fresh = _apiFactory(current.endpoint, current.secret);
+    var adopted = false;
+    try {
+      final health = await fresh.health(timeout: healthTimeout);
+      if (_canRecover(generation) && health.ok && _xrayFailure == null) {
+        _api = fresh;
+        current.close();
+        adopted = true;
+      }
+    } catch (_) {
+    } finally {
+      if (!adopted) fresh.close();
+    }
+    return adopted;
+  }
+
+  Future<void> _recover(int generation, String reason) async {
+    var lastError = reason;
+    try {
+      while (_canRecover(generation)) {
+        if (_restarts < recoveryBackoff.length) {
+          await _waitToRetry(recoveryBackoff[_restarts], generation);
+        }
+        if (await _reattachHealthyApi(generation)) {
+          _ensureCurrent(generation);
+          _emit(const VpnState(VpnStatus.connected));
+          _startMonitor(generation);
+          return;
+        }
+        _ensureCurrent(generation);
+        if (_restarts >= recoveryBackoff.length) break;
+        _restarts++;
+        try {
+          await _serialize(() async {
+            _ensureCurrent(generation);
+            final config = await _recoveryConfig?.call() ?? _lastConfig;
+            _ensureCurrent(generation);
+            if (config == null) throw const DesktopVpnException('No saved VPN configuration is available.');
+            try {
+              await _start(config, generation);
+            } on _CancelledStart {
+              if (_disposed) await _stopSession();
+              rethrow;
+            } catch (_) {
+              if (generation == _generation && !_disposed) await _stopSession();
+              rethrow;
+            }
+          });
+          _ensureCurrent(generation);
+          return;
+        } on _CancelledStart {
+          return;
+        } catch (error) {
+          lastError = error.toString();
+        }
+      }
+      if (!_canRecover(generation)) return;
+      await _serialize(() async {
+        if (!_canRecover(generation)) return;
+        await _stopSession();
+        final tail = await readLog(maxLines: 12) ?? '';
+        if (!_canRecover(generation)) return;
+        _desiredRunning = false;
+        _emit(VpnState(VpnStatus.error,
+          'Automatic reconnect stopped after $_restarts attempts. $lastError${tail.isEmpty ? '' : '\n$tail'}'));
+      });
+    } on _CancelledStart {
+      return;
+    } catch (error) {
+      if (_canRecover(generation)) {
+        _desiredRunning = false;
+        _emit(VpnState(VpnStatus.error, 'Automatic reconnect failed: $error'));
+      }
+    }
   }
 
   Future<String> _logTail(int n) async {
@@ -434,12 +621,22 @@ class DesktopVpnController extends VpnController {
   @override
   Future<void> stop() {
     final generation = ++_generation;
+    _desiredRunning = false;
+    _recovering = false;
+    _cancelRetry();
     _stopping = true;
     _monitor?.cancel();
     _killProcess(_checking);
     _emit(const VpnState(VpnStatus.stopping));
     return _serialize(() async {
-      await _stopSession();
+      try {
+        await _stopSession();
+      } catch (error) {
+        if (generation == _generation && !_disposed) {
+          _emit(VpnState(VpnStatus.error, error.toString()));
+        }
+        rethrow;
+      }
       if (generation == _generation) _emit(VpnState.stopped);
     });
   }
@@ -468,14 +665,38 @@ class DesktopVpnController extends VpnController {
       }
       forceKill = !stopAccepted || alive;
       if (stopAccepted && !alive && pid != null) _pendingCleanupPid = pid;
-      if (alive) await _killByPid();
+      if (forceKill && _coreProcess == null && pid != null) {
+        _unconfirmedCorePid = pid;
+      } else if (alive) {
+        await _killByPid();
+      }
       api.close();
     }
     // The control API closes before sing-box restores the system proxy/TUN.
     // Acknowledged shutdown must finish that cleanup without a forced kill.
     if (forceKill) _killProcess(_coreProcess);
     _coreProcess = null;
+    await _checkAttachedCoreStopped();
     await _killXray();
+  }
+
+  Future<void> _checkAttachedCoreStopped() async {
+    final pid = _unconfirmedCorePid;
+    if (pid == null) return;
+    if (await _corePid() != pid || _pendingCleanupPid == pid) {
+      // An acknowledged stop is still protected by _waitForCleanup.
+      _unconfirmedCorePid = null;
+      return;
+    }
+    final core = _coreLocator() ?? (Platform.isWindows ? 'melsi-core.exe' : 'melsi-core');
+    final matches = await _processProbe(pid, core);
+    if (matches != false) {
+      throw const DesktopVpnException(
+        'The existing VPN core is not responding, and its shutdown cannot be confirmed. '
+        'A second tunnel was not started. Wait for the core to stop or restart the device before reconnecting.',
+      );
+    }
+    _unconfirmedCorePid = null;
   }
 
   Future<int?> _corePid() async {
@@ -545,55 +766,41 @@ class DesktopVpnController extends VpnController {
         'Xray exited before the tunnel started${tail.isEmpty ? '' : ':\n$tail'}',
       );
     }
-    unawaited(
-      proc.exitCode
-          .then<void>((code) async {
-            if (_disposed ||
-                _stopping ||
-                generation != _generation ||
-                !identical(_xray, proc)) {
-              return;
-            }
-            final failedGeneration = ++_generation;
-            _stopping = true;
-            _monitor?.cancel();
-            _emit(const VpnState(VpnStatus.stopping));
-            await _serialize(() async {
-              await logDone.timeout(
-                const Duration(seconds: 1),
-                onTimeout: () {},
-              );
-              final tail = await _fileTail(logPath, 8);
-              await _stopSession();
-              if (_disposed || failedGeneration != _generation) return;
-              _emit(
-                VpnState(
-                  VpnStatus.error,
-                  'Xray stopped unexpectedly (exit $code). Reconnect or select another core${tail.isEmpty ? '.' : ':\n$tail'}',
-                ),
-              );
-            });
-          })
-          .catchError((Object _) {}),
-    );
+    unawaited(proc.exitCode.then<void>((code) async {
+      if (_disposed || _stopping || generation != _generation || !identical(_xray, proc)) return;
+      _xrayFailure = 'Xray stopped unexpectedly (exit $code).';
+      if (_state.status == VpnStatus.connected || _recovering) {
+        _beginRecovery(_xrayFailure!);
+      }
+    }).catchError((Object _) {}));
   }
 
   Future<void> _killXray() async {
     final proc = _xray;
     _xray = null;
     _killProcess(proc);
+    final executable = _attachedXrayExecutable ?? _xrayLocator();
+    _attachedXrayPid = null;
+    _attachedXrayExecutable = null;
+    int? pid;
     try {
-      final pid = int.tryParse(
+      pid = int.tryParse(
         (await File(await _path('xray.pid')).readAsString()).trim(),
       );
-      if (pid != null && pid != proc?.pid) {
+    } catch (_) {}
+    if (pid != null && pid > 0 && pid != proc?.pid) {
+      final matches = executable == null ? null : await _processProbe(pid, executable);
+      if (matches == null) {
+        throw const DesktopVpnException('Cannot verify the previous Xray process. Wait a moment before reconnecting.');
+      }
+      if (matches) {
         if (Platform.isWindows) {
           await Process.run('taskkill', ['/PID', '$pid', '/F']);
         } else {
           Process.killPid(pid);
         }
       }
-    } catch (_) {}
+    }
     try {
       await File(await _path('xray.pid')).delete();
     } catch (_) {}
@@ -645,9 +852,9 @@ class DesktopVpnController extends VpnController {
       final f = File(await _path('engine.json'));
       if (!await f.exists()) return;
       final j = (jsonDecode(await f.readAsString()) as Map).cast<String, dynamic>();
-      final api = EngineApi(
-          endpoint: j['control_listen'] as String? ?? '127.0.0.1:9791',
-          secret: j['secret'] as String? ?? '');
+      final api = _apiFactory(
+          j['control_listen'] as String? ?? '127.0.0.1:9791',
+          j['secret'] as String? ?? '');
       try {
         await api.health(timeout: const Duration(milliseconds: 500));
         final pid = await _corePid();
@@ -668,17 +875,23 @@ class DesktopVpnController extends VpnController {
 
   @override
   Future<VpnState> currentState() async {
+    if (_disposed) return _state;
+    if (_state.status == VpnStatus.connected) {
+      await _checkHealth(_generation);
+      return _state;
+    }
     if (_state.status != VpnStatus.stopped || _stopping) return _state;
     final generation = _generation;
     // Re-attach to a daemon that survived an app restart.
+    EngineApi? candidate;
     try {
       final f = File(await _path('engine.json'));
       if (!await f.exists()) return _state;
       final j = (jsonDecode(await f.readAsString()) as Map)
           .cast<String, dynamic>();
-      final api = EngineApi(
-        endpoint: j['control_listen'] as String? ?? '127.0.0.1:9791',
-        secret: j['secret'] as String? ?? '',
+      final api = candidate = _apiFactory(
+        j['control_listen'] as String? ?? '127.0.0.1:9791',
+        j['secret'] as String? ?? '',
       );
       final h = await api.health(timeout: const Duration(milliseconds: 700));
       if (generation != _generation || _stopping || _disposed) {
@@ -686,14 +899,33 @@ class DesktopVpnController extends VpnController {
         return _state;
       }
       if (h.ok) {
+        BuiltConfig? config;
+        int? xrayPid;
+        try {
+          final singBox = await File(await _path('config.json')).readAsString();
+          final hasXray = await File(await _path('xray.pid')).exists();
+          if (hasXray) xrayPid = int.tryParse((await File(await _path('xray.pid')).readAsString()).trim());
+          config = BuiltConfig(singBox: singBox, engine: jsonEncode(j), nodeTags: const {},
+            xray: hasXray ? await File(await _path('xray.json')).readAsString() : null);
+        } catch (_) {}
+        if (generation != _generation || _disposed || _stopping || _state.status != VpnStatus.stopped) return _state;
         _api = api;
+        candidate = null;
+        _lastConfig = config;
+        _attachedXrayPid = xrayPid != null && xrayPid > 0 ? xrayPid : null;
+        _attachedXrayExecutable = _attachedXrayPid == null ? null : _xrayLocator();
         _elevated = !Platform.isWindows;
+        _desiredRunning = true;
+        _restarts = 0;
         _emit(const VpnState(VpnStatus.connected));
         _startMonitor(_generation);
       } else {
         api.close();
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      candidate?.close();
+    }
     return _state;
   }
 
@@ -746,7 +978,13 @@ class DesktopVpnController extends VpnController {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
+    _desiredRunning = false;
+    _recoveryConfig = null;
+    _generation++;
+    _cancelRetry();
+    _killProcess(_checking);
     _monitor?.cancel();
     _api?.close();
     _ctrl.close();

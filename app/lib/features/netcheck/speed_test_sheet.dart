@@ -33,9 +33,6 @@ class SpeedTestSheet extends StatelessWidget {
     final l = context.l;
     final c = context.c;
     final t = context.t;
-    final connected = app.connected;
-    final node = connected ? app.activeNode : null;
-    final key = net.speedKey;
     final quota = app.subscriptions.any((s) {
       final total = s.total;
       if (total == null || total <= 0) return false;
@@ -45,6 +42,8 @@ class SpeedTestSheet extends StatelessWidget {
     return ListenableBuilder(
       listenable: net,
       builder: (context, _) {
+        final node = app.connected ? app.activeNode : null;
+        final key = net.speedKey;
         final running = net.speedRunning;
         final done = net.phase == SpeedPhase.done && net.result != null;
         final phaseKey = switch (net.phase) {
@@ -61,7 +60,7 @@ class SpeedTestSheet extends StatelessWidget {
           SpeedPhase.done => net.result?.down,
           _ => null,
         };
-        final ping = running || done ? net.livePing ?? net.result?.ping : null;
+        final ping = running || done || net.speedFailed ? net.livePing ?? net.result?.ping : null;
         final down = done ? net.result?.down : net.liveDown;
         final up = done ? net.result?.up : null;
         // History: the run that just finished is on top of the list too.
@@ -113,10 +112,16 @@ class SpeedTestSheet extends StatelessWidget {
                 Text(l('speed.note'), style: t.footnote),
                 if (net.speedFailed && !running) ...[
                   const SizedBox(height: Space.xs),
-                  Text(l('speed.failedAt', {
-                    'phase': l('speed.phase.${net.failedPhase?.name ?? 'down'}'),
-                    'reason': l(net.speedErrorKey, net.speedErrorArgs),
-                  }), style: t.caption.copyWith(color: c.warning)),
+                  Text(net.failedPhase == null
+                      ? l(net.speedErrorKey, net.speedErrorArgs)
+                      : l('speed.failedAt', {
+                        'phase': l('speed.phase.${net.failedPhase!.name}'),
+                        'reason': l(net.speedErrorKey, net.speedErrorArgs),
+                      }), style: t.caption.copyWith(color: c.warning)),
+                ],
+                if (net.speedInterruptedKey != null && !running) ...[
+                  const SizedBox(height: Space.xs),
+                  Text(l(net.speedInterruptedKey!), style: t.caption),
                 ],
                 if (quota) ...[
                   const SizedBox(height: Space.xs),

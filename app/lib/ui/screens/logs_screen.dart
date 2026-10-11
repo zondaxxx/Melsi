@@ -24,10 +24,15 @@ class _LogsScreenState extends State<LogsScreen> {
   static const _maxProbeLines = 200;
   final List<ClashLogLine> _lines = [];
   final List<ClashLogLine> _probeLines = [];
+  final Set<ClashLogLine> _savedLines = {};
   final Map<String, (String, String)> _probeErrors = {};
   final _scroll = ScrollController();
   StreamSubscription<ClashLogLine>? _sub;
   Timer? _fileTimer;
+  ClashApi? _boundClash;
+  int _sourceGeneration = 0;
+  int _fileReadGeneration = 0;
+  bool _liveLogs = false;
   bool _paused = false;
   bool _fileHistoryLoaded = false;
   String _filter = '';
@@ -35,33 +40,60 @@ class _LogsScreenState extends State<LogsScreen> {
   @override
   void initState() {
     super.initState();
-    widget.state.addListener(_captureProbeErrors);
+    widget.state.addListener(_onAppState);
+    _bindSource(force: true);
     _captureProbeErrors();
+  }
+
+  void _onAppState() {
+    _bindSource();
+    _captureProbeErrors();
+  }
+
+  void _bindSource({bool force = false}) {
     final clash = widget.state.clash;
+    if (!force && identical(clash, _boundClash)) return;
+    _boundClash = clash;
+    final generation = ++_sourceGeneration;
+    _sub?.cancel();
+    _sub = null;
+    _fileTimer?.cancel();
+    _fileTimer = null;
+    _fileHistoryLoaded = false;
+    _liveLogs = clash != null;
     if (clash != null) {
       final level = switch (widget.state.settings.logLevel.name) {
         'trace' || 'debug' => 'debug',
         'warn' => 'warning',
         final s => s,
       };
-      _sub = clash.logs(level: level).listen(_add, onError: (Object _) {});
+      _sub = clash.logs(level: level).listen((line) {
+        if (mounted && generation == _sourceGeneration) _add(line);
+      }, onError: (Object _) {}, onDone: () {
+        if (!mounted || generation != _sourceGeneration) return;
+        _liveLogs = false;
+        _startFilePolling();
+        _loadFile();
+      });
     }
     _loadFile();
-    if (clash == null) {
-      _fileTimer = Timer.periodic(
-        const Duration(seconds: 2),
-        (_) => _loadFile(),
-      );
-    }
+    if (clash == null) _startFilePolling();
+  }
+
+  void _startFilePolling() {
+    _fileTimer ??= Timer.periodic(
+      const Duration(seconds: 2), (_) => _loadFile(),
+    );
   }
 
   @override
   void didUpdateWidget(LogsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state != widget.state) {
-      oldWidget.state.removeListener(_captureProbeErrors);
-      widget.state.addListener(_captureProbeErrors);
+      oldWidget.state.removeListener(_onAppState);
+      widget.state.addListener(_onAppState);
       _probeErrors.clear();
+      _bindSource(force: true);
       _captureProbeErrors();
     }
   }
@@ -105,8 +137,19 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   Future<void> _loadFile() async {
-    final text = await widget.state.vpn.readLog();
-    if (text == null || !mounted || _paused) return;
+    if (_paused || (_liveLogs && _fileHistoryLoaded)) return;
+    final source = _sourceGeneration;
+    final read = ++_fileReadGeneration;
+    String? text;
+    try {
+      text = await widget.state.vpn.readLog();
+    } catch (_) {
+      return;
+    }
+    if (text == null || !mounted || _paused || source != _sourceGeneration ||
+        read != _fileReadGeneration) {
+      return;
+    }
     final lines = text.split('\n').where((l) => l.trim().isNotEmpty).map((l) {
       final lvl =
           RegExp(
@@ -116,19 +159,14 @@ class _LogsScreenState extends State<LogsScreen> {
           'info';
       return ClashLogLine(lvl, l, DateTime.now());
     }).toList();
-    final live = widget.state.clash != null;
-    if (live && _fileHistoryLoaded) return;
     setState(() {
-      if (live) {
-        // A live event can arrive before the native file read finishes. Keep
-        // both so the previous background stop is still visible after recovery.
-        _lines.insertAll(0, lines);
-      } else {
-        _lines
-          ..clear()
-          ..addAll(lines)
-          ..addAll(_probeLines);
-      }
+      // Replace only the saved-file snapshot. Live and probe events remain
+      // available across reconnects, even if they arrive before this read.
+      _lines.removeWhere(_savedLines.contains);
+      _lines.insertAll(0, lines);
+      _savedLines
+        ..clear()
+        ..addAll(lines);
       _trimLines();
       _fileHistoryLoaded = true;
     });
@@ -136,7 +174,7 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   void _add(ClashLogLine l) {
-    if (_paused) return;
+    if (!mounted || _paused) return;
     setState(() {
       _lines.add(l);
       _trimLines();
@@ -149,6 +187,7 @@ class _LogsScreenState extends State<LogsScreen> {
     final removed = _lines.take(_lines.length - _maxLines).toSet();
     _lines.removeRange(0, _lines.length - _maxLines);
     _probeLines.removeWhere(removed.contains);
+    _savedLines.removeAll(removed);
   }
 
   void _togglePause() {
@@ -161,7 +200,7 @@ class _LogsScreenState extends State<LogsScreen> {
 
   void _toEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients &&
+      if (mounted && _scroll.hasClients &&
           _scroll.position.maxScrollExtent - _scroll.offset < 200) {
         _scroll.jumpTo(_scroll.position.maxScrollExtent);
       }
@@ -170,7 +209,9 @@ class _LogsScreenState extends State<LogsScreen> {
 
   @override
   void dispose() {
-    widget.state.removeListener(_captureProbeErrors);
+    widget.state.removeListener(_onAppState);
+    _sourceGeneration++;
+    _fileReadGeneration++;
     _sub?.cancel();
     _fileTimer?.cancel();
     _scroll.dispose();
@@ -219,6 +260,8 @@ class _LogsScreenState extends State<LogsScreen> {
             onPressed: () => setState(() {
               _lines.clear();
               _probeLines.clear();
+              _savedLines.clear();
+              _fileReadGeneration++;
             }),
           ),
         ],

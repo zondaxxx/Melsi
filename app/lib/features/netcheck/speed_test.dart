@@ -8,10 +8,13 @@
 // measures the tunnel under every routing preset.
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+
+import '../../services/probe_diagnostics.dart';
 
 /// One progress reading: total [bytes] so far, [elapsed] since the request
 /// started and the instantaneous [bps] over the last interval.
@@ -37,18 +40,32 @@ class SpeedSample {
       'SpeedSample($bytes B, ${elapsed.inMilliseconds} ms, $bps B/s)';
 }
 
-enum SpeedFailure { timeout, server, connection, empty }
+enum SpeedFailure { timeout, server, connection, empty, dns, tls, proxy, notReady }
 
 class SpeedTestException implements Exception {
   const SpeedTestException(this.failure, {this.statusCode});
   final SpeedFailure failure;
   final int? statusCode;
 
-  static SpeedTestException from(Object error) => switch (error) {
-    SpeedTestException() => error,
-    TimeoutException() => const SpeedTestException(SpeedFailure.timeout),
-    _ => const SpeedTestException(SpeedFailure.connection),
-  };
+  static SpeedTestException from(Object error, {bool localProxy = false}) {
+    if (error is SpeedTestException) return error;
+    if (error is TimeoutException) {
+      return const SpeedTestException(SpeedFailure.timeout);
+    }
+    if (error is HandshakeException || error is TlsException) {
+      return const SpeedTestException(SpeedFailure.tls);
+    }
+    if (localProxy && error is SocketException &&
+        error.address?.isLoopback == true) {
+      return const SpeedTestException(SpeedFailure.proxy);
+    }
+    return SpeedTestException(switch (classifyProbeFailure('$error')) {
+      ProbeFailure.dns => SpeedFailure.dns,
+      ProbeFailure.tls => SpeedFailure.tls,
+      ProbeFailure.timeout => SpeedFailure.timeout,
+      _ => SpeedFailure.connection,
+    });
+  }
 
   @override
   String toString() =>
@@ -65,6 +82,7 @@ class SpeedTest {
     this.requestTimeout = const Duration(seconds: 10),
     this.responseTimeout = const Duration(seconds: 5),
     this.interval = const Duration(milliseconds: 250),
+    this.localProxy = false,
     Random? random,
   }) : _newClient = client,
        downloadUrl = downloadUrl ?? defaultDownloadUrl,
@@ -87,6 +105,7 @@ class SpeedTest {
   final Duration requestTimeout;
   final Duration responseTimeout;
   final Duration interval;
+  final bool localProxy;
   final Random _random;
   _Transfer? _active;
   bool _cancelled = false;
@@ -117,7 +136,7 @@ class SpeedTest {
           await run(current);
         } catch (error, stack) {
           if (!_cancelled && !(transfer?.aborted ?? false) && !ctrl.isClosed) {
-            ctrl.addError(SpeedTestException.from(error), stack);
+            ctrl.addError(SpeedTestException.from(error, localProxy: localProxy), stack);
           }
         } finally {
           transfer?.close();

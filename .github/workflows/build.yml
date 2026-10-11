@@ -7,13 +7,19 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      platform:
+        description: "Platform to build. Releases always build all platforms."
+        type: choice
+        options: [all, android, ios, macos, windows, linux]
+        required: true
+        default: all
       release_tag:
         description: "Create a GitHub Release with this tag (e.g. v1.0.0-alpha.1) from the selected branch. Leave empty for a plain build."
         required: false
         default: ""
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.release_tag || inputs.platform || 'all' }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
@@ -31,22 +37,27 @@ jobs:
     name: Tests (Go + Flutter)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v5
+
+      - name: Build workflow regression tests
+        run: python3 -B -m unittest discover -s scripts/tests -v
 
       - uses: ./.github/actions/setup-go
 
       - name: go vet
         working-directory: core
-        run: go vet ./...
+        run: |
+          source ../scripts/go-build-settings.sh
+          go vet "${MELSI_DESKTOP_GO_FLAGS[@]}" -tags "$(melsi_desktop_go_tags linux)" ./...
 
-      - name: go test
+      - name: Go tests (including REALITY and Xray regressions)
         working-directory: core
-        run: go test ./...
-
-      - name: REALITY compatibility and Xray transport regressions
-        working-directory: core
-        run: go test -tags with_utls,with_clash_api,badlinkname,tfogo_checklinkname0 -ldflags=-checklinkname=0 ./compat -run 'Test(NativeReality|MihomoReality|Xray)' -v
+        run: |
+          source ../scripts/go-build-settings.sh
+          go test "${MELSI_DESKTOP_GO_FLAGS[@]}" -tags "$(melsi_desktop_go_tags linux)" -ldflags=-checklinkname=0 ./... -v
 
       - name: Mobile compatibility registry
         working-directory: core
@@ -85,6 +96,7 @@ jobs:
   # -------------------------------------------------------------- android ---
   android:
     name: Android
+    if: github.event_name != 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' || inputs.platform == 'all' || inputs.platform == 'android'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -138,9 +150,9 @@ jobs:
 
       - name: Native library inputs
         id: libbox-inputs
-        env:
-          SOURCE_HASH: ${{ hashFiles('core/**', '!core/dist/**', 'scripts/build-libbox.sh') }}
-        run: echo "source=$SOURCE_HASH" >> "$GITHUB_OUTPUT"
+        run: |
+          source_hash="$(python3 scripts/native-cache-key.py mobile)"
+          echo "source=$source_hash" >> "$GITHUB_OUTPUT"
 
       - name: Cache libbox.aar
         id: libbox
@@ -219,6 +231,7 @@ jobs:
   # ------------------------------------------------------------------ iOS ---
   ios:
     name: iOS (unsigned)
+    if: github.event_name != 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' || inputs.platform == 'all' || inputs.platform == 'ios'
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -239,10 +252,9 @@ jobs:
 
       - name: Native library inputs
         id: libbox-inputs
-        env:
-          SOURCE_HASH: ${{ hashFiles('core/**', '!core/dist/**', 'scripts/build-libbox.sh') }}
         run: |
-          echo "source=$SOURCE_HASH" >> "$GITHUB_OUTPUT"
+          source_hash="$(python3 scripts/native-cache-key.py mobile)"
+          echo "source=$source_hash" >> "$GITHUB_OUTPUT"
           sdk="$( { xcodebuild -version; xcrun --sdk iphoneos --show-sdk-build-version; } | shasum -a 256 | cut -d ' ' -f 1)"
           echo "sdk=$sdk" >> "$GITHUB_OUTPUT"
 
@@ -310,6 +322,7 @@ jobs:
   # ---------------------------------------------------------------- macOS ---
   macos:
     name: macOS (universal)
+    if: github.event_name != 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' || inputs.platform == 'all' || inputs.platform == 'macos'
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -437,6 +450,7 @@ jobs:
   # x64 only: Flutter Windows arm64 builds need an arm64 host runner.
   windows:
     name: Windows (x64)
+    if: github.event_name != 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' || inputs.platform == 'all' || inputs.platform == 'windows'
     runs-on: windows-latest
     timeout-minutes: 60
     defaults:
@@ -454,7 +468,10 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          # Saving the 1.9 GB SDK took 5m26s on Windows; the dependency cache
+          # was only 36 MB / 11s. Install the SDK, cache only pub packages here.
+          cache: false
+          pub-cache: true
 
       - name: Build melsi-core (windows amd64)
         run: bash scripts/build-core.sh windows amd64
@@ -467,14 +484,16 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: |
-          go test -tags with_utls,with_clash_api,badlinkname,tfogo_checklinkname0 -ldflags=-checklinkname=0 ./cmd/melsi-core
-          go test -tags with_utls,with_clash_api,badlinkname,tfogo_checklinkname0 -ldflags=-checklinkname=0 ./compat -run TestXray
+          source ../scripts/go-build-settings.sh
+          tags="$(melsi_desktop_go_tags windows)"
+          go test "${MELSI_DESKTOP_GO_FLAGS[@]}" -tags "$tags" -ldflags=-checklinkname=0 ./cmd/melsi-core
+          go test "${MELSI_DESKTOP_GO_FLAGS[@]}" -tags "$tags" -ldflags=-checklinkname=0 ./compat -run TestXray
 
       - name: Desktop lifecycle regression tests
         working-directory: app
         run: |
           flutter pub get
-          flutter test test/core/desktop_vpn_controller_test.dart test/ui/logs_screen_test.dart
+          flutter test test/core/desktop_vpn_controller_test.dart test/core/desktop_recovery_test.dart test/core/process_identity_test.dart test/core/runtime_generation_test.dart test/ui/logs_screen_test.dart test/features/speed_transport_test.dart test/features/speed_session_test.dart
 
       - name: flutter build windows
         working-directory: app
@@ -539,6 +558,7 @@ jobs:
   # ---------------------------------------------------------------- Linux ---
   linux:
     name: Linux (x64)
+    if: github.event_name != 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' || inputs.platform == 'all' || inputs.platform == 'linux'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

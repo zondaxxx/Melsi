@@ -20,35 +20,68 @@ class Verdict {
   bool get healthy => key == 'doctor.v.ok';
 
   static const offline = Verdict('doctor.v.offline');
-  static const port = Verdict('doctor.v.port', fixes: [DoctorFix.antiDpi, DoctorFix.switchServer]);
+  static const port = Verdict(
+    'doctor.v.port',
+    fixes: [DoctorFix.antiDpi, DoctorFix.switchServer],
+  );
   static const core = Verdict('doctor.v.core');
-  static const tunnel = Verdict('doctor.v.tunnel', fixes: [DoctorFix.switchServer]);
+  static const tunnel = Verdict(
+    'doctor.v.tunnel',
+    fixes: [DoctorFix.switchServer],
+  );
   static const dns = Verdict('doctor.v.dns');
   static const clock = Verdict('doctor.v.clock');
   static const leak = Verdict('doctor.v.leak', fixes: [DoctorFix.switchServer]);
   static const warn = Verdict('doctor.v.warn');
   static const ok = Verdict('doctor.v.ok');
   static const partial = Verdict('doctor.v.partial');
+  static const probeService = Verdict('doctor.v.probeService');
 
   @override
   String toString() => 'Verdict($key)';
 }
 
-/// Order matters: each rule assumes the ones above it did not fire, so
-/// "tunnel fails" is only reported when the server port itself answered.
+/// Local core evidence and a working proxy take precedence over an unrelated
+/// public endpoint or raw TCP check. A failed endpoint is not an outage proof.
 Verdict diagnose(Map<String, StepResult> results) {
   bool fail(String id) => results[id]?.isFail ?? false;
   bool warn(String id) => results[id]?.status == StepStatus.warn;
 
-  if (fail(Diagnostics.internetId)) return Verdict.offline;
-  if (fail(Diagnostics.serverId)) return Verdict.port;
   if (fail(Diagnostics.coreId)) return Verdict.core;
-  if (fail(Diagnostics.tunnelId)) return Verdict.tunnel;
+  final tunnel = results[Diagnostics.tunnelId];
+  final detail = tunnel?.detail;
+  if (fail(Diagnostics.tunnelId) && const {
+    'doctor.probe.dns',
+    'doctor.probe.tls',
+    'doctor.probe.authentication',
+    'doctor.probe.route',
+    'doctor.probe.core',
+  }.contains(detail)) {
+    return Verdict(detail!);
+  }
+  final tunnelAnswers =
+      tunnel?.isOk == true || tunnel?.detail == 'doctor.probeService';
+  if (!tunnelAnswers) {
+    if (fail(Diagnostics.internetId) &&
+        results[Diagnostics.serverId]?.isOk != true) {
+      return Verdict.offline;
+    }
+    if (fail(Diagnostics.serverId)) return Verdict.port;
+  }
+  if (fail(Diagnostics.tunnelId)) {
+    return Verdict.tunnel;
+  }
   if (fail(Diagnostics.dnsId)) return Verdict.dns;
   if (fail(Diagnostics.clockId)) return Verdict.clock;
   if (fail(Diagnostics.leakId)) return Verdict.leak;
   // A cancelled run has no failure to report, but no clean bill either.
-  if (Diagnostics.stepIds.any((id) => !results.containsKey(id))) return Verdict.partial;
+  if (Diagnostics.stepIds.any((id) => !results.containsKey(id))) {
+    return Verdict.partial;
+  }
+  if (tunnel?.detail == 'doctor.probeService') return Verdict.probeService;
+  if (fail(Diagnostics.internetId) || fail(Diagnostics.serverId)) {
+    return Verdict.warn;
+  }
   if (Diagnostics.stepIds.any(warn)) return Verdict.warn;
   return Verdict.ok;
 }
@@ -67,7 +100,8 @@ String doctorReport({
   final node = app.activeNode;
   String onOff(bool v) => v ? 'on' : 'off';
   String status(StepResult r) => r.status.name;
-  String detail(StepResult r) => r.detail == null ? '' : ' · ${l(r.detail!, r.args)}';
+  String detail(StepResult r) =>
+      r.detail == null ? '' : ' · ${l(r.detail!, r.args)}';
 
   final lines = <String>[
     '${l('doctor.report.title')} · Melsi $appVersion · ${currentPlatformKind().name}',

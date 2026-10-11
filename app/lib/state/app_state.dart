@@ -66,18 +66,34 @@ class AppState extends ChangeNotifier {
     PlatformApps? apps,
     SubscriptionFetcher? fetcher,
     PlatformKind? platform,
+    EngineApi Function(RuntimeEndpoints)? engineFactory,
+    ClashApi Function(RuntimeEndpoints)? clashFactory,
+    Future<int?> Function(String, int)? tcpProbe,
     this.enableNetwork = true,
   })  : store = store ?? FileStateStore(),
         vpn = vpn ?? VpnController.forPlatform(),
         apps = apps ?? PlatformApps(),
         platform = platform ?? currentPlatformKind(),
-        _fetcher = fetcher; // ignore: prefer_initializing_formals
+        _engineFactory = engineFactory ?? _newEngine,
+        _clashFactory = clashFactory ?? _newClash,
+        _tcpProbe = tcpProbe ?? tcpPing,
+        _fetcher = fetcher { // ignore: prefer_initializing_formals
+    this.vpn.setRecoveryConfigProvider(_buildRecoveryConfig);
+  }
 
   final StateStore store;
   final VpnController vpn;
   final PlatformApps apps;
   final PlatformKind platform;
   final SubscriptionFetcher? _fetcher;
+  final EngineApi Function(RuntimeEndpoints) _engineFactory;
+  final ClashApi Function(RuntimeEndpoints) _clashFactory;
+  final Future<int?> Function(String, int) _tcpProbe;
+
+  static EngineApi _newEngine(RuntimeEndpoints ep) =>
+      EngineApi(endpoint: ep.engineApi, secret: ep.secret);
+  static ClashApi _newClash(RuntimeEndpoints ep) =>
+      ClashApi(endpoint: ep.clashApi, secret: ep.secret);
 
   /// Tests turn this off: no auto-updates / pings on load.
   final bool enableNetwork;
@@ -111,6 +127,15 @@ class AppState extends ChangeNotifier {
 
   /// Called when the app returns to the foreground.
   final List<VoidCallback> resumeHooks = [];
+  bool _disposed = false;
+  int _vpnRevision = 0;
+  int _runtimeEpoch = 0;
+  int? _pollingEpoch;
+
+  bool _runtimeCurrent(int epoch, {EngineApi? engine, ClashApi? clash}) =>
+      !_disposed && epoch == _runtimeEpoch &&
+      (engine == null || identical(engine, this.engine)) &&
+      (clash == null || identical(clash, this.clash));
 
   // ----------------------------------------------------------- runtime
   bool loaded = false;
@@ -213,6 +238,7 @@ class AppState extends ChangeNotifier {
     _vpnSub = vpn.states.listen(_onVpnState, onError: (Object _) {});
     unawaited(_attach());
     unawaited(vpn.coreVersion().then((v) {
+      if (_disposed) return;
       coreVersion = v;
       notifyListeners();
     }));
@@ -222,11 +248,11 @@ class AppState extends ChangeNotifier {
       if (settings.connectOnLaunch && nodes.isNotEmpty) {
         // Give the attach check a moment so we don't double-start.
         Future<void>.delayed(const Duration(milliseconds: 600), () {
-          if (vpnState.status == VpnStatus.stopped) connect();
+          if (!_disposed && vpnState.status == VpnStatus.stopped) connect();
         });
       } else {
         Future<void>.delayed(const Duration(seconds: 1), () {
-          if (!connected && latencies.isEmpty) pingAll();
+          if (!_disposed && !connected && latencies.isEmpty) pingAll();
         });
       }
     }
@@ -234,20 +260,35 @@ class AppState extends ChangeNotifier {
 
   /// Re-attaches to a tunnel that is already running (app restart).
   Future<void> _attach() async {
+    final attempt = _connectAttempt;
+    final before = _vpnRevision;
     final s = await vpn.currentState();
+    if (_disposed || attempt != _connectAttempt) return;
+    if (before != _vpnRevision && vpnState.status != s.status) return;
+    // currentState may itself emit connected. Subsequent recovery/error
+    // events must still invalidate the slower secret/config reads below.
+    final revision = _vpnRevision;
+    bool current() => !_disposed && attempt == _connectAttempt && revision == _vpnRevision;
     if (s.status == VpnStatus.connected) {
       var secret = _lastSecret;
       if (vpn is DesktopVpnController) {
         secret = await (vpn as DesktopVpnController).attachedSecret() ?? secret;
       }
+      if (!current()) return;
       if (secret != null) {
-        _endpoints = RuntimeEndpoints(secret: secret);
+        final endpoints = RuntimeEndpoints(secret: secret);
+        BuiltConfig? built;
         try {
-          lastBuilt = await _build(_endpoints!);
+          built = await _build(endpoints);
         } catch (_) {}
+        if (!current()) return;
+        _endpoints = endpoints;
+        lastBuilt = built;
+        if (engine != null && engine!.secret != secret) _stopRuntime();
       }
       // This process did not launch the tunnel, so the live selector may
       // still be the outbound sing-box restored from an older cache.
+      if (!current()) return;
       _startedForNodeId = null;
       _onVpnState(s);
     }
@@ -255,11 +296,15 @@ class AppState extends ChangeNotifier {
 
   /// Called by the UI when the app returns to the foreground.
   void onResume() {
+    if (_disposed) return;
     final timerExpired = _checkDisconnectDeadline();
     if (enableNetwork) unawaited(updateDueSubscriptions());
     if (!timerExpired) {
+      final revision = _vpnRevision;
+      final attempt = _connectAttempt;
       unawaited(vpn.currentState().then((s) {
-        if (s.status != vpnState.status && s.status != VpnStatus.error) _onVpnState(s);
+        if (_disposed || revision != _vpnRevision || attempt != _connectAttempt) return;
+        if (s.status != vpnState.status || s.message != vpnState.message) _onVpnState(s);
       }));
     }
     // A tunnel restored in the background can still be sitting on the
@@ -272,6 +317,10 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _connectAttempt++;
+    _applyAborted = true;
+    _runtimeEpoch++;
     _disconnectTimer?.cancel();
     _vpnSub?.cancel();
     _poll?.cancel();
@@ -495,12 +544,16 @@ class AppState extends ChangeNotifier {
   NodeStat? statOf(ProxyNode n, {String selector = kProxySelector}) =>
       engineGroups[selector]?.stat(tagOf(n.id));
 
-  /// Best-known latency for a node: engine stat when connected, else the last
-  /// explicit test.
+  /// A live tunnel uses engine samples or a URL test from this session.
+  /// Offline results prove TCP reachability only.
   int? latencyOf(ProxyNode n) {
     final l = latencies[n.id];
-    if (l != null) return l.ms;
-    return statOf(n)?.latencyMs;
+    if (connected) {
+      final stat = statOf(n);
+      if (stat != null) return stat.latencyMs;
+      return l?.viaUrl == true ? l?.ms : null;
+    }
+    return l?.viaUrl == false ? l?.ms : null;
   }
 
   List<ProxyNode> filteredNodes({
@@ -779,21 +832,32 @@ class AppState extends ChangeNotifier {
       _markConfigChanged();
       return;
     }
+    final runtime = _runtimeEpoch;
+    final selection = _selectionEpoch;
+    final e = engine;
+    final c = clash;
+    bool current() => _runtimeCurrent(runtime, engine: e, clash: c) &&
+        selectedNodeId == id && _selectionEpoch == selection && !settings.autoSelect;
     try {
-      if (engine != null) {
-        await engine!.setAuto(kProxySelector, false);
-        engineGroups[kProxySelector] = await engine!.select(kProxySelector, tag);
-      } else if (clash != null) {
-        final ok = await clash!.select(kProxySelector, tag);
+      if (e != null) {
+        await e.setAuto(kProxySelector, false);
+        if (!current()) return;
+        final group = await e.select(kProxySelector, tag);
+        if (!current()) return;
+        engineGroups[kProxySelector] = group;
+      } else if (c != null) {
+        final ok = await c.select(kProxySelector, tag);
+        if (!current()) return;
         if (!ok) throw StateError('select failed');
       } else {
         _markConfigChanged();
         return;
       }
       _startedForNodeId = id;
-      unawaited(clash?.closeAllConnections().catchError((_) {}));
+      unawaited(c?.closeAllConnections().catchError((_) {}));
       notifyListeners();
     } catch (_) {
+      if (!current()) return;
       _markConfigChanged();
       notifyListeners();
     }
@@ -806,27 +870,31 @@ class AppState extends ChangeNotifier {
     final id = selectedNodeId;
     if (id == null || _startedForNodeId == id) return;
     final epoch = _selectionEpoch;
+    final runtime = _runtimeEpoch;
+    final e = engine;
+    final c = clash;
     for (var i = 0; i < 6; i++) {
-      if (!connected || settings.autoSelect || selectedNodeId != id || _selectionEpoch != epoch) {
+      if (!_runtimeCurrent(runtime, engine: e, clash: c) || !connected || settings.autoSelect || selectedNodeId != id || _selectionEpoch != epoch) {
         return;
       }
       final tag = tagOf(id);
       if (tag == null) break;
       try {
-        if (engine != null) {
-          await engine!.setAuto(kProxySelector, false);
-          final group = await engine!.select(kProxySelector, tag);
-          if (selectedNodeId != id || _selectionEpoch != epoch) return;
+        if (e != null) {
+          await e.setAuto(kProxySelector, false);
+          if (!_runtimeCurrent(runtime, engine: e, clash: c) || selectedNodeId != id || _selectionEpoch != epoch) return;
+          final group = await e.select(kProxySelector, tag);
+          if (!_runtimeCurrent(runtime, engine: e, clash: c) || selectedNodeId != id || _selectionEpoch != epoch) return;
           engineGroups[kProxySelector] = group;
           _startedForNodeId = id;
-          unawaited(clash?.closeAllConnections().catchError((_) {}));
+          unawaited(c?.closeAllConnections().catchError((_) {}));
           notifyListeners();
           return;
         }
       } catch (_) {}
       await Future<void>.delayed(Duration(milliseconds: 80 * (i + 1)));
     }
-    if (connected && !settings.autoSelect && selectedNodeId == id && _selectionEpoch == epoch) {
+    if (_runtimeCurrent(runtime, engine: e, clash: c) && connected && !settings.autoSelect && selectedNodeId == id && _selectionEpoch == epoch) {
       _markConfigChanged();
     }
   }
@@ -834,11 +902,16 @@ class AppState extends ChangeNotifier {
   Future<void> setAutoSelect(bool on) async {
     settings.autoSelect = on;
     _changed();
-    if (connected && engine != null) {
+    final e = engine;
+    final runtime = _runtimeEpoch;
+    if (connected && e != null) {
       try {
-        engineGroups[kProxySelector] = await engine!.setAuto(kProxySelector, on);
+        final group = await e.setAuto(kProxySelector, on);
+        if (!_runtimeCurrent(runtime, engine: e) || settings.autoSelect != on) return;
+        engineGroups[kProxySelector] = group;
         notifyListeners();
       } catch (_) {
+        if (!_runtimeCurrent(runtime, engine: e) || settings.autoSelect != on) return;
         _markConfigChanged();
         notifyListeners();
       }
@@ -848,11 +921,16 @@ class AppState extends ChangeNotifier {
   Future<void> setSmartMode(SmartMode mode) async {
     settings.smartMode = mode;
     _changed();
-    if (connected && engine != null) {
+    final e = engine;
+    final runtime = _runtimeEpoch;
+    if (connected && e != null) {
       try {
-        engineGroups[kProxySelector] = await engine!.setMode(kProxySelector, mode.name);
+        final group = await e.setMode(kProxySelector, mode.name);
+        if (!_runtimeCurrent(runtime, engine: e) || settings.smartMode != mode) return;
+        engineGroups[kProxySelector] = group;
         notifyListeners();
       } catch (_) {
+        if (!_runtimeCurrent(runtime, engine: e) || settings.smartMode != mode) return;
         _markConfigChanged();
         notifyListeners();
       }
@@ -862,17 +940,23 @@ class AppState extends ChangeNotifier {
   Future<void> setGameNode(String? nodeId) async {
     game.gameNodeId = nodeId;
     _changed();
-    if (connected && engine != null && gameGroup != null) {
+    final e = engine;
+    final runtime = _runtimeEpoch;
+    if (connected && e != null && gameGroup != null) {
       try {
+        late final GroupStatus group;
         if (nodeId == null) {
-          engineGroups[kGameSelector] = await engine!.setAuto(kGameSelector, true);
+          group = await e.setAuto(kGameSelector, true);
         } else {
           final tag = tagOf(nodeId);
           if (tag == null) throw StateError('no tag');
-          engineGroups[kGameSelector] = await engine!.select(kGameSelector, tag);
+          group = await e.select(kGameSelector, tag);
         }
+        if (!_runtimeCurrent(runtime, engine: e) || game.gameNodeId != nodeId) return;
+        engineGroups[kGameSelector] = group;
         notifyListeners();
       } catch (_) {
+        if (!_runtimeCurrent(runtime, engine: e) || game.gameNodeId != nodeId) return;
         _markConfigChanged();
         notifyListeners();
       }
@@ -880,9 +964,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> probeNow() async {
-    if (engine == null) return;
+    final e = engine;
+    final runtime = _runtimeEpoch;
+    final selection = _selectionEpoch;
+    if (e == null) return;
     try {
-      engineGroups[kProxySelector] = await engine!.probe(kProxySelector);
+      final group = await e.probe(kProxySelector);
+      if (!_runtimeCurrent(runtime, engine: e) || selection != _selectionEpoch) return;
+      engineGroups[kProxySelector] = group;
       notifyListeners();
     } catch (_) {}
   }
@@ -935,6 +1024,7 @@ class AppState extends ChangeNotifier {
   /// Applies pending config changes to the running tunnel: a hot reload on
   /// iOS, a quick stop + start elsewhere. The session timer is preserved.
   Future<void> applyNow() async {
+    if (_disposed) return;
     _applyTimer?.cancel();
     if (!needsReconnect) {
       if (applyPhase == ApplyPhase.pending) {
@@ -972,7 +1062,7 @@ class AppState extends ChangeNotifier {
         await disconnect(preserveTimer: true);
         await _waitForStatus(
             (s) => s == VpnStatus.stopped || s == VpnStatus.error, const Duration(seconds: 8));
-        if (!_applyAborted) await connect();
+        if (!_disposed && !_applyAborted) await connect();
         await _waitForStatus(
             (s) => s == VpnStatus.connected || s == VpnStatus.error || s == VpnStatus.stopped,
             const Duration(seconds: 20));
@@ -981,6 +1071,7 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       notice('notice.applyFailed', kind: NoticeKind.error, detail: _short(e));
     }
+    if (_disposed) return;
     if (!ok) scheduleDisconnect(null);
     if (ok && _applySince != null) connectedAt = _applySince;
     _applySince = null;
@@ -1024,37 +1115,52 @@ class AppState extends ChangeNotifier {
   // ============================================================ ping
 
   Future<void> pingAll() async {
-    if (pingingAll || nodes.isEmpty) return;
+    if (_disposed || pingingAll || nodes.isEmpty) return;
+    final runtime = _runtimeEpoch;
+    final c = clash;
+    final viaUrl = connected;
+    if (viaUrl && (c == null || lastBuilt == null)) return;
+    final tags = Map<String, String>.of(lastBuilt?.nodeTags ?? const {});
+    final url = settings.probeUrl;
     pingingAll = true;
     notifyListeners();
-    final viaUrl = connected && clash != null && lastBuilt != null;
     final list = List<ProxyNode>.from(nodes);
-    await runPool<ProxyNode>(list, viaUrl ? 8 : 24, (n) => _ping(n, viaUrl));
+    await runPool<ProxyNode>(list, viaUrl ? 8 : 24, (n) =>
+        _ping(n, viaUrl, runtime: runtime, client: c, tag: tags[n.id], url: url));
+    if (!_runtimeCurrent(runtime, clash: c)) return;
     pingingAll = false;
     notifyListeners();
   }
 
   Future<void> pingNode(String id) async {
     final n = nodeById(id);
-    if (n == null) return;
-    final viaUrl = connected && clash != null && lastBuilt != null;
-    await _ping(n, viaUrl);
+    if (_disposed || n == null) return;
+    final runtime = _runtimeEpoch;
+    final c = clash;
+    final viaUrl = connected;
+    if (viaUrl && (c == null || lastBuilt == null)) return;
+    await _ping(n, viaUrl, runtime: runtime, client: c, tag: tagOf(id), url: settings.probeUrl);
+    if (!_runtimeCurrent(runtime, clash: c)) return;
     notifyListeners();
   }
 
-  Future<void> _ping(ProxyNode n, bool viaUrl) async {
+  Future<void> _ping(ProxyNode n, bool viaUrl, {
+    required int runtime, required ClashApi? client, required String? tag, required String url,
+  }) async {
+    if (!_runtimeCurrent(runtime, clash: client) || pinging.contains(n.id)) return;
     pinging.add(n.id);
     _notifySoon();
     int? ms;
-    if (viaUrl) {
-      final tag = tagOf(n.id);
-      ms = tag == null
-          ? null
-          : await clash!.delay(tag, url: settings.probeUrl, timeoutMs: 5000);
-    } else {
-      ms = await tcpPing(n.server, n.port);
-    }
+    try {
+      if (viaUrl) {
+        ms = tag == null ? null : await client!.delay(tag, url: url, timeoutMs: 5000);
+      } else {
+        ms = await _tcpProbe(n.server, n.port);
+      }
+    } catch (_) {}
+    if (!_runtimeCurrent(runtime, clash: client)) return;
     pinging.remove(n.id);
+    if (!identical(nodeById(n.id), n)) return;
     latencies[n.id] = Latency(ms, viaUrl: viaUrl, at: DateTime.now());
     _notifySoon();
   }
@@ -1074,6 +1180,21 @@ class AppState extends ChangeNotifier {
       cacheDir: await store.cacheDir(),
       bundledRuleSetDir: _ruleSetDir,
     );
+  }
+
+  Future<BuiltConfig> _buildRecoveryConfig() async {
+    final endpoints = _endpoints;
+    final attempt = _connectAttempt;
+    if (_disposed || endpoints == null) throw StateError('VPN session is no longer available');
+    while (true) {
+      final selection = _selectionEpoch;
+      final built = await _build(endpoints);
+      if (_disposed || attempt != _connectAttempt || !identical(endpoints, _endpoints)) throw StateError('VPN session changed');
+      if (selection != _selectionEpoch) continue;
+      lastBuilt = built;
+      _startedForNodeId = selectedNodeId;
+      return built;
+    }
   }
 
   /// Directory holding copies of the bundled rule-sets, used by sing-box as
@@ -1123,7 +1244,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> connect() async {
-    if (busy || connected) return;
+    if (_disposed || busy || connected) return;
     if (nodes.isEmpty) {
       notice('notice.addServerFirst', kind: NoticeKind.error);
       return;
@@ -1191,12 +1312,15 @@ class AppState extends ChangeNotifier {
   }
 
   void _onVpnState(VpnState s) {
+    if (_disposed) return;
+    _vpnRevision++;
     final prev = vpnState.status;
+    final wasRecovering = vpnState.message == 'reconnecting';
     vpnState = s;
     switch (s.status) {
       case VpnStatus.connected:
         connectedAt ??= DateTime.now();
-        if (prev != VpnStatus.connected) _startRuntime();
+        if (prev != VpnStatus.connected || engine == null || clash == null) _startRuntime();
         final warning = s.message?.trim();
         if (warning != null && warning.isNotEmpty && _shownVpnWarnings.add(warning)) {
           notice('notice.vpnWarning', kind: NoticeKind.info, detail: warning);
@@ -1213,11 +1337,17 @@ class AppState extends ChangeNotifier {
         }
         _stopRuntime();
         if (s.status == VpnStatus.error && prev != VpnStatus.error &&
-            s.message != null && s.message != 'permission' && prev != VpnStatus.connecting) {
+            s.message != null && s.message != 'permission' && (prev != VpnStatus.connecting || wasRecovering)) {
           notice('notice.vpnError', kind: NoticeKind.error, detail: s.message);
         }
       case VpnStatus.connecting:
+        if (s.message == 'reconnecting') {
+          _startedForNodeId = null;
+          _stopRuntime();
+        }
+        break;
       case VpnStatus.stopping:
+        _stopRuntime();
         break;
     }
     notifyListeners();
@@ -1229,14 +1359,17 @@ class AppState extends ChangeNotifier {
   }
 
   void _startRuntime() {
+    _runtimeEpoch++;
     final ep = _endpoints ?? (_lastSecret == null ? null : RuntimeEndpoints(secret: _lastSecret!));
     if (ep == null) return;
     clash?.close();
     engine?.close();
-    clash = ClashApi(endpoint: ep.clashApi, secret: ep.secret);
-    engine = EngineApi(endpoint: ep.engineApi, secret: ep.secret);
+    clash = _clashFactory(ep);
+    engine = _engineFactory(ep);
     traffic.start(clash!);
-    latencies.removeWhere((_, l) => !l.viaUrl); // TCP pings are stale now
+    latencies.clear();
+    pinging.clear();
+    pingingAll = false;
     gameLatencyHistory.clear();
     proxyLatencyHistory.clear();
     _poll?.cancel();
@@ -1246,10 +1379,17 @@ class AppState extends ChangeNotifier {
   }
 
   void _stopRuntime() {
+    final hadRuntime = _poll != null || engine != null || clash != null;
+    _runtimeEpoch++;
     _poll?.cancel();
     _poll = null;
-    traffic.stop(reset: true);
+    // stopping and stopped can both arrive for one shutdown. Capture the
+    // final totals once, while still invalidating every old async response.
+    traffic.stop(reset: hadRuntime);
     engineGroups.clear();
+    latencies.clear();
+    pinging.clear();
+    pingingAll = false;
     clash?.close();
     engine?.close();
     clash = null;
@@ -1257,25 +1397,39 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _pollRuntime() async {
+    final runtime = _runtimeEpoch;
+    if (_pollingEpoch == runtime || _disposed) return;
+    _pollingEpoch = runtime;
     final e = engine;
-    if (e != null) {
-      try {
-        final groups = await e.status();
-        engineGroups
-          ..clear()
-          ..addEntries(groups.map((g) => MapEntry(g.selector, g)));
-        _pushHistory(proxyLatencyHistory, proxyGroup?.currentStat?.latencyMs);
-        if (gameGroup != null) {
-          _pushHistory(gameLatencyHistory, gameGroup?.currentStat?.latencyMs);
-        }
-        notifyListeners();
-      } catch (_) {}
-    }
     final c = clash;
-    if (c != null) {
-      try {
-        traffic.setTotals(await c.connections());
-      } catch (_) {}
+    final selection = _selectionEpoch;
+    try {
+      if (e != null) {
+        try {
+          final groups = await e.status();
+          if (!_runtimeCurrent(runtime, engine: e, clash: c)) return;
+          if (selection == _selectionEpoch) {
+            engineGroups
+              ..clear()
+              ..addEntries(groups.map((g) => MapEntry(g.selector, g)));
+            _pushHistory(proxyLatencyHistory, proxyGroup?.currentStat?.latencyMs);
+            if (gameGroup != null) {
+              _pushHistory(gameLatencyHistory, gameGroup?.currentStat?.latencyMs);
+            }
+            notifyListeners();
+          }
+        } catch (_) {}
+      }
+      if (!_runtimeCurrent(runtime, engine: e, clash: c)) return;
+      if (c != null) {
+        try {
+          final totals = await c.connections();
+          if (!_runtimeCurrent(runtime, engine: e, clash: c)) return;
+          traffic.setTotals(totals);
+        } catch (_) {}
+      }
+    } finally {
+      if (_pollingEpoch == runtime) _pollingEpoch = null;
     }
   }
 

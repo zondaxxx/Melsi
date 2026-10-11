@@ -8,6 +8,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart' show Icons;
 
+import '../../core/models.dart';
+import '../../services/probe_diagnostics.dart';
 import '../../services/tcp_ping.dart';
 import '../../state/app_state.dart';
 import '../../state/commands.dart';
@@ -21,9 +23,7 @@ enum StepStatus { ok, warn, fail, skipped }
 /// unknown keys unchanged, so one field serves both. [mono] marks numeric
 /// details (latency, skew, file counts) the UI sets in monospace.
 class StepResult {
-  const StepResult(this.status, [this.detail])
-      : args = const {},
-        mono = false;
+  const StepResult(this.status, [this.detail]) : args = const {}, mono = false;
 
   const StepResult.value(this.status, this.detail, this.args) : mono = true;
 
@@ -45,9 +45,10 @@ class StepResult {
 
 /// One check: [id] doubles as the l10n key of its title.
 class DiagStep {
-  const DiagStep({required this.id, required this.run});
+  const DiagStep({required this.id, required this.run, this.timeout});
   final String id;
   final Future<StepResult> Function() run;
+  final Duration? timeout;
 }
 
 /// The I/O behind every step. A null field means "the real thing"; tests
@@ -67,8 +68,10 @@ class DiagProbes {
   });
 
   /// Every step answers with a fixed result ([fallback] for the rest).
-  factory DiagProbes.canned(Map<String, StepResult> results,
-      {StepResult fallback = const StepResult(StepStatus.ok)}) {
+  factory DiagProbes.canned(
+    Map<String, StepResult> results, {
+    StepResult fallback = const StepResult(StepStatus.ok),
+  }) {
     Future<StepResult> of(String id) async => results[id] ?? fallback;
     return DiagProbes(
       internet: () => of(Diagnostics.internetId),
@@ -98,7 +101,9 @@ class DiagProbes {
 StepResult clockResult(DateTime server, DateTime now) {
   final skew = now.difference(server).inSeconds;
   return StepResult.value(
-    skew.abs() > Diagnostics.maxSkew.inSeconds ? StepStatus.fail : StepStatus.ok,
+    skew.abs() > Diagnostics.maxSkew.inSeconds
+        ? StepStatus.fail
+        : StepStatus.ok,
     'unit.sec',
     {'n': skew > 0 ? '+$skew' : '$skew'},
   );
@@ -143,10 +148,11 @@ class Diagnostics extends FeatureService {
   static const stepTimeout = Duration(seconds: 5);
   static const maxSkew = Duration(seconds: 90);
 
-  /// The in-tunnel DNS check resolves through Google's DoH JSON endpoint;
-  /// the config builder routes `dns.google` through the proxy on every
-  /// preset, so a reply proves DNS works *through the tunnel*.
+  /// Measures reachability of a DoH endpoint through the selected proxy.
+  /// It does not inspect a DNS answer or verify the device's DNS routing.
   static const dnsProbeUrl = 'https://dns.google/resolve?name=example.com';
+  static const fallbackProbeUrl = 'https://www.gstatic.com/generate_204';
+  static const secondProbeUrl = 'https://speed.cloudflare.com/__down?bytes=0';
 
   DiagProbes probes = DiagProbes();
 
@@ -164,52 +170,62 @@ class Diagnostics extends FeatureService {
 
   bool get complete => !running && results.isNotEmpty;
 
+  Object _connectionScope() => (
+        app.vpnState.status,
+        app.activeNode?.id,
+        app.proxyGroup?.current,
+        app.sessionSince,
+        app.lastBuilt,
+      );
+
   @override
   Future<void> load() async {
-    features.commands.register(AppCommand(
-      id: 'doctor.run',
-      titleKey: 'doctor.title',
-      group: 'palette.g.tools',
-      icon: Icons.troubleshoot_rounded,
-      keywords: const ['diagnostics', 'doctor', 'диагностика', 'проверка'],
-      run: showDoctorSheet,
-    ));
+    features.commands.register(
+      AppCommand(
+        id: 'doctor.run',
+        titleKey: 'doctor.title',
+        group: 'palette.g.tools',
+        icon: Icons.troubleshoot_rounded,
+        keywords: const ['diagnostics', 'doctor', 'диагностика', 'проверка'],
+        run: showDoctorSheet,
+      ),
+    );
   }
 
   List<DiagStep> steps() => [
-        DiagStep(id: internetId, run: _internet),
-        DiagStep(id: serverId, run: _server),
-        DiagStep(id: coreId, run: _core),
-        DiagStep(id: tunnelId, run: _tunnel),
-        DiagStep(id: dnsId, run: _dns),
-        DiagStep(id: leakId, run: _leak),
-        DiagStep(id: rulesetsId, run: _rulesets),
-        DiagStep(id: clockId, run: _clock),
-      ];
+    DiagStep(id: internetId, run: _internet),
+    DiagStep(id: serverId, run: _server),
+    DiagStep(id: coreId, run: _core),
+    DiagStep(id: tunnelId, run: _tunnel, timeout: const Duration(seconds: 12)),
+    DiagStep(id: dnsId, run: _dns),
+    DiagStep(id: leakId, run: _leak),
+    DiagStep(id: rulesetsId, run: _rulesets),
+    DiagStep(id: clockId, run: _clock),
+  ];
 
-  /// Runs every step in order. Stops early only when the internet check
-  /// fails (nothing after it can succeed); the untouched steps are recorded
-  /// as skipped so the report stays complete.
+  /// A failed public check must not hide local core or proxy diagnostics:
+  /// the public endpoint may itself be blocked or routed through a bad tunnel.
   Future<void> run() async {
     final gen = ++_gen;
+    final scope = _connectionScope();
     results.clear();
+    finishedAt = null;
     running = true;
     currentStep = null;
     _notify();
     final all = steps();
-    var stopped = false;
     for (final step in all) {
       if (gen != _gen) return;
-      if (stopped) {
-        results[step.id] = const StepResult(StepStatus.skipped, 'doctor.notRun');
-        continue;
-      }
       currentStep = step.id;
       _notify();
-      final r = await _guard(step.run);
+      final r = await _guard(step.run, timeout: step.timeout);
       if (gen != _gen) return;
+      if (scope != _connectionScope()) {
+        results.clear();
+        cancel();
+        return;
+      }
       results[step.id] = r;
-      if (step.id == internetId && r.isFail) stopped = true;
       _notify();
     }
     running = false;
@@ -238,9 +254,12 @@ class Diagnostics extends FeatureService {
     super.dispose();
   }
 
-  Future<StepResult> _guard(Future<StepResult> Function() f) async {
+  Future<StepResult> _guard(
+    Future<StepResult> Function() f, {
+    Duration? timeout,
+  }) async {
     try {
-      return await f().timeout(stepTimeout);
+      return await f().timeout(timeout ?? stepTimeout);
     } on TimeoutException {
       return const StepResult(StepStatus.fail, 'doctor.timeout');
     } catch (_) {
@@ -255,7 +274,9 @@ class Diagnostics extends FeatureService {
   /// A raw TCP connect to 1.1.1.1:443 (no DNS involved) plus a lookup of
   /// example.com: together they tell "no network" from "DNS is broken".
   Future<StepResult> _internetDefault() async {
-    if (!networkAllowed) return const StepResult(StepStatus.fail, 'doctor.timeout');
+    if (!networkAllowed) {
+      return const StepResult(StepStatus.fail, 'doctor.timeout');
+    }
     final ping = tcpPing('1.1.1.1', 443, timeout: const Duration(seconds: 4));
     final lookup = InternetAddress.lookup('example.com')
         .timeout(const Duration(seconds: 4))
@@ -263,7 +284,9 @@ class Diagnostics extends FeatureService {
     final ms = await ping;
     final dns = await lookup;
     if (ms != null && dns) return StepResult.ms(StepStatus.ok, ms);
-    if (ms != null) return const StepResult(StepStatus.warn, 'doctor.dnsBroken');
+    if (ms != null) {
+      return const StepResult(StepStatus.warn, 'doctor.dnsBroken');
+    }
     if (dns) return const StepResult(StepStatus.warn, 'doctor.tcpBlocked');
     return const StepResult(StepStatus.fail, 'doctor.timeout');
   }
@@ -271,25 +294,58 @@ class Diagnostics extends FeatureService {
   /// The host the tunnel actually dials first: the chain entry when the
   /// double VPN is on, otherwise the active node.
   Future<StepResult> _server() {
-    final node = (app.chain.active ? app.nodeById(app.chain.entryNodeId) : null) ?? app.activeNode;
+    final node =
+        (app.chain.active ? app.nodeById(app.chain.entryNodeId) : null) ??
+        app.activeNode;
     if (node == null || node.server.isEmpty || node.port <= 0) {
-      return Future.value(const StepResult(StepStatus.skipped, 'doctor.noServer'));
+      return Future.value(
+        const StepResult(StepStatus.skipped, 'doctor.noServer'),
+      );
+    }
+    if (const {
+      ProxyProtocol.hysteria,
+      ProxyProtocol.hysteria2,
+      ProxyProtocol.tuic,
+      ProxyProtocol.wireguard,
+      ProxyProtocol.amneziawg,
+    }.contains(node.protocol)) {
+      return Future.value(
+        const StepResult(StepStatus.skipped, 'doctor.udpServer'),
+      );
     }
     return (probes.server ?? _serverDefault)(node.server, node.port);
   }
 
   Future<StepResult> _serverDefault(String host, int port) async {
-    if (!networkAllowed) return const StepResult(StepStatus.fail, 'doctor.timeout');
+    if (!networkAllowed) {
+      return const StepResult(StepStatus.fail, 'doctor.timeout');
+    }
     final ms = await tcpPing(host, port, timeout: const Duration(seconds: 4));
-    return ms == null ? const StepResult(StepStatus.fail, 'doctor.timeout') : StepResult.ms(StepStatus.ok, ms);
+    return ms == null
+        ? const StepResult(StepStatus.fail, 'doctor.timeout')
+        : StepResult.ms(StepStatus.ok, ms);
   }
 
   Future<StepResult> _core() => (probes.core ?? _coreDefault)();
 
-  /// Desktop: the daemon reported a version at load. Mobile: the platform
-  /// side answers a state query.
+  /// A cached version proves installation only; a connected desktop must
+  /// answer a fresh authenticated health request.
   Future<StepResult> _coreDefault() async {
     if (app.isDesktopPlatform) {
+      if (app.connected) {
+        final engine = app.engine;
+        if (engine == null) {
+          return const StepResult(StepStatus.fail, 'doctor.noApi');
+        }
+        try {
+          final health = await engine.health();
+          return health.ok
+              ? const StepResult(StepStatus.ok, 'doctor.coreOk')
+              : const StepResult(StepStatus.fail, 'doctor.noApi');
+        } catch (_) {
+          return const StepResult(StepStatus.fail, 'doctor.noApi');
+        }
+      }
       final v = app.coreVersion;
       return v == null
           ? const StepResult(StepStatus.fail, 'doctor.noCore')
@@ -299,13 +355,32 @@ class Diagnostics extends FeatureService {
     return const StepResult(StepStatus.ok, 'doctor.coreOk');
   }
 
-  Future<StepResult> _tunnel() {
-    if (!app.connected) return Future.value(const StepResult(StepStatus.skipped, 'doctor.skipped'));
-    return (probes.tunnel ?? _delayDefault)(kProxySelector, app.settings.probeUrl);
+  Future<StepResult> _tunnel() async {
+    if (!app.connected) {
+      return const StepResult(StepStatus.skipped, 'doctor.skipped');
+    }
+    final gen = _gen;
+    final scope = _connectionScope();
+    final probe = probes.tunnel ?? _delayDefault;
+    final url = app.settings.probeUrl;
+    final primary = await probe(kProxySelector, url);
+    if (!primary.isFail || gen != _gen || scope != _connectionScope()) return primary;
+    final fallback = Uri.tryParse(url)?.host == Uri.parse(fallbackProbeUrl).host
+        ? secondProbeUrl
+        : fallbackProbeUrl;
+    final secondary = await probe(kProxySelector, fallback);
+    if (secondary.isOk) {
+      return const StepResult(StepStatus.warn, 'doctor.probeService');
+    }
+    return primary;
   }
 
   Future<StepResult> _dns() {
-    if (!app.connected) return Future.value(const StepResult(StepStatus.skipped, 'doctor.skipped'));
+    if (!app.connected) {
+      return Future.value(
+        const StepResult(StepStatus.skipped, 'doctor.skipped'),
+      );
+    }
     return (probes.dns ?? _delayDefault)(kProxySelector, dnsProbeUrl);
   }
 
@@ -313,24 +388,36 @@ class Diagnostics extends FeatureService {
   Future<StepResult> _delayDefault(String tag, String url) async {
     final c = app.clash;
     if (c == null) return const StepResult(StepStatus.skipped, 'doctor.noApi');
-    final ms = await c.delay(tag, url: url, timeoutMs: 4000);
-    return ms == null ? const StepResult(StepStatus.fail, 'doctor.timeout') : StepResult.ms(StepStatus.ok, ms);
+    final result = await c.probe(tag, url: url, timeoutMs: 4000);
+    if (result.delayMs case final ms?) return StepResult.ms(StepStatus.ok, ms);
+    return StepResult(
+      StepStatus.fail,
+      probeFailureKey(result.failure ?? ProbeFailure.unknown),
+    );
   }
 
   Future<StepResult> _leak() {
-    if (!app.connected) return Future.value(const StepResult(StepStatus.skipped, 'doctor.skipped'));
+    if (!app.connected) {
+      return Future.value(
+        const StepResult(StepStatus.skipped, 'doctor.skipped'),
+      );
+    }
     return (probes.leak ?? _leakDefault)();
   }
 
   Future<StepResult> _leakDefault() async {
     final n = features.netcheck;
     await n.refresh(manual: true);
-    if (n.error || n.checking) return const StepResult(StepStatus.skipped, 'doctor.skipped');
+    if (n.error || n.checking) {
+      return const StepResult(StepStatus.skipped, 'doctor.skipped');
+    }
     return leakResult(n.realIp?.ip, n.exitIp?.ip);
   }
 
   Future<StepResult> _rulesets() async {
-    if (app.isIOS) return const StepResult(StepStatus.skipped, 'doctor.skippedIos');
+    if (app.isIOS) {
+      return const StepResult(StepStatus.skipped, 'doctor.skippedIos');
+    }
     final dir = '${await app.store.cacheDir()}/rulesets';
     return (probes.rulesets ?? _rulesetsDefault)(dir);
   }
@@ -339,7 +426,9 @@ class Diagnostics extends FeatureService {
   /// them on first use, but until then presets route less than they claim.
   Future<StepResult> _rulesetsDefault(String dir) async {
     final d = Directory(dir);
-    if (!await d.exists()) return const StepResult(StepStatus.warn, 'doctor.rulesetsNone');
+    if (!await d.exists()) {
+      return const StepResult(StepStatus.warn, 'doctor.rulesetsNone');
+    }
     var n = 0;
     await for (final e in d.list()) {
       if (e is File && e.path.endsWith('.srs')) n++;
@@ -349,19 +438,26 @@ class Diagnostics extends FeatureService {
         : StepResult.value(StepStatus.ok, 'doctor.rulesetsN', {'n': '$n'});
   }
 
-  Future<StepResult> _clock() => (probes.clock ?? _clockDefault)(app.settings.probeUrl);
+  Future<StepResult> _clock() =>
+      (probes.clock ?? _clockDefault)(app.settings.probeUrl);
 
   /// HEAD to the probe URL: every HTTP response carries a `Date` header, so
   /// even a 405 gives a trustworthy server clock.
   Future<StepResult> _clockDefault(String url) async {
-    if (!networkAllowed) return const StepResult(StepStatus.warn, 'doctor.clockUnknown');
+    if (!networkAllowed) {
+      return const StepResult(StepStatus.warn, 'doctor.clockUnknown');
+    }
     final uri = Uri.tryParse(url);
-    if (uri == null || !uri.hasScheme) return const StepResult(StepStatus.warn, 'doctor.clockUnknown');
+    if (uri == null || !uri.hasScheme) {
+      return const StepResult(StepStatus.warn, 'doctor.clockUnknown');
+    }
     final client = features.httpClient();
     try {
       final r = await client.head(uri).timeout(const Duration(seconds: 4));
       final date = r.headers['date'];
-      if (date == null) return const StepResult(StepStatus.warn, 'doctor.clockUnknown');
+      if (date == null) {
+        return const StepResult(StepStatus.warn, 'doctor.clockUnknown');
+      }
       return clockResult(HttpDate.parse(date), now());
     } catch (_) {
       return const StepResult(StepStatus.warn, 'doctor.clockUnknown');

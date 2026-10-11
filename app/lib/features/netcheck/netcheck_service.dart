@@ -13,6 +13,7 @@ import 'package:http/io_client.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/models.dart';
+import '../../services/clash_api.dart';
 import '../../services/tcp_ping.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_state.dart';
@@ -64,7 +65,7 @@ class SpeedResult {
   }
 }
 
-class NetCheckService extends FeatureService {
+class NetCheckService extends FeatureService with WidgetsBindingObserver {
   NetCheckService(super.app, super.features);
 
   static const sectionName = 'netcheck';
@@ -101,6 +102,7 @@ class NetCheckService extends FeatureService {
   Timer? _connectTimer;
   bool _queued = false;
   bool _listening = false;
+  bool _observingLifecycle = false;
   bool _disposed = false;
   int _lookupGeneration = 0;
 
@@ -115,6 +117,7 @@ class NetCheckService extends FeatureService {
   bool speedFailed = false;
   SpeedTestException? speedFailure;
   SpeedPhase? failedPhase;
+  String? speedInterruptedKey;
 
   String get speedErrorKey => speedFailure == null
       ? 'speed.failed'
@@ -124,6 +127,9 @@ class NetCheckService extends FeatureService {
   };
   final Map<String, List<SpeedResult>> _speedResults = {};
   SpeedTest? _speed;
+  Completer<void>? _speedAbort;
+  ClashApi? _speedPing;
+  Object? _speedContext;
 
   bool get speedRunning =>
       phase == SpeedPhase.ping || phase == SpeedPhase.down || phase == SpeedPhase.up;
@@ -168,14 +174,14 @@ class NetCheckService extends FeatureService {
   @override
   Future<void> load() async {
     _lookupGeneration++;
+    _resetSpeed(notify: false);
+    _speedContext = _currentSpeedContext;
     _nodeSeen = app.activeNode?.id;
     _restore(app.sectionOf(sectionName));
-    if (!_listening) {
-      _listening = true;
-      app.addListener(_onApp);
-    }
+    _listen();
     _registerCommands();
     if (autoAllowed) unawaited(refresh());
+    _notify();
   }
 
   void _restore(Map<String, dynamic>? j) {
@@ -187,7 +193,8 @@ class NetCheckService extends FeatureService {
     final r = j['realIp'], e = j['exitIp'];
     realIp = r is Map ? IpInfo.fromJson(r.cast<String, dynamic>()) : null;
     exitIp = e is Map ? IpInfo.fromJson(e.cast<String, dynamic>()) : null;
-    result = SpeedResult.fromJson(j['lastSpeed']);
+    // A restored measurement belongs in per-node history, never in the
+    // current session's live result (legacy lastSpeed has no node identity).
     _speedResults.clear();
     final all = j['speedResults'];
     if (all is Map) {
@@ -244,7 +251,10 @@ class NetCheckService extends FeatureService {
   @override
   void onVpn(VpnStatus prev, VpnStatus next) {
     _lookupGeneration++;
-    if (next != VpnStatus.connected && speedRunning) cancelSpeedTest();
+    _syncSpeedContext();
+    if (prev != next && (speedRunning || result != null || speedFailed)) {
+      _resetSpeed(interrupted: speedRunning ? 'speed.interrupted.connection' : null);
+    }
     _connectTimer?.cancel();
     _connectTimer = null;
     if (next == VpnStatus.connected) {
@@ -279,6 +289,7 @@ class NetCheckService extends FeatureService {
 
   /// The engine switched nodes: the exit moved with it.
   void _onApp() {
+    _syncSpeedContext();
     if (_disposed || !app.connected) return;
     final nodeId = app.activeNode?.id;
     final nodeChanged = nodeId != _nodeSeen;
@@ -299,7 +310,6 @@ class NetCheckService extends FeatureService {
       _lookupGeneration++;
       exitIp = null;
       error = false;
-      cancelSpeedTest();
       _notify();
     }
     // The first status poll after connect reports a switch that the
@@ -321,9 +331,58 @@ class NetCheckService extends FeatureService {
   void dispose() {
     _disposed = true;
     _connectTimer?.cancel();
-    if (_listening) app.removeListener(_onApp);
-    _speed?.cancel();
+    if (_listening) {
+      app.removeListener(_onApp);
+    }
+    if (_observingLifecycle) WidgetsBinding.instance.removeObserver(this);
+    _resetSpeed(notify: false);
     super.dispose();
+  }
+
+  void _listen() {
+    if (_listening) return;
+    _listening = true;
+    app.addListener(_onApp);
+    if (_mobile) {
+      WidgetsBinding.instance.addObserver(this);
+      _observingLifecycle = true;
+    }
+  }
+
+  bool get _mobile => app.platform == PlatformKind.android || app.platform == PlatformKind.ios;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_mobile && speedRunning &&
+        (state == AppLifecycleState.paused || state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.detached)) {
+      _resetSpeed(interrupted: 'speed.interrupted.background');
+    }
+  }
+
+  // Include the built route and session, not only the displayed node: a
+  // same-node reconnect or a change of core must invalidate a running test.
+  Object get _currentSpeedContext => (
+    app.vpnState.status,
+    app.connected ? app.activeNode?.id : null,
+    app.connected
+        ? app.proxyGroup?.current ?? app.tagOf(app.activeNode?.id ?? '')
+        : null,
+    app.sessionSince,
+    app.lastBuilt,
+    app.settings.captureMode,
+    app.settings.mixedPort,
+  );
+
+  void _syncSpeedContext() {
+    if (_disposed) return;
+    final context = _currentSpeedContext;
+    final previous = _speedContext;
+    _speedContext = context;
+    if (previous != null && previous != context) {
+      _resetSpeed(interrupted: speedRunning
+          ? 'speed.interrupted.connection' : speedInterruptedKey);
+    }
   }
 
   void _notify() {
@@ -415,8 +474,33 @@ class NetCheckService extends FeatureService {
   /// [currentBps] and [samples].
   Future<void> runSpeedTest() async {
     if (speedRunning || _disposed) return;
+    _listen();
+    _speedContext = _currentSpeedContext;
+    _resetSpeed(notify: false);
+    final expectedTag = app.tagOf(app.activeNode?.id ?? '');
+    final currentTag = app.proxyGroup?.current;
+    if ((app.vpnState.status != VpnStatus.stopped && !app.connected) ||
+        (app.connected && (app.activeNode == null ||
+            (expectedTag != null && currentTag != null && expectedTag != currentTag))) ||
+        app.applying) {
+      speedFailed = true;
+      speedFailure = const SpeedTestException(SpeedFailure.notReady);
+      _notify();
+      return;
+    }
     final key = speedKey;
-    final test = _speed = SpeedTest(client: _lookupClient);
+    // Capture the route once. A later settings/session change cancels this
+    // run; upload must never switch to a direct client after VPN disconnect.
+    final localProxy = networkAllowed && app.connected && isDesktop &&
+        app.settings.captureMode == CaptureMode.systemProxy;
+    final mixedPort = app.settings.mixedPort;
+    final test = _speed = SpeedTest(
+      client: localProxy
+          ? () => IOClient(HttpClient()..findProxy = (_) => 'PROXY 127.0.0.1:$mixedPort')
+          : features.httpClient,
+      localProxy: localProxy,
+    );
+    final abort = _speedAbort = Completer<void>();
     samples.clear();
     currentBps = 0;
     result = null;
@@ -428,7 +512,10 @@ class NetCheckService extends FeatureService {
     phase = SpeedPhase.ping;
     _notify();
 
-    final ping = await _ping();
+    final ping = await Future.any<int?>([
+      _ping().catchError((Object _) => null),
+      abort.future.then((_) => null),
+    ]);
     if (_ended(test)) return;
     livePing = ping;
     phase = SpeedPhase.down;
@@ -462,16 +549,26 @@ class NetCheckService extends FeatureService {
     phase = SpeedPhase.done;
     currentBps = down;
     _speed = null;
+    _speedAbort = null;
     _persist();
     _notify();
   }
 
   void cancelSpeedTest() {
-    final t = _speed;
-    if (t == null) return;
-    t.cancel();
+    _resetSpeed();
+  }
+
+  void _resetSpeed({String? interrupted, bool notify = true}) {
+    _speed?.cancel();
+    _speedPing?.close();
+    _speedPing = null;
+    final abort = _speedAbort;
+    if (abort != null && !abort.isCompleted) abort.complete();
+    _speedAbort = null;
+    speedFailed = false;
     speedFailure = null;
     failedPhase = null;
+    speedInterruptedKey = interrupted;
     _speed = null;
     phase = SpeedPhase.idle;
     currentBps = 0;
@@ -479,16 +576,20 @@ class NetCheckService extends FeatureService {
     result = null;
     livePing = null;
     liveDown = null;
-    _notify();
+    if (notify) _notify();
   }
 
   /// True when [test] is no longer the run in progress (cancelled or the
   /// service went away).
-  bool _ended(SpeedTest test) => _disposed || test.cancelled || !identical(_speed, test);
+  bool _ended(SpeedTest test) {
+    _syncSpeedContext();
+    return _disposed || test.cancelled || !identical(_speed, test);
+  }
 
   void _fail(SpeedTest test) {
     if (!identical(_speed, test)) return;
     _speed = null;
+    _speedAbort = null;
     failedPhase = phase;
     phase = SpeedPhase.idle;
     speedFailed = true;
@@ -530,7 +631,19 @@ class NetCheckService extends FeatureService {
       final clash = app.clash;
       final tag = node == null ? null : app.tagOf(node.id);
       if (clash == null || tag == null) return null;
-      return clash.delay(tag, url: app.settings.probeUrl, timeoutMs: 5000);
+      // A separate API client makes cancelling latency work close only this
+      // test's request, never the live app's traffic/selector connection.
+      final ping = _speedPing = ClashApi(
+        endpoint: clash.endpoint, secret: clash.secret, client: features.httpClient(),
+      );
+      try {
+        return await ping.delay(tag, url: app.settings.probeUrl, timeoutMs: 5000);
+      } finally {
+        if (identical(_speedPing, ping)) {
+          _speedPing = null;
+          ping.close();
+        }
+      }
     }
     if (node == null) return null;
     return tcpPing(node.server, node.port);

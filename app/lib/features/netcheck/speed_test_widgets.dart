@@ -26,17 +26,18 @@ class SpeedTestPanel extends StatelessWidget {
     final l = context.l;
     final c = context.c;
     final t = context.t;
-    final key = net.speedKey;
     return ListenableBuilder(
       listenable: net,
       builder: (context, _) {
+        final key = net.speedKey;
         final running = net.speedRunning;
-        final latest = running
+        final partial = running || net.speedFailed;
+        final latest = partial || net.speedInterruptedKey != null
             ? null
             : (net.phase == SpeedPhase.done ? net.result : null) ??
                 net.resultsFor(key).firstOrNull;
-        final ping = running ? net.livePing : latest?.ping;
-        final down = running
+        final ping = partial ? net.livePing : latest?.ping;
+        final down = partial
             ? (net.phase == SpeedPhase.down ? net.currentBps : net.liveDown)
             : latest?.down;
         final up = running
@@ -47,6 +48,8 @@ class SpeedTestPanel extends StatelessWidget {
           caption = '${l('speed.phase.${net.phase.name}')}…';
         } else if (net.speedFailed) {
           caption = l('speed.failed');
+        } else if (net.speedInterruptedKey != null) {
+          caption = l(net.speedInterruptedKey!);
         } else if (latest != null) {
           caption = formatAgo(l, net.now().difference(latest.at));
         } else {

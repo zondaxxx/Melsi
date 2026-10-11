@@ -44,6 +44,10 @@ abstract class VpnController {
   Future<void> stop();
   Future<VpnState> currentState();
 
+  /// Desktop recovery rebuilds from the latest user choices, while retaining
+  /// the running session's API credentials. Mobile recovery is OS-owned.
+  void setRecoveryConfigProvider(Future<BuiltConfig> Function() provider) {}
+
   /// Core version string(s) for the About screen, if known.
   Future<String?> coreVersion() async => null;
 

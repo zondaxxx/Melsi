@@ -19,6 +19,28 @@ class SavedLogVpn extends FakeVpn {
   Future<String?> readLog({int maxLines = 400}) => saved.future;
 }
 
+class UpdatingLogVpn extends FakeVpn {
+  String text = '';
+  int reads = 0;
+
+  @override
+  Future<String?> readLog({int maxLines = 400}) async {
+    reads++;
+    return text;
+  }
+}
+
+class PendingLogVpn extends FakeVpn {
+  final reads = <Completer<String?>>[];
+
+  @override
+  Future<String?> readLog({int maxLines = 400}) {
+    final read = Completer<String?>();
+    reads.add(read);
+    return read.future;
+  }
+}
+
 class LiveLogApi extends ClashApi {
   LiveLogApi() : super(endpoint: '127.0.0.1:1', secret: 'test');
   final events = StreamController<ClashLogLine>();
@@ -32,6 +54,11 @@ class ProbeLogState extends AppState {
     : super(store: MemoryStateStore(), vpn: vpn, enableNetwork: false);
 
   bool get observed => hasListeners;
+
+  void replaceClash(ClashApi? api) {
+    clash = api;
+    notifyListeners();
+  }
 
   void report(List<GroupStatus> groups) {
     engineGroups
@@ -231,5 +258,86 @@ void main() {
     expect(state.observed, isFalse);
     state.report([probeGroup('After disposal')]);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('recovery replaces the live subscription and polls saved logs while stopped', (tester) async {
+    final vpn = UpdatingLogVpn();
+    final first = LiveLogApi();
+    final second = LiveLogApi();
+    final state = ProbeLogState(vpn)..clash = first;
+    addTearDown(state.dispose);
+    addTearDown(first.close);
+    addTearDown(first.events.close);
+    addTearDown(second.events.close);
+    await tester.pumpWidget(logApp(state));
+    first.events.add(ClashLogLine('info', 'Before reconnect', DateTime.now()));
+    await tester.pump();
+    vpn.text = 'WARN Tunnel stopped';
+    state.replaceClash(null);
+    await tester.pump();
+    expect(first.events.hasListener, isFalse);
+    expect(find.text('WARN Tunnel stopped'), findsOneWidget);
+    expect(find.text('Before reconnect'), findsOneWidget);
+    vpn.text = 'INFO Recovery in progress';
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('WARN Tunnel stopped'), findsNothing);
+    expect(find.text('INFO Recovery in progress'), findsOneWidget);
+    state.replaceClash(second);
+    await tester.pump();
+    first.events.add(ClashLogLine('info', 'Obsolete event', DateTime.now()));
+    second.events.add(ClashLogLine('info', 'Recovered connection', DateTime.now()));
+    await tester.pump();
+    expect(find.text('Obsolete event'), findsNothing);
+    expect(find.text('Recovered connection'), findsOneWidget);
+    final reads = vpn.reads;
+    await tester.pump(const Duration(seconds: 2));
+    expect(vpn.reads, reads, reason: 'saved-log polling stops when the new stream is bound');
+    await tester.pumpWidget(const SizedBox());
+    expect(second.events.hasListener, isFalse);
+  });
+
+  testWidgets('late saved read from the previous runtime cannot overwrite recovery', (tester) async {
+    final vpn = PendingLogVpn();
+    final first = LiveLogApi();
+    final second = LiveLogApi();
+    final state = ProbeLogState(vpn)..clash = first;
+    addTearDown(state.dispose);
+    addTearDown(first.close);
+    addTearDown(first.events.close);
+    addTearDown(second.events.close);
+    await tester.pumpWidget(logApp(state));
+    state.replaceClash(second);
+    await tester.pump();
+    expect(vpn.reads, hasLength(2));
+    second.events.add(ClashLogLine('info', 'New live session', DateTime.now()));
+    vpn.reads.last.complete('INFO Latest saved diagnostics');
+    await tester.pump();
+    vpn.reads.first.complete('ERROR Old stale file');
+    await tester.pump();
+    expect(find.text('ERROR Old stale file'), findsNothing);
+    expect(find.text('INFO Latest saved diagnostics'), findsOneWidget);
+    expect(find.text('New live session'), findsOneWidget);
+    state.replaceClash(null);
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    vpn.reads.last.complete('INFO Late read after disposal');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closed live stream falls back to saved diagnostics', (tester) async {
+    final vpn = UpdatingLogVpn();
+    final api = LiveLogApi();
+    final state = ProbeLogState(vpn)..clash = api;
+    addTearDown(state.dispose);
+    await tester.pumpWidget(logApp(state));
+    vpn.text = 'ERROR Native transport exited';
+    unawaited(api.events.close());
+    await tester.pump();
+    expect(find.text('ERROR Native transport exited'), findsOneWidget);
+    vpn.text = 'INFO Waiting for reconnect';
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('INFO Waiting for reconnect'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 }
