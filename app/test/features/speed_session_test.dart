@@ -62,9 +62,23 @@ class _Client extends http.BaseClient {
   void close() => closes++;
 }
 
-// The widget binding otherwise replaces every HTTP response with HTTP 400.
-// This test uses real sockets only to a closed loopback proxy port.
-class _LocalHttp extends HttpOverrides {}
+// Keep the real HttpClient's proxy selection, but inject the socket failure:
+// a closed loopback port does not have a portable connection-refusal deadline.
+class _MissingProxyHttp extends HttpOverrides {
+  final attempts = <(Uri, String?, int?)>[];
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) =>
+      super.createHttpClient(context)
+        ..connectionFactory = (url, proxyHost, proxyPort) async {
+          attempts.add((url, proxyHost, proxyPort));
+          throw SocketException(
+            'Connection refused',
+            address: InternetAddress.loopbackIPv4,
+            port: proxyPort,
+          );
+        };
+}
 
 Future<http.StreamedResponse> _success(
   http.BaseRequest request,
@@ -310,9 +324,8 @@ void main() {
   test(
     'missing system proxy fails without retrying through a direct client',
     () async {
-      final reserved = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      final port = reserved.port;
-      await reserved.close();
+      const port = 43128;
+      final sockets = _MissingProxyHttp();
       var clients = 0;
       final state = _State(network: true);
       state.settings.captureMode = CaptureMode.systemProxy;
@@ -329,11 +342,16 @@ void main() {
         });
       }).netcheck;
       await HttpOverrides.runWithHttpOverrides(
-        () => net.runSpeedTest().timeout(const Duration(seconds: 2)),
-        _LocalHttp(),
+        net.runSpeedTest,
+        sockets,
       );
       expect(net.speedErrorKey, 'speed.error.proxy');
       expect(net.result, isNull);
+      expect(
+        sockets.attempts,
+        [(SpeedTest.defaultDownloadUrl, '127.0.0.1', port)],
+        reason: 'HttpClient must select only the configured proxy, never DIRECT',
+      );
       expect(
         clients,
         1,
