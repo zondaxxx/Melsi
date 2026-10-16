@@ -152,6 +152,28 @@ class WorkflowSelectionTests(unittest.TestCase):
         self.assertIn("cache: false", flutter)
         self.assertIn("pub-cache: true", flutter)
 
+    def test_gradle_cache_writes_on_internal_builds_but_not_fork_prs(self):
+        gradle = self.jobs["android"].split("uses: gradle/actions/setup-gradle@v4\n")[1].split("\n      - ")[0]
+        condition = re.search(r"cache-read-only: \$\{\{ (.+) \}\}", gradle)[1]
+        condition = condition.replace("||", "or").replace("&&", "and")
+        for event, source_repo, read_only in (
+            ("pull_request", "owner/Melsi", False),
+            ("pull_request", "contributor/Melsi", True),
+            ("pull_request", "", True),
+            ("push", None, False),
+            ("workflow_dispatch", None, False),
+        ):
+            with self.subTest(event=event, source_repo=source_repo):
+                github = SimpleNamespace(event_name=event, repository="owner/Melsi")
+                # Pushes and manual builds have no pull_request payload.
+                if source_repo is not None:
+                    github.event = SimpleNamespace(pull_request=SimpleNamespace(
+                        head=SimpleNamespace(repo=SimpleNamespace(full_name=source_repo)),
+                    ))
+                self.assertEqual(read_only, eval(condition, {"__builtins__": {}}, {
+                    "github": github,
+                }))
+
 
 class DesktopBuildSettingsTests(unittest.TestCase):
     def test_optional_naive_tags_are_windows_only(self):

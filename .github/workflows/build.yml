@@ -113,6 +113,10 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Persist dependencies for repeat builds on our branches and PRs.
+          # Fork PRs can restore the base branch cache but cannot update it.
+          cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
       - uses: subosito/flutter-action@v2
         with:
