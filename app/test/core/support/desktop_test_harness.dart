@@ -127,7 +127,7 @@ class DesktopTestHarness {
       healthTimeout: healthTimeout,
       startupTimeout: startupTimeout,
       recoveryBackoff: recoveryBackoff,
-      processProbe: processProbe,
+      processProbe: processProbe ?? probe,
       apiFactory: apiFactory,
     );
     vpn.states.listen(states.add);
@@ -142,6 +142,16 @@ class DesktopTestHarness {
     nodeTags: const {},
     xray: xray ? '{}' : null,
   );
+
+  Future<bool?> probe(int pid, String executable) async {
+    final processes = switch (executable) {
+      'test-core' => cores,
+      'test-xray' => xrays,
+      _ => const <DesktopTestProcess>[],
+    };
+    return processes.any((process) =>
+        process.pid == pid && !process.exited.isCompleted);
+  }
 
   Future<Process> launch(
     String executable,

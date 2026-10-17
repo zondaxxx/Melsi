@@ -78,6 +78,12 @@ Verdict diagnose(Map<String, StepResult> results) {
   if (Diagnostics.stepIds.any((id) => !results.containsKey(id))) {
     return Verdict.partial;
   }
+  // A connected tunnel whose API could not be queried was not verified.
+  // Keep legitimate skips (disconnected, UDP, iOS rulesets) neutral.
+  if (results.values.any((r) =>
+      r.status == StepStatus.skipped && r.detail == 'doctor.noApi')) {
+    return Verdict.partial;
+  }
   if (tunnel?.detail == 'doctor.probeService') return Verdict.probeService;
   if (fail(Diagnostics.internetId) || fail(Diagnostics.serverId)) {
     return Verdict.warn;

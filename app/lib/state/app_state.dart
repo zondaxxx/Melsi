@@ -147,6 +147,8 @@ class AppState extends ChangeNotifier {
   final Set<String> pinging = {};
   bool pingingAll = false;
   final Set<String> updating = {};
+  final Map<String, Future<bool>> _subscriptionUpdates = {};
+  int _subscriptionRevision = 0;
   final Map<String, GroupStatus> engineGroups = {};
 
   /// Latency of the game selector's current node, oldest first (for the
@@ -318,6 +320,8 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _subscriptionUpdates.clear();
+    updating.clear();
     _connectAttempt++;
     _applyAborted = true;
     _runtimeEpoch++;
@@ -423,6 +427,9 @@ class AppState extends ChangeNotifier {
   void replaceFromJson(Map<String, dynamic> j) {
     final snapshot = (jsonDecode(jsonEncode(j)) as Map).cast<String, dynamic>();
     snapshot['lastSecret'] = _lastSecret;
+    _subscriptionRevision++;
+    _subscriptionUpdates.clear();
+    updating.clear();
     _fromJson(snapshot);
     _markConfigChanged();
     _changed();
@@ -685,13 +692,30 @@ class AppState extends ChangeNotifier {
     return sub;
   }
 
-  Future<bool> updateSubscription(String id, {bool userNamed = false, bool quiet = false}) async {
+  Future<bool> updateSubscription(String id, {bool userNamed = false, bool quiet = false}) {
+    if (_disposed) return Future.value(false);
     final sub = subscriptionById(id);
-    if (sub == null || sub.url == null || updating.contains(id)) return false;
+    if (sub == null || sub.url == null) return Future.value(false);
+    final active = _subscriptionUpdates[id];
+    if (active != null) return active;
+    final result = Completer<bool>();
+    _subscriptionUpdates[id] = result.future;
     updating.add(id);
     notifyListeners();
+    unawaited(_refreshSubscription(sub, result.future, userNamed: userNamed, quiet: quiet)
+        .then(result.complete, onError: result.completeError));
+    return result.future;
+  }
+
+  Future<bool> _refreshSubscription(Subscription sub, Future<bool> request,
+      {required bool userNamed, required bool quiet}) async {
+    final id = sub.id;
+    bool current() => !_disposed && identical(_subscriptionUpdates[id], request) &&
+        identical(subscriptionById(id), sub);
     try {
+      if (!current()) return false;
       final r = await fetcher.fetch(sub.url!, userAgent: sub.userAgent, subscriptionId: id);
+      if (!current()) return false;
       if (r.nodes.isEmpty) throw const FormatException('empty');
       _prepareNodes(r.nodes);
       final wasSelected = nodeById(selectedNodeId)?.subscriptionId == id;
@@ -723,22 +747,35 @@ class AppState extends ChangeNotifier {
       }
       return true;
     } catch (e) {
-      if (!quiet) {
+      if (current() && !quiet) {
         notice('notice.subFailed',
             kind: NoticeKind.error, args: {'name': sub.name}, detail: _short(e));
       }
       return false;
     } finally {
-      updating.remove(id);
-      _changed();
+      // An older request must not clear a replacement subscription's spinner.
+      if (!_disposed && identical(_subscriptionUpdates[id], request)) {
+        _subscriptionUpdates.remove(id);
+        updating.remove(id);
+        _changed();
+      }
     }
   }
 
   Future<void> updateAllSubscriptions() async {
-    await Future.wait(subscriptions
-        .where((s) => s.url != null)
+    if (_disposed) return;
+    final revision = _subscriptionRevision;
+    final requested = subscriptions.where((s) => s.url != null).toList();
+    final results = await Future.wait(requested
         .map((s) => updateSubscription(s.id, quiet: true)));
-    notice('notice.allUpdated', kind: NoticeKind.success);
+    if (_disposed || revision != _subscriptionRevision || results.isEmpty) return;
+    final failed = results.where((ok) => !ok).length;
+    if (failed == 0) {
+      notice('notice.allUpdated', kind: NoticeKind.success);
+    } else {
+      notice('notice.subsUpdateFailed', kind: NoticeKind.error,
+          args: {'ok': '${results.length - failed}', 'total': '${results.length}'});
+    }
   }
 
   /// Auto-update subscriptions whose interval has elapsed.
@@ -747,11 +784,14 @@ class AppState extends ChangeNotifier {
     final due = subscriptions.where((s) =>
         s.url != null &&
         (s.updatedAt == null ||
-            now.difference(s.updatedAt!) >= Duration(hours: max(1, s.updateIntervalHours))));
+            now.difference(s.updatedAt!) >= Duration(hours: max(1, s.updateIntervalHours)))).toList();
     await Future.wait(due.map((s) => updateSubscription(s.id, quiet: true)));
   }
 
   void removeSubscription(String id) {
+    _subscriptionRevision++;
+    _subscriptionUpdates.remove(id);
+    updating.remove(id);
     subscriptions.removeWhere((s) => s.id == id);
     nodes.removeWhere((n) => n.subscriptionId == id);
     if (nodeById(selectedNodeId) == null) selectedNodeId = nodes.firstOrNull?.id;

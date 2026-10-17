@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/app_version.dart';
 import '../../core/models.dart';
 import '../../l10n/l10n.dart';
 import '../../services/vpn_controller.dart';
@@ -22,7 +23,7 @@ import 'servers_screen.dart' show promptText;
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  static const appVersion = String.fromEnvironment('MELSI_VERSION', defaultValue: '1.1.0');
+  static const appVersion = kAppVersion;
 
   @override
   Widget build(BuildContext context) {
@@ -367,8 +368,11 @@ class SettingsScreen extends StatelessWidget {
               // A missing core is a fault, not a value: the same small red
               // status text the latency column uses for "Нет ответа".
               trailing: app.coreVersion == null && app.isDesktopPlatform
-                  ? Text(l('settings.coreMissing'),
-                      style: t.caption.copyWith(fontSize: 13, color: c.danger))
+                  ? ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 170),
+                      child: Text(l('settings.coreMissing'),
+                          style: t.caption.copyWith(fontSize: 13, color: c.danger)),
+                    )
                   : value(app.coreVersion ?? 'sing-box 1.14', mono: true),
             ),
             ...SettingsSlots.aboutRows(context, app),

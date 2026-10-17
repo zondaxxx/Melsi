@@ -184,7 +184,7 @@ jobs:
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/android/app/release.jks
           {
-            echo "storeFile=release.jks"
+            echo "storeFile=app/release.jks"
             echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
             echo "keyAlias=$ANDROID_KEY_ALIAS"
             echo "keyPassword=$ANDROID_KEY_PASSWORD"
@@ -217,6 +217,10 @@ jobs:
           flutter build apk --release $MELSI_BUILD_ARGS
           cp build/app/outputs/flutter-apk/app-release.apk \
              "../dist/Melsi-$MELSI_VERSION-android-universal.apk"
+
+      - name: Android lifecycle regression tests
+        working-directory: app/android
+        run: ./gradlew :app:testDebugUnitTest
 
       - name: Remove signing material
         if: always()

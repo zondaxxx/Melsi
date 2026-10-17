@@ -13,6 +13,7 @@ import android.net.VpnService
 import android.os.Build
 import app.melsi.vpn.LibboxRuntime
 import app.melsi.vpn.MelsiVpnService
+import app.melsi.vpn.PendingVpnStart
 import app.melsi.vpn.VpnProfileStore
 import app.melsi.vpn.VpnState
 import io.flutter.embedding.android.FlutterActivity
@@ -45,6 +46,7 @@ class MainActivity : FlutterActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var pendingPrepare: MethodChannel.Result? = null
     private var eventsJob: Job? = null
+    private val pendingStart = PendingVpnStart()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -66,6 +68,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pendingStart.invalidate()
         scope.cancel()
         super.onDestroy()
     }
@@ -75,6 +78,7 @@ class MainActivity : FlutterActivity() {
             "prepare" -> prepare(result)
             "start" -> start(call, result)
             "stop" -> {
+                pendingStart.invalidate()
                 MelsiVpnService.stop(this)
                 result.success(null)
             }
@@ -165,14 +169,20 @@ class MainActivity : FlutterActivity() {
             result.error("start", "VPN permission not granted (call prepare first)", null)
             return
         }
+        val serviceRequest = MelsiVpnService.prepareStart()
         scope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    VpnProfileStore.save(this@MainActivity, VpnProfileStore.Profile(config, engine, name))
-                }
-                MelsiVpnService.start(this@MainActivity)
+                pendingStart.start(
+                    persist = {
+                        withContext(Dispatchers.IO) {
+                            VpnProfileStore.save(this@MainActivity, VpnProfileStore.Profile(config, engine, name))
+                        }
+                    },
+                    connect = { MelsiVpnService.start(this@MainActivity, serviceRequest) },
+                )
                 result.success(null)
             } catch (e: Exception) {
+                MelsiVpnService.cancelStart(serviceRequest)
                 result.error("start", e.message, null)
             }
         }

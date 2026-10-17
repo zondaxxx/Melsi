@@ -202,6 +202,11 @@ class ConfigBuilder {
 
 ### Feature lifecycle and persistence
 
+- Subscription refreshes share an in-flight request for the same subscription.
+  Removal, backup replacement and disposal invalidate old responses; old tasks
+  cannot write servers back or clear a newer request's progress. Bulk refresh
+  reports partial failures instead of unconditional success. Invalid optional
+  usage/expiry headers do not invalidate a parseable server list.
 - `Features` owns feature services, the command registry and injected HTTP,
   clock and clipboard dependencies. `init()` loads services once and hooks VPN
   status / resume events; `dispose()` removes hooks and releases resources.
@@ -231,7 +236,8 @@ class ConfigBuilder {
 - Network diagnostics preserve safe URL-probe error categories. A failed
   primary probe is checked against a second HTTPS endpoint through the same
   `proxy` selector, never direct. Diagnostic reports stop and discard partial
-  results if their connection scope changes. Raw server messages stay in Logs;
+  or completed results if their connection/configuration scope changes. Missing
+  tunnel API checks produce a partial verdict, not a healthy one. Raw server messages stay in Logs;
   the copyable doctor report contains categorical setup/error information.
   sing-box may return only a generic delay-test failure; it remains unknown,
   rather than being presented as a confirmed DNS/TLS fault.
@@ -338,6 +344,13 @@ EventChannel `app.melsi/vpn/events` emits maps
 
 Native side lifecycle: start libbox `CommandServer` + `StartOrReloadService(config)`,
 then `Melsicore.startEngine(engineJson)`; on stop call `Melsicore.stopEngine()` first.
+Android serializes profile writes before launching the service. A stop, newer
+start or Activity destruction invalidates the pending launch; it is checked
+again after IO returns. Profile save/load uses the same lock so the service
+does not observe files from different in-progress writes.
+The same process-wide request token covers profile IO, queued service intents
+and native startup. Stop/revoke cancels pending starts even before service
+creation; an obsolete callback or teardown cannot revive or stop a newer start.
 On iOS device sleep, pause both libbox and the engine; wake resumes both.
 Engine pause cancels probe work without marking nodes dead or stopping the
 tunnel. The mobile bridge preserves this pause across a service reload.

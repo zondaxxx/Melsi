@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:melsi/core/models.dart';
@@ -281,6 +282,7 @@ void main() {
         supportDir: () async => h.directory,
         coreLocator: () => 'test-core',
         startProcess: h.launch,
+        processProbe: h.probe,
         healthInterval: const Duration(milliseconds: 10),
         healthTimeout: const Duration(milliseconds: 100),
         recoveryBackoff: const [Duration(milliseconds: 10)],
@@ -409,7 +411,110 @@ void main() {
     },
   );
 
+  for (final engineFile in ['missing', 'invalid']) {
+    test('cold reconnect verifies the old PID with $engineFile settings', () async {
+      final h = await harness();
+      final config = h.config();
+      await h.vpn.start(config, name: 'original');
+      h.vpn.dispose();
+      final file = File('${h.directory.path}/engine.json');
+      if (engineFile == 'missing') {
+        await file.delete();
+      } else {
+        await file.writeAsString('{');
+      }
+      h.vpn = DesktopVpnController(
+        supportDir: () async => h.directory,
+        coreLocator: () => 'test-core',
+        startProcess: h.launch,
+        processProbe: (pid, executable) async => true,
+      );
+      await expectLater(
+        h.vpn.start(config, name: 'reconnect'),
+        throwsA(isA<DesktopVpnException>().having(
+          (error) => error.message,
+          'message',
+          contains('shutdown cannot be confirmed'),
+        )),
+      );
+      expect(h.cores, hasLength(1));
+      expect(h.cores.single.signals, isEmpty);
+      expect(h.alive, isTrue);
+    });
+  }
+
+  for (final alive in [true, false]) {
+    test('cold reconnect safely replaces an ${alive ? 'alive' : 'exited'} core', () async {
+      final h = await harness();
+      final config = h.config();
+      await h.vpn.start(config, name: 'original');
+      h.vpn.dispose();
+      if (!alive) {
+        h.cores.single.finish(17);
+        await until(() => !h.alive);
+      }
+      h.vpn = DesktopVpnController(
+        supportDir: () async => h.directory,
+        coreLocator: () => 'test-core',
+        startProcess: h.launch,
+        processProbe: (pid, executable) async => false,
+      );
+      await h.vpn.start(config, name: 'reconnect');
+      expect((await h.vpn.currentState()).status, VpnStatus.connected);
+      expect(h.cores, hasLength(2));
+      expect(h.cores.first.signals, isEmpty);
+      expect(h.cores.first.exited.isCompleted, isTrue);
+      expect(h.cores.last.exited.isCompleted, isFalse);
+      expect(h.stops, alive ? 1 : 0);
+    });
+  }
+
   for (final identity in <bool?>[true, null]) {
+    test(
+      'cold reconnect with unreachable core identity $identity preserves its session',
+      () async {
+        final h = await harness();
+        final config = h.config(xray: true);
+        await h.vpn.start(config, name: 'original');
+        h.vpn.dispose();
+        h.alive = false;
+        var probes = 0;
+        h.vpn = DesktopVpnController(
+          supportDir: () async => h.directory,
+          coreLocator: () => 'test-core',
+          xrayLocator: () => 'test-xray',
+          startProcess: h.launch,
+          processProbe: (pid, executable) async {
+            if (executable == 'test-xray') return false;
+            probes++;
+            expect(pid, h.cores.first.pid);
+            expect(executable, 'test-core');
+            return identity;
+          },
+        );
+        expect((await h.vpn.currentState()).status, VpnStatus.stopped);
+        for (var attempt = 0; attempt < 2; attempt++) {
+          await expectLater(
+            h.vpn.start(config, name: 'reconnect'),
+            throwsA(isA<DesktopVpnException>().having(
+              (error) => error.message,
+              'message',
+              contains('shutdown cannot be confirmed'),
+            )),
+          );
+          expect(h.cores, hasLength(1));
+          expect(h.xrays, hasLength(1));
+          expect(h.xrays.single.signals, isEmpty);
+          expect(h.cores.single.signals, isEmpty);
+        }
+        expect(probes, greaterThanOrEqualTo(2));
+        expect(
+          await File('${h.directory.path}/config.json').readAsString(),
+          config.singBox,
+        );
+      },
+    );
+
     test(
       'unresponsive attached core with identity $identity cannot be bypassed by retry',
       () async {

@@ -164,9 +164,14 @@ class Diagnostics extends FeatureService {
   /// When the last full run finished (null until one has).
   DateTime? finishedAt;
 
+  /// The previous report described a different server, session or setup.
+  bool connectionChanged = false;
+
   /// Cancelled or restarted runs bump this so their late results are dropped.
   int _gen = 0;
   bool _disposed = false;
+  bool _listening = false;
+  Object? _reportScope;
 
   bool get complete => !running && results.isNotEmpty;
 
@@ -176,7 +181,37 @@ class Diagnostics extends FeatureService {
         app.proxyGroup?.current,
         app.sessionSince,
         app.lastBuilt,
+        app.settings.core,
+        app.settings.captureMode,
+        app.settings.tunStack,
+        app.settings.antiDpi,
+        app.settings.killSwitch,
+        app.settings.autoSelect,
+        app.settings.probeUrl,
+        app.routing.preset,
+        app.chain.active,
+        app.chain.entryNodeId,
       );
+
+  void _listen() {
+    if (_listening) return;
+    _listening = true;
+    app.addListener(_onApp);
+  }
+
+  void _onApp() {
+    if (_disposed || _reportScope == null || _reportScope == _connectionScope()) return;
+    // A completed report is just as stale as an in-flight result. Clear it
+    // before the UI can copy old evidence with the new setup's metadata.
+    _gen++;
+    _reportScope = null;
+    results.clear();
+    running = false;
+    currentStep = null;
+    finishedAt = null;
+    connectionChanged = true;
+    _notify();
+  }
 
   @override
   Future<void> load() async {
@@ -206,10 +241,13 @@ class Diagnostics extends FeatureService {
   /// A failed public check must not hide local core or proxy diagnostics:
   /// the public endpoint may itself be blocked or routed through a bad tunnel.
   Future<void> run() async {
+    if (_disposed) return;
+    _listen();
     final gen = ++_gen;
-    final scope = _connectionScope();
+    final scope = _reportScope = _connectionScope();
     results.clear();
     finishedAt = null;
+    connectionChanged = false;
     running = true;
     currentStep = null;
     _notify();
@@ -218,16 +256,17 @@ class Diagnostics extends FeatureService {
       if (gen != _gen) return;
       currentStep = step.id;
       _notify();
+      if (gen != _gen) return;
       final r = await _guard(step.run, timeout: step.timeout);
       if (gen != _gen) return;
       if (scope != _connectionScope()) {
-        results.clear();
-        cancel();
+        _onApp();
         return;
       }
       results[step.id] = r;
       _notify();
     }
+    if (gen != _gen) return;
     running = false;
     currentStep = null;
     finishedAt = now();
@@ -251,6 +290,7 @@ class Diagnostics extends FeatureService {
   void dispose() {
     _gen++;
     _disposed = true;
+    if (_listening) app.removeListener(_onApp);
     super.dispose();
   }
 

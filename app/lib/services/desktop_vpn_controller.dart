@@ -248,7 +248,11 @@ class DesktopVpnController extends VpnController {
 
     // Stop a daemon left over from a previous session (it holds the ports).
     // A previously unreachable attached daemon may have regained its API.
-    if (_unconfirmedCorePid != null) await _stopStale();
+    if (_unconfirmedCorePid != null || (_api == null && _coreProcess == null)) {
+      // A reopened UI may not have attached before Connect is pressed. Verify
+      // the old owner before touching its Xray companion or configuration.
+      await _stopStale();
+    }
     await _stopSession();
     await _stopStale();
     await _waitForCleanup(generation);
@@ -848,27 +852,38 @@ class DesktopVpnController extends VpnController {
   }
 
   Future<void> _stopStale() async {
+    final pid = await _corePid();
+    var stopAccepted = false;
+    EngineApi? api;
     try {
       final f = File(await _path('engine.json'));
-      if (!await f.exists()) return;
-      final j = (jsonDecode(await f.readAsString()) as Map).cast<String, dynamic>();
-      final api = _apiFactory(
+      if (await f.exists()) {
+        final j = (jsonDecode(await f.readAsString()) as Map)
+            .cast<String, dynamic>();
+        api = _apiFactory(
           j['control_listen'] as String? ?? '127.0.0.1:9791',
-          j['secret'] as String? ?? '');
-      try {
+          j['secret'] as String? ?? '',
+        );
         await api.health(timeout: const Duration(milliseconds: 500));
-        final pid = await _corePid();
         await api.stop();
-        if (pid != null) {
-          _pendingCleanupPid = pid;
-        } else {
-          await Future<void>.delayed(const Duration(milliseconds: 800));
-        }
-      } catch (_) {
-      } finally {
-        api.close();
+        stopAccepted = true;
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      api?.close();
+    }
+    if (stopAccepted) {
+      if (pid != null) {
+        _pendingCleanupPid = pid;
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+      }
+    } else if (pid != null) {
+      // An unreachable API (or unreadable settings) does not prove the old
+      // daemon is gone. Reuse the same guard as recovery of an attached core.
+      _unconfirmedCorePid = pid;
+      await _checkAttachedCoreStopped();
+    }
   }
 
   // ------------------------------------------------------------ state

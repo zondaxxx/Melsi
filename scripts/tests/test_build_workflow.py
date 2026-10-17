@@ -152,6 +152,16 @@ class WorkflowSelectionTests(unittest.TestCase):
         self.assertIn("cache: false", flutter)
         self.assertIn("pub-cache: true", flutter)
 
+    def test_android_signing_path_resolves_to_the_decoded_keystore(self):
+        android = self.jobs["android"]
+        destination = re.search(r"base64 --decode > (\S+)", android)[1]
+        property_value = re.search(r'echo "storeFile=([^\"]+)"', android)[1]
+        # The Gradle app resolves key.properties paths against its root project.
+        self.assertEqual(
+            (ROOT / destination).resolve(),
+            (ROOT / "app/android" / property_value).resolve(),
+        )
+
     def test_gradle_cache_writes_on_internal_builds_but_not_fork_prs(self):
         gradle = self.jobs["android"].split("uses: gradle/actions/setup-gradle@v4\n")[1].split("\n      - ")[0]
         condition = re.search(r"cache-read-only: \$\{\{ (.+) \}\}", gradle)[1]

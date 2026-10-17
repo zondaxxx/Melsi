@@ -330,6 +330,7 @@ const _ru = <String, String>{
   // notices
   'notice.addServerFirst': 'Сначала добавьте сервер',
   'notice.allUpdated': 'Подписки обновлены',
+  'notice.subsUpdateFailed': 'Обновлено подписок: {ok} из {total}. Остальные не удалось обновить',
   'notice.autoOffManual': 'Умный выбор выключен — вы выбрали сервер вручную',
   'notice.clipboardEmpty': 'Буфер обмена пуст',
   'notice.connectFailed': 'Не удалось подключиться',
@@ -645,6 +646,7 @@ const _en = <String, String>{
 
   'notice.addServerFirst': 'Add a server first',
   'notice.allUpdated': 'Subscriptions updated',
+  'notice.subsUpdateFailed': 'Updated {ok} of {total} subscriptions. The others could not be refreshed',
   'notice.autoOffManual': 'Smart select turned off — you picked a server manually',
   'notice.clipboardEmpty': 'Clipboard is empty',
   'notice.connectFailed': 'Could not connect',

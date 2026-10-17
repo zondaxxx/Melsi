@@ -65,6 +65,7 @@ const StringTable kDoctorStrings = StringTable(
     // verdict
     'doctor.verdict': 'Диагноз',
     'doctor.running': 'Проверяем…',
+    'doctor.connectionChanged': 'Подключение изменилось. Повторите проверку.',
     'doctor.v.offline': 'Сетевые проверки не отвечают: проверьте подключение к интернету и туннель',
     'doctor.v.port':
         'Порт сервера не отвечает: попробуйте другой сервер или анти-DPI',
@@ -140,6 +141,7 @@ const StringTable kDoctorStrings = StringTable(
 
     'doctor.verdict': 'Verdict',
     'doctor.running': 'Checking…',
+    'doctor.connectionChanged': 'The connection changed. Run the checks again.',
     'doctor.v.offline': 'Network checks did not respond: check the internet connection and tunnel',
     'doctor.v.port':
         'The server port does not answer: try another server or anti-DPI',
