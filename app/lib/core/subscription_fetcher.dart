@@ -5,11 +5,12 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'app_version.dart';
 import 'link_parser.dart';
 import 'models.dart';
 
 /// App version reported in the default User-Agent.
-const String kMelsiVersion = '1.0.0';
+const String kMelsiVersion = kAppVersion;
 
 /// Default subscription User-Agent. Mentions clash/mihomo so panels
 /// (Marzban, Remnawave, 3x-ui, ...) return a full-featured format.
@@ -104,8 +105,13 @@ class SubscriptionFetcher {
         final kv = part.split('=');
         if (kv.length != 2) continue;
         final k = kv[0].trim().toLowerCase();
-        final v = num.tryParse(kv[1].trim())?.toInt();
-        if (v == null) continue;
+        final number = num.tryParse(kv[1].trim());
+        // Malformed optional provider metadata must not discard valid servers.
+        if (number == null || !number.isFinite || number < 0 ||
+            number >= 9223372036854775807) {
+          continue;
+        }
+        final v = number.toInt();
         switch (k) {
           case 'upload':
             up = v;
@@ -114,7 +120,7 @@ class SubscriptionFetcher {
           case 'total':
             total = v;
           case 'expire':
-            if (v > 0) {
+            if (v > 0 && v <= 8640000000000) {
               expire = DateTime.fromMillisecondsSinceEpoch(v * 1000, isUtc: true);
             }
         }

@@ -1,7 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:melsi/services/engine_api.dart';
+import 'package:melsi/services/vpn_controller.dart';
 import 'package:melsi/features/doctor/verdict.dart';
 import 'package:melsi/l10n/l10n.dart';
 import 'package:melsi/state/app_state.dart';
@@ -49,15 +54,28 @@ Finder _key(String k) => find.byKey(ValueKey(k), skipOffstage: false);
 
 void main() {
   group('diagnose', () {
-    test('internet down → offline, whatever else failed', () {
-      expect(diagnose(_all({Diagnostics.internetId: _fail, Diagnostics.serverId: _fail})),
-          Verdict.offline);
+    test('failed public checks cannot override a working tunnel', () {
+      expect(diagnose(_all({Diagnostics.internetId: _fail, Diagnostics.serverId: _fail})), Verdict.warn);
+      expect(diagnose(_all({Diagnostics.internetId: _fail, Diagnostics.serverId: _fail, Diagnostics.tunnelId: _fail})), Verdict.offline);
+      expect(diagnose(_all({Diagnostics.internetId: _fail, Diagnostics.coreId: _fail})), Verdict.core);
     });
 
     test('server port silent with internet up → port, with both fixes', () {
-      final v = diagnose(_all({Diagnostics.serverId: _fail}));
+      final v = diagnose(_all({Diagnostics.serverId: _fail, Diagnostics.tunnelId: _skipped}));
       expect(v, Verdict.port);
       expect(v.fixes, [DoctorFix.antiDpi, DoctorFix.switchServer]);
+    });
+
+    test('specific tunnel errors take precedence over generic port failures', () {
+      for (final issue in ['dns', 'tls', 'authentication', 'route', 'core']) {
+        final verdict = diagnose(_all({
+          Diagnostics.internetId: _fail,
+          Diagnostics.serverId: _fail,
+          Diagnostics.tunnelId: StepResult(StepStatus.fail, 'doctor.probe.$issue'),
+        }));
+        expect(verdict.key, 'doctor.probe.$issue');
+        expect(verdict.fixes, isEmpty);
+      }
     });
 
     test('core missing → core', () {
@@ -96,6 +114,13 @@ void main() {
       expect(diagnose({Diagnostics.internetId: _ok}), Verdict.partial);
       expect(Verdict.ok.healthy, isTrue);
       expect(Verdict.port.healthy, isFalse);
+    });
+
+    test('unavailable tunnel API cannot produce a healthy verdict', () {
+      expect(diagnose(_all({
+        Diagnostics.tunnelId: const StepResult(StepStatus.skipped, 'doctor.noApi'),
+        Diagnostics.dnsId: const StepResult(StepStatus.skipped, 'doctor.noApi'),
+      })), Verdict.partial);
     });
   });
 
@@ -168,7 +193,7 @@ void main() {
       expect(diagnose(doc.results), Verdict.ok);
     });
 
-    test('internet failure stops the run; the rest is recorded as not run', () async {
+    test('internet failure still checks the server and local core', () async {
       await state.importText(kSampleVless);
       var serverCalls = 0;
       doc.probes = DiagProbes.canned({Diagnostics.internetId: _fail})
@@ -177,10 +202,11 @@ void main() {
           return _ok;
         };
       await doc.run();
-      expect(serverCalls, 0);
+      expect(serverCalls, 1);
       expect(doc.results.length, Diagnostics.stepIds.length);
-      expect(doc.results[Diagnostics.clockId]!.detail, 'doctor.notRun');
-      expect(diagnose(doc.results), Verdict.offline);
+      expect(doc.results[Diagnostics.coreId]!.isOk, isTrue);
+      expect(doc.results[Diagnostics.clockId]!.isOk, isTrue);
+      expect(diagnose(doc.results), Verdict.warn);
     });
 
     test('the server probe gets the chain entry host when the double VPN is on', () async {
@@ -236,6 +262,137 @@ void main() {
       expect(diagnose(doc.results), Verdict.partial);
     });
 
+    test('a fallback site distinguishes probe endpoint failure from tunnel failure', () async {
+      await state.importText(kSampleVless);
+      state.vpnState = const VpnState(VpnStatus.connected);
+      final urls = <String>[];
+      doc.probes = DiagProbes.canned({})
+        ..tunnel = (tag, url) async {
+          expect(tag, kProxySelector);
+          urls.add(url);
+          return urls.length == 1 ? _fail : StepResult.ms(StepStatus.ok, 42);
+        };
+      await doc.run();
+      expect(urls, [state.settings.probeUrl, Diagnostics.secondProbeUrl]);
+      expect(doc.results[Diagnostics.tunnelId]!.detail, 'doctor.probeService');
+      expect(diagnose(doc.results), Verdict.probeService);
+    });
+
+    test(
+      'cancelling primary probe does not start another network request',
+      () async {
+        await state.importText(kSampleVless);
+        state.vpnState = const VpnState(VpnStatus.connected);
+        final gate = Completer<StepResult>();
+        var calls = 0;
+        doc.probes = DiagProbes.canned({})
+          ..tunnel = (_, _) {
+            calls++;
+            return gate.future;
+          };
+        final run = doc.run();
+        while (doc.currentStep != Diagnostics.tunnelId) {
+          await Future<void>.delayed(Duration.zero);
+        }
+        doc.cancel();
+        gate.complete(_fail);
+        await run;
+        expect(calls, 1);
+        expect(doc.results.containsKey(Diagnostics.tunnelId), isFalse);
+      },
+    );
+
+    test('UDP server is not declared dead by a TCP port check', () async {
+      await state.importText(
+        'hysteria2://password@example.com:443?insecure=0#UDP',
+      );
+      var calls = 0;
+      doc.probes = DiagProbes.canned({})
+        ..server = (_, _) async {
+          calls++;
+          return _fail;
+        };
+      await doc.run();
+      expect(calls, 0);
+      expect(doc.results[Diagnostics.serverId]!.detail, 'doctor.udpServer');
+    });
+
+    test('cached core version cannot hide a stopped daemon', () async {
+      state.vpnState = const VpnState(VpnStatus.connected);
+      state.coreVersion = 'cached-version';
+      state.engine = EngineApi(
+        endpoint: '127.0.0.1:9791',
+        secret: 'test',
+        client: MockClient((_) async => http.Response('unavailable', 503)),
+      );
+      doc.probes = DiagProbes.canned({})..core = null;
+      await doc.run();
+      expect(doc.results[Diagnostics.coreId]!.isFail, isTrue);
+      expect(diagnose(doc.results), Verdict.core);
+    });
+
+    test('connection changes discard an unfinished report', () async {
+      await state.importText(kSampleVless);
+      final gate = Completer<StepResult>();
+      doc.probes = DiagProbes.canned({})..server = (_, _) => gate.future;
+      final run = doc.run();
+      while (doc.currentStep != Diagnostics.serverId) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      state.vpnState = const VpnState(VpnStatus.connecting, 'reconnecting');
+      gate.complete(_ok);
+      await run;
+      expect(doc.running, isFalse);
+      expect(doc.results, isEmpty);
+      expect(doc.finishedAt, isNull);
+    });
+
+    test('completed report is invalidated immediately after changing server', () async {
+      await state.importText(kSampleVless);
+      await state.importText(kSampleVless.replaceAll('nl1.example.com', 'de1.example.com'));
+      doc.probes = DiagProbes.canned({});
+      await doc.run();
+      expect(doc.complete, isTrue);
+      await state.selectNode(state.nodes.last.id);
+      expect(doc.results, isEmpty);
+      expect(doc.finishedAt, isNull);
+      expect(doc.complete, isFalse);
+      expect(doc.connectionChanged, isTrue);
+      await doc.run();
+      expect(doc.complete, isTrue);
+      expect(doc.connectionChanged, isFalse);
+    });
+
+    test('unrelated notifications retain a report but reconnect invalidates it', () async {
+      await state.importText(kSampleVless);
+      doc.probes = DiagProbes.canned({});
+      await doc.run();
+      state.notifyListeners();
+      expect(doc.complete, isTrue);
+      state.vpnState = const VpnState(VpnStatus.connecting, 'reconnecting');
+      state.notifyListeners();
+      expect(doc.results, isEmpty);
+      expect(doc.connectionChanged, isTrue);
+    });
+
+    test('changing connection cancels a pending check before its timeout', () async {
+      await state.importText(kSampleVless);
+      final gate = Completer<StepResult>();
+      doc.probes = DiagProbes.canned({})..server = (_, _) => gate.future;
+      final run = doc.run();
+      while (doc.currentStep != Diagnostics.serverId) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      state.vpnState = const VpnState(VpnStatus.connecting);
+      state.notifyListeners();
+      expect(doc.running, isFalse);
+      expect(doc.results, isEmpty);
+      expect(doc.connectionChanged, isTrue);
+      gate.complete(_ok);
+      await run;
+      expect(doc.results, isEmpty);
+    });
+
     test('registers the palette command on load', () async {
       await doc.load();
       final cmd = features.commands.byId('doctor.run');
@@ -249,7 +406,7 @@ void main() {
       final state = testState();
       await state.load();
       await state.importText(kSampleVless);
-      final results = _all({Diagnostics.serverId: _fail, Diagnostics.internetId: StepResult.ms(StepStatus.ok, 23)});
+      final results = _all({Diagnostics.serverId: _fail, Diagnostics.tunnelId: _skipped, Diagnostics.internetId: StepResult.ms(StepStatus.ok, 23)});
       final text = doctorReport(
         l: const L10n('ru'),
         app: state,
@@ -285,18 +442,19 @@ void main() {
       expect(_text('пропущено: не подключено'), findsNWidgets(3));
       expect(state.settings.antiDpi, isFalse);
 
-      await _reveal(tester, _text('Включить анти-DPI'));
-      await tester.tap(_text('Включить анти-DPI'));
-      await settle(tester);
-      expect(state.settings.antiDpi, isTrue);
-      // Applied fixes are not offered twice.
-      expect(_text('Включить анти-DPI'), findsNothing);
-      expect(_text('Сменить сервер'), findsOneWidget);
-
       await _reveal(tester, _key('doctor-copy'));
       await tester.tap(_key('doctor-copy'));
       await settle(tester);
       expect(find.text('Скопировано'), findsOneWidget);
+
+      await _reveal(tester, _text('Включить анти-DPI'));
+      await tester.tap(_text('Включить анти-DPI'));
+      await settle(tester);
+      expect(state.settings.antiDpi, isTrue);
+      // The old report no longer describes the changed connection settings.
+      expect(_text('Включить анти-DPI'), findsNothing);
+      expect(_text('Сменить сервер'), findsNothing);
+      expect(_text('Подключение изменилось. Повторите проверку.'), findsOneWidget);
 
       await _closeSheet(tester);
       await shutdownApp(tester, state, features: f);
@@ -324,7 +482,8 @@ void main() {
       expect(_text('API ядра недоступен'), findsNWidgets(2));
       expect(_text('IP отличается от реального'), findsOneWidget);
       expect(leakCalls, 1);
-      expect(_text('Всё в порядке'), findsOneWidget);
+      expect(_text('Всё в порядке'), findsNothing);
+      expect(_text('Проверка не завершена'), findsOneWidget);
 
       await _closeSheet(tester);
       await shutdownApp(tester, state, features: f);
@@ -391,6 +550,26 @@ void main() {
       expect(find.text('Проверьте время на устройстве'), findsOneWidget);
       await _closeSheet(tester);
       expect(find.byType(Dialog), findsNothing);
+      await shutdownApp(tester, state, features: f);
+    });
+
+    testWidgets('large system text keeps complete diagnostic details readable', (tester) async {
+      stubPlatformChannels(tester);
+      reducedMotion(tester);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final (state, f) = await bootApp(tester, size: const Size(360, 640));
+      await state.importText(kSampleVless);
+      f.doctor.probes = DiagProbes.canned({});
+      await _openDoctor(tester);
+      final detail = _text('пропущено: не подключено').first;
+      final paragraph = tester.renderObject<RenderParagraph>(detail);
+      expect(paragraph.size.height,
+          closeTo(paragraph.getMaxIntrinsicHeight(paragraph.size.width), 0.01),
+          reason: 'the detail must grow with text instead of clipping to 16 px');
+      expect(paragraph.didExceedMaxLines, isFalse);
+      expect(tester.takeException(), isNull);
+      await _closeSheet(tester);
       await shutdownApp(tester, state, features: f);
     });
   });

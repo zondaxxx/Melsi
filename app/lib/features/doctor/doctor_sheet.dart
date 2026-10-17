@@ -118,6 +118,7 @@ class _DoctorSheetState extends State<DoctorSheet> {
                 _VerdictPanel(
                   verdict: verdict,
                   running: _doc.running,
+                  connectionChanged: _doc.connectionChanged,
                   fixes: fixes,
                   onFix: (f) => _fix(f, app),
                 ),
@@ -136,8 +137,8 @@ class _DoctorSheetState extends State<DoctorSheet> {
   }
 }
 
-/// One check. The detail line is always present (pending / checking / the
-/// result) so rows keep one height while results land, and the whole row
+/// One check. The detail stays readable at the system text size and wraps
+/// when needed (pending / checking / the result), and the whole row
 /// springs from dimmed-and-6px-low to full when the runner reaches it.
 class _StepRow extends StatelessWidget {
   const _StepRow({
@@ -182,10 +183,7 @@ class _StepRow extends StatelessWidget {
       // and the actions closer to the fold.
       dense: context.isWide,
       title: l(id),
-      subtitleWidget: SizedBox(
-        height: 16,
-        child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
-      ),
+      subtitleWidget: Text(text, style: style),
       trailing: _StatusMark(result: r, active: active),
     );
 
@@ -253,12 +251,14 @@ class _VerdictPanel extends StatelessWidget {
   const _VerdictPanel({
     required this.verdict,
     required this.running,
+    required this.connectionChanged,
     required this.fixes,
     required this.onFix,
   });
 
   final Verdict? verdict;
   final bool running;
+  final bool connectionChanged;
   final List<DoctorFix> fixes;
   final void Function(DoctorFix fix) onFix;
 
@@ -268,7 +268,9 @@ class _VerdictPanel extends StatelessWidget {
     final c = context.c;
     final t = context.t;
     final v = verdict;
-    final headline = running ? l('doctor.running') : l((v ?? Verdict.partial).key);
+    final headline = running ? l('doctor.running')
+        : connectionChanged ? l('doctor.connectionChanged')
+        : l((v ?? Verdict.partial).key);
     final dot = running
         ? c.tertiaryLabel
         : switch (v) {

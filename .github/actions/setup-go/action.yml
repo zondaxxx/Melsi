@@ -15,12 +15,20 @@ runs:
         echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+        python=python3
+        if [[ "$RUNNER_OS" == "Windows" ]]; then python=python; fi
+        source_hash="$("$python" scripts/native-cache-key.py go)"
+        echo "source=$source_hash" >> "$GITHUB_OUTPUT"
 
     - name: Cache Go modules
       uses: actions/cache@v5
       with:
-        path: ${{ steps.go.outputs.modules }}
-        key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}
+        # Module zip files are already compressed; avoid tarring the thousands
+        # of extracted source files too. Go verifies and extracts them locally.
+        path: ${{ steps.go.outputs.modules }}/cache/download
+        key: go-mod-zips-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}
+        restore-keys: |
+          go-mod-zips-v2-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Cache compiled Go packages
       uses: actions/cache@v5
@@ -28,6 +36,8 @@ runs:
         path: ${{ steps.go.outputs.build }}
         # Native architectures, CGO and build tags differ between jobs. A single
         # immutable setup-go key let the fastest job strand the others' caches.
-        key: go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}-${{ github.sha }}
+        # App/docs-only commits reuse an exact key, without another cache save.
+        key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}-${{ steps.go.outputs.source }}
         restore-keys: |
-          go-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}-
+          go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-${{ hashFiles('core/go.mod', 'core/go.sum') }}-
+          go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.version }}-

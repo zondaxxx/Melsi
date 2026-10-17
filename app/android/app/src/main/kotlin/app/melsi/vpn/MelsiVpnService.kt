@@ -45,9 +45,11 @@ import io.nekohasekai.libbox.SystemProxyStatus
 import io.nekohasekai.libbox.TunOptions
 import io.nekohasekai.libbox.WIFIState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.lang.ref.WeakReference
@@ -72,21 +74,41 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
         private const val TAG = "MelsiVpnService"
         const val ACTION_START = "app.melsi.action.START"
         const val ACTION_STOP = "app.melsi.action.STOP"
+        private const val EXTRA_START_REQUEST = "app.melsi.extra.START_REQUEST"
+        private val requests = VpnServiceRequests()
 
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_SERVICE = "melsi_vpn"
 
-        private var instance: WeakReference<MelsiVpnService>? = null
+        @Volatile private var instance: WeakReference<MelsiVpnService>? = null
 
-        fun start(context: Context) {
+        fun prepareStart(): Long = requests.start()
+
+        fun cancelStart(request: Long) {
+            requests.stopIfCurrent(request)?.let { enqueueStop(it) }
+        }
+
+        fun start(context: Context, request: Long = prepareStart()) {
+            if (!requests.mayStart(request)) throw CancellationException("VPN start was superseded")
             val intent = Intent(context, MelsiVpnService::class.java).setAction(ACTION_START)
-            ContextCompat.startForegroundService(context, intent)
+                .putExtra(EXTRA_START_REQUEST, request)
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (e: Exception) {
+                cancelStart(request)
+                throw e
+            }
         }
 
         fun stop(context: Context) {
+            // Invalidate even when onCreate has not run for a queued start yet.
+            enqueueStop(requests.stop())
+        }
+
+        private fun enqueueStop(request: Long) {
             val running = instance?.get()
             if (running != null) {
-                running.requestStop()
+                running.enqueueStop(request, null)
                 return
             }
             if (VpnState.status != VpnStatus.Stopped) VpnState.set(VpnStatus.Stopped)
@@ -105,6 +127,8 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
     private var profileName: String = ""
     private var systemProxyAvailable = false
     private var systemProxyEnabled = true
+    @Volatile private var destroyed = false
+    @Volatile private var serviceRequest: Long? = null
 
     private val connectivity by lazy { getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager }
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
@@ -124,7 +148,23 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
         // Must enter the foreground quickly after startForegroundService().
         showNotification(getString(R.string.vpn_status_connecting))
         val restart = intent?.action == ACTION_START
-        scope.launch { startOrReload(restart) }
+        val request = if (restart && intent.hasExtra(EXTRA_START_REQUEST)) {
+            intent.getLongExtra(EXTRA_START_REQUEST, -1)
+        } else {
+            // Always-on VPN / START_STICKY creates a fresh request.
+            requests.start()
+        }
+        scope.launch {
+            if (requests.mayStart(request)) {
+                startOrReload(restart, request)
+            } else if (!requests.wantsStart()) {
+                // A stale foreground-service start still has to enter the
+                // foreground above, then release it without creating a TUN.
+                shutdown(null)
+            } else if (commandServer != null && VpnState.status == VpnStatus.Connected) {
+                showNotification(getString(R.string.vpn_status_connected))
+            }
+        }
         return START_STICKY
     }
 
@@ -134,20 +174,31 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
     }
 
     override fun onDestroy() {
-        if (commandServer != null) {
-            runBlocking(serial) { shutdown(null) }
-        }
+        destroyed = true
+        scope.cancel()
+        // Wait for an in-flight synchronous native start too: it may not have
+        // assigned commandServer yet when Android destroys this instance.
+        runBlocking(serial) { shutdown(null) }
         if (instance?.get() === this) instance = null
         super.onDestroy()
     }
 
     fun requestStop(message: String? = null) {
-        scope.launch { shutdown(message) }
+        enqueueStop(requests.stop(), message)
     }
 
-    private fun startOrReload(restartIfRunning: Boolean) {
+    private fun enqueueStop(request: Long, message: String?) {
+        scope.launch { if (requests.isCurrent(request)) shutdown(message) }
+    }
+
+    private fun startOrReload(restartIfRunning: Boolean, request: Long) {
+        if (destroyed || !requests.mayStart(request)) return
+        serviceRequest = request
         val running = commandServer != null && VpnState.status == VpnStatus.Connected
-        if (running && !restartIfRunning) return
+        if (running && !restartIfRunning) {
+            showNotification(getString(R.string.vpn_status_connected))
+            return
+        }
         VpnState.set(VpnStatus.Connecting)
         try {
             val profile = VpnProfileStore.load(this) ?: throw IllegalStateException("Нет сохранённой конфигурации")
@@ -161,6 +212,10 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
             }
             if (running) MelsiEngine.stop()
             server.startOrReloadService(profile.config, OverrideOptions())
+            if (destroyed || !requests.mayStart(request)) {
+                if (!requests.wantsStart()) shutdown(null)
+                return
+            }
             var message: String? = null
             try {
                 MelsiEngine.start(profile.engine)
@@ -168,11 +223,19 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
                 Log.e(TAG, "start engine", e)
                 message = "engine: ${e.message}"
             }
+            if (destroyed || !requests.mayStart(request)) {
+                if (!requests.wantsStart()) shutdown(null)
+                return
+            }
             VpnState.set(VpnStatus.Connected, message)
             showNotification(getString(R.string.vpn_status_connected))
         } catch (e: Exception) {
             Log.e(TAG, "start service", e)
-            shutdown(e.message ?: e.toString())
+            if (requests.stopIfCurrent(request) != null) {
+                shutdown(e.message ?: e.toString())
+            } else if (!requests.wantsStart()) {
+                shutdown(null)
+            }
         }
     }
 
@@ -197,8 +260,12 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
     }
 
     private fun stopSelfCompat() {
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // A new explicit start may arrive while native shutdown is blocking
+        // this serial dispatcher. Keep the service for its queued intent.
+        requests.ifStopped {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     private fun closeTun() {
@@ -256,7 +323,10 @@ class MelsiVpnService : VpnService(), PlatformInterface, CommandServerHandler {
     }
 
     override fun serviceReload() {
-        scope.launch { startOrReload(true) }
+        // A delayed core callback must not turn a stopped session into a new
+        // explicit start. Only the accepted session can request a reload.
+        val request = serviceRequest ?: return
+        scope.launch { startOrReload(true, request) }
     }
 
     override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus().also {

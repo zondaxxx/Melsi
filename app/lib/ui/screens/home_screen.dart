@@ -12,6 +12,7 @@ import '../../services/engine_api.dart';
 import '../../services/vpn_controller.dart';
 import '../../state/app_scope.dart';
 import '../../state/app_state.dart';
+import '../../services/probe_diagnostics.dart';
 import '../../state/features.dart';
 import '../../state/traffic.dart';
 import '../shell.dart';
@@ -256,8 +257,13 @@ class _Status extends StatelessWidget {
     final c = context.c;
     final t = context.t;
     final s = app.displayStatus;
+    final probeError = app.proxyGroup?.currentStat?.lastError;
+    final probeFailed = s == VpnStatus.connected && !app.applying &&
+        probeError != null && probeError.trim().isNotEmpty;
+    final recovering = s == VpnStatus.connecting && app.vpnState.message == 'reconnecting';
+    final statusLabel = l(recovering ? 'status.reconnecting' : 'status.${s.name}');
     final color = switch (s) {
-      VpnStatus.connected => c.success,
+      VpnStatus.connected => probeFailed ? c.warning : c.success,
       VpnStatus.connecting || VpnStatus.stopping => c.warning,
       VpnStatus.error => c.danger,
       VpnStatus.stopped => c.tertiaryLabel,
@@ -267,6 +273,8 @@ class _Status extends StatelessWidget {
           ? l('notice.permissionDenied')
           : (app.vpnState.message ?? l('status.error')),
       VpnStatus.stopped when app.nodes.isEmpty => l('home.addServerHint'),
+      VpnStatus.connected when probeFailed => l(probeFailureKey(classifyProbeFailure(probeError))),
+      VpnStatus.connecting when recovering => l('home.recovering'),
       _ => null,
     };
     final style = t.monoDisplay.copyWith(fontSize: 28, height: 1.1);
@@ -286,8 +294,8 @@ class _Status extends StatelessWidget {
           Flexible(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
-              child: Text(l('status.${s.name}'),
-                  key: ValueKey(s),
+              child: Text(statusLabel,
+                  key: ValueKey(statusLabel),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: style),
@@ -318,8 +326,10 @@ class _Status extends StatelessWidget {
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: t.footnote.copyWith(color: s == VpnStatus.error ? c.danger : null)),
+                  if (probeFailed)
+                    Text(l('home.probeHint'), style: t.footnote),
                   // An error is a question; the diagnostics answer it.
-                  if (s == VpnStatus.error)
+                  if (s == VpnStatus.error || probeFailed)
                     PressableScale(
                       scale: 0.97,
                       behavior: HitTestBehavior.deferToChild,

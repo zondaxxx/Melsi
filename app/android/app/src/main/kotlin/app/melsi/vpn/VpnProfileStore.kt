@@ -18,6 +18,7 @@ object VpnProfileStore {
 
     private fun dir(context: Context): File = File(context.filesDir, "melsi").apply { mkdirs() }
 
+    @Synchronized
     fun save(context: Context, profile: Profile) {
         val dir = dir(context)
         writeAtomic(File(dir, "config.json"), profile.config)
@@ -25,6 +26,9 @@ object VpnProfileStore {
         writeAtomic(File(dir, "name.txt"), profile.name)
     }
 
+    // The service reloads on a different dispatcher from the activity's save.
+    // Read all three files together so it cannot combine two profiles.
+    @Synchronized
     fun load(context: Context): Profile? {
         val dir = dir(context)
         val config = File(dir, "config.json").takeIf { it.isFile }?.readText() ?: return null

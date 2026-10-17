@@ -23,7 +23,8 @@ export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 GOOS_T="${1:-$(go env GOOS)}"
 GOARCH_T="${2:-$(go env GOARCH)}"
 
-DESKTOP_TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_openvpn,with_openconnect,badlinkname,tfogo_checklinkname0"
+# shellcheck source=go-build-settings.sh
+source "$ROOT/scripts/go-build-settings.sh"
 
 if [[ -z "${MELSI_VERSION:-}" ]]; then
   MELSI_VERSION="$(bash "$ROOT/scripts/version.sh" 2>/dev/null || true)"
@@ -37,10 +38,8 @@ LDFLAGS+=" -X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0 -
 
 build_one() {
   local goos="$1" goarch="$2" out="$3"
-  local tags="$DESKTOP_TAGS"
-  if [[ "$goos" == "windows" && "${MELSI_NAIVE:-0}" == "1" ]]; then
-    tags+=",with_naive_outbound,with_purego"
-  fi
+  local tags
+  tags="$(melsi_desktop_go_tags "$goos")"
   local ldflags="$LDFLAGS"
   # GUI subsystem: no console window pops up when the app spawns the daemon.
   # Redirected stdout/stderr still work.
@@ -50,7 +49,7 @@ build_one() {
   mkdir -p "$(dirname "$out")"
   echo ">> melsi-core ${MELSI_VERSION} (sing-box ${SING_BOX_VERSION}) ${goos}/${goarch} -> ${out}"
   (cd "$CORE" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -v -trimpath -buildvcs=false -tags "$tags" -ldflags "$ldflags" -o "$out" ./cmd/melsi-core)
+    go build -v "${MELSI_DESKTOP_GO_FLAGS[@]}" -tags "$tags" -ldflags "$ldflags" -o "$out" ./cmd/melsi-core)
 }
 
 exe=""

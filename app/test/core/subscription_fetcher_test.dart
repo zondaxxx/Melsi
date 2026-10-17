@@ -67,6 +67,25 @@ void main() {
     expect(i.total, 0);
   });
 
+  test('invalid optional usage headers do not discard valid servers', () async {
+    for (final invalid in ['NaN', 'Infinity', '-1', '9223372036854775808']) {
+      final client = MockClient((req) async => http.Response(
+        kSampleLinks.values.first, 200, headers: {
+          'subscription-userinfo':
+              'upload=$invalid;download=42;total=$invalid;expire=$invalid',
+        },
+      ));
+      final result = await SubscriptionFetcher(client: client)
+          .fetch('https://sub.example.com/abc');
+      expect(result.nodes, hasLength(1), reason: invalid);
+      expect(result.download, 42);
+      expect(result.upload, isNull);
+      expect(result.total, isNull);
+      expect(result.expire, isNull);
+    }
+    expect(SubscriptionFetcher.parseUserInfo('expire=8640000000001').expire, isNull);
+  });
+
   test('HTTP errors throw', () async {
     final client = MockClient((req) async => http.Response('nope', 403));
     expect(

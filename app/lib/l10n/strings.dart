@@ -41,6 +41,9 @@ const _ru = <String, String>{
   'status.connected': 'Подключено',
   'status.stopping': 'Отключение…',
   'status.error': 'Ошибка',
+  'status.reconnecting': 'Восстановление…',
+  'home.recovering': 'Повторно подключаемся к выбранному серверу.',
+  'home.probeHint': 'Потери — доля неудачных проверок сайта. Диагностика проверит соединение подробнее.',
 
   // common
   'common.all': 'Все',
@@ -327,6 +330,7 @@ const _ru = <String, String>{
   // notices
   'notice.addServerFirst': 'Сначала добавьте сервер',
   'notice.allUpdated': 'Подписки обновлены',
+  'notice.subsUpdateFailed': 'Обновлено подписок: {ok} из {total}. Остальные не удалось обновить',
   'notice.autoOffManual': 'Умный выбор выключен — вы выбрали сервер вручную',
   'notice.clipboardEmpty': 'Буфер обмена пуст',
   'notice.connectFailed': 'Не удалось подключиться',
@@ -360,6 +364,9 @@ const _en = <String, String>{
   'status.connected': 'Connected',
   'status.stopping': 'Disconnecting…',
   'status.error': 'Error',
+  'status.reconnecting': 'Reconnecting…',
+  'home.recovering': 'Reconnecting to the selected server.',
+  'home.probeHint': 'Loss is the share of failed website probes. Run diagnostics to check the connection.',
 
   'common.all': 'All',
   'common.cancel': 'Cancel',
@@ -639,6 +646,7 @@ const _en = <String, String>{
 
   'notice.addServerFirst': 'Add a server first',
   'notice.allUpdated': 'Subscriptions updated',
+  'notice.subsUpdateFailed': 'Updated {ok} of {total} subscriptions. The others could not be refreshed',
   'notice.autoOffManual': 'Smart select turned off — you picked a server manually',
   'notice.clipboardEmpty': 'Clipboard is empty',
   'notice.connectFailed': 'Could not connect',

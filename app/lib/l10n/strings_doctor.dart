@@ -15,7 +15,7 @@ const StringTable kDoctorStrings = StringTable(
     'doctor.server': 'Сервер',
     'doctor.core': 'Ядро',
     'doctor.tunnel': 'Туннель',
-    'doctor.dns': 'DNS через туннель',
+    'doctor.dns': 'Сервис DNS через туннель',
     'doctor.leak': 'Утечка IP',
     'doctor.rulesets': 'Наборы правил',
     'doctor.clock': 'Время',
@@ -41,6 +41,21 @@ const StringTable kDoctorStrings = StringTable(
     'doctor.rulesetsN': '{n} .srs',
     'doctor.clockUnknown': 'не удалось сверить',
 
+    'doctor.udpServer': 'TCP-проверка неприменима к UDP-серверу',
+    'doctor.probeService':
+        'Другой сайт через VPN отвечает; основной адрес проверки недоступен',
+    'doctor.probe.dns':
+        'Проверка не прошла: не удалось разрешить имя через DNS',
+    'doctor.probe.tls':
+        'Проверка не прошла: ошибка защищённого соединения TLS/REALITY',
+    'doctor.probe.authentication': 'Сервер отклонил данные доступа',
+    'doctor.probe.refused': 'Соединение при проверке отклонено',
+    'doctor.probe.route': 'Сеть или маршрут до адреса проверки недоступны',
+    'doctor.probe.timeout': 'Время ожидания проверки истекло',
+    'doctor.probe.core': 'Локальное API ядра недоступно или отклонило запрос',
+    'doctor.probe.unknown': 'Проверка не прошла; подробности в журнале',
+    'doctor.v.probeService': 'VPN отвечает, но выбранный адрес проверки недоступен. Попробуйте другой URL проверки в настройках.',
+
     // status glyph semantics
     'doctor.st.ok': 'в порядке',
     'doctor.st.warn': 'замечание',
@@ -50,14 +65,16 @@ const StringTable kDoctorStrings = StringTable(
     // verdict
     'doctor.verdict': 'Диагноз',
     'doctor.running': 'Проверяем…',
-    'doctor.v.offline': 'Нет сети',
-    'doctor.v.port': 'Порт сервера не отвечает: попробуйте другой сервер или анти-DPI',
-    'doctor.v.core': 'Ядро недоступно: переустановите приложение',
-    'doctor.v.tunnel': 'Сервер принимает соединение, но не пропускает трафик: проверьте подписку или квоту',
-    'doctor.v.dns': 'DNS через туннель не отвечает: проверьте удалённый DNS в настройках',
+    'doctor.connectionChanged': 'Подключение изменилось. Повторите проверку.',
+    'doctor.v.offline': 'Сетевые проверки не отвечают: проверьте подключение к интернету и туннель',
+    'doctor.v.port':
+        'Порт сервера не отвечает: попробуйте другой сервер или анти-DPI',
+    'doctor.v.core': 'Ядро недоступно: переподключитесь и проверьте журнал',
+    'doctor.v.tunnel': 'HTTPS-проверки через VPN не проходят. Причина может быть в сервере, DNS или доступности сайтов проверки; подробности в журнале.',
+    'doctor.v.dns': 'Сервис проверки DNS недоступен через VPN. Это не доказывает сбой DNS устройства.',
     'doctor.v.clock': 'Проверьте время на устройстве',
     'doctor.v.leak': 'Трафик идёт мимо туннеля',
-    'doctor.v.warn': 'Всё работает, но есть замечания',
+    'doctor.v.warn': 'Проверка завершена с замечаниями',
     'doctor.v.ok': 'Всё в порядке',
     'doctor.v.partial': 'Проверка не завершена',
     'doctor.fix.antiDpi': 'Включить анти-DPI',
@@ -77,7 +94,7 @@ const StringTable kDoctorStrings = StringTable(
     'doctor.server': 'Server',
     'doctor.core': 'Core',
     'doctor.tunnel': 'Tunnel',
-    'doctor.dns': 'DNS via tunnel',
+    'doctor.dns': 'DNS service via tunnel',
     'doctor.leak': 'IP leak',
     'doctor.rulesets': 'Rule-sets',
     'doctor.clock': 'Clock',
@@ -102,6 +119,21 @@ const StringTable kDoctorStrings = StringTable(
     'doctor.rulesetsN': '{n} .srs',
     'doctor.clockUnknown': 'could not compare',
 
+    'doctor.udpServer': 'A TCP check does not apply to this UDP server',
+    'doctor.probeService': 'Another site answers through the VPN; the primary probe URL is unavailable',
+    'doctor.probe.dns': 'Probe failed: DNS could not resolve a name',
+    'doctor.probe.tls':
+        'Probe failed: TLS/REALITY handshake or certificate error',
+    'doctor.probe.authentication': 'The server rejected the credentials',
+    'doctor.probe.refused': 'The probe connection was refused',
+    'doctor.probe.route':
+        'The network or route to the probe destination is unavailable',
+    'doctor.probe.timeout': 'The probe timed out',
+    'doctor.probe.core':
+        'The local core API is unavailable or rejected the request',
+    'doctor.probe.unknown': 'The probe failed; see the log for details',
+    'doctor.v.probeService': 'The VPN responds, but the selected probe URL is unavailable. Try another probe URL in Settings.',
+
     'doctor.st.ok': 'ok',
     'doctor.st.warn': 'warning',
     'doctor.st.fail': 'failed',
@@ -109,14 +141,16 @@ const StringTable kDoctorStrings = StringTable(
 
     'doctor.verdict': 'Verdict',
     'doctor.running': 'Checking…',
-    'doctor.v.offline': 'No network',
-    'doctor.v.port': 'The server port does not answer: try another server or anti-DPI',
-    'doctor.v.core': 'The core is unavailable: reinstall the app',
-    'doctor.v.tunnel': 'The server accepts connections but passes no traffic: check the subscription or quota',
-    'doctor.v.dns': 'DNS through the tunnel does not answer: check the remote DNS in settings',
+    'doctor.connectionChanged': 'The connection changed. Run the checks again.',
+    'doctor.v.offline': 'Network checks did not respond: check the internet connection and tunnel',
+    'doctor.v.port':
+        'The server port does not answer: try another server or anti-DPI',
+    'doctor.v.core': 'The core is unavailable: reconnect and check the log',
+    'doctor.v.tunnel': 'HTTPS checks through the VPN failed. The server, DNS or probe sites may be unavailable; see the log for details.',
+    'doctor.v.dns': 'The DNS test service is unreachable through the VPN. This does not establish a device DNS failure.',
     'doctor.v.clock': 'Check the device clock',
     'doctor.v.leak': 'Traffic bypasses the tunnel',
-    'doctor.v.warn': 'Working, with remarks',
+    'doctor.v.warn': 'Checks completed with remarks',
     'doctor.v.ok': 'All good',
     'doctor.v.partial': 'Check incomplete',
     'doctor.fix.antiDpi': 'Enable anti-DPI',

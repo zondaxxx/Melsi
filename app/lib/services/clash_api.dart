@@ -3,6 +3,16 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'probe_diagnostics.dart';
+
+class UrlProbeResult {
+  const UrlProbeResult.success(this.delayMs) : failure = null;
+  const UrlProbeResult.failed(this.failure) : delayMs = null;
+
+  final int? delayMs;
+  final ProbeFailure? failure;
+}
+
 /// One sample from `GET /traffic` — bytes per second.
 class TrafficSample {
   const TrafficSample(this.up, this.down);
@@ -33,7 +43,7 @@ class ClashLogLine {
 /// Minimal client for sing-box's Clash-compatible API.
 class ClashApi {
   ClashApi({required this.endpoint, required this.secret, http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   /// `host:port`
   final String endpoint;
@@ -45,15 +55,27 @@ class ClashApi {
   Map<String, String> get _h => {'Authorization': 'Bearer $secret'};
 
   /// Streams `{"up":N,"down":N}` lines once per second until cancelled.
-  Stream<TrafficSample> traffic() => _jsonLines('/traffic').map((j) =>
-      TrafficSample((j['up'] as num?)?.toInt() ?? 0, (j['down'] as num?)?.toInt() ?? 0));
+  Stream<TrafficSample> traffic() => _jsonLines('/traffic').map(
+    (j) => TrafficSample(
+      (j['up'] as num?)?.toInt() ?? 0,
+      (j['down'] as num?)?.toInt() ?? 0,
+    ),
+  );
 
   /// Live log stream (`GET /logs?level=`).
   Stream<ClashLogLine> logs({String level = 'info'}) =>
-      _jsonLines('/logs', {'level': level}).map((j) => ClashLogLine(
-          j['type'] as String? ?? 'info', j['payload'] as String? ?? '', DateTime.now()));
+      _jsonLines('/logs', {'level': level}).map(
+        (j) => ClashLogLine(
+          j['type'] as String? ?? 'info',
+          j['payload'] as String? ?? '',
+          DateTime.now(),
+        ),
+      );
 
-  Stream<Map<String, dynamic>> _jsonLines(String path, [Map<String, String>? q]) {
+  Stream<Map<String, dynamic>> _jsonLines(
+    String path, [
+    Map<String, String>? q,
+  ]) {
     late StreamController<Map<String, dynamic>> ctrl;
     http.Client? client;
     StreamSubscription<String>? sub;
@@ -71,12 +93,16 @@ class ClashApi {
           sub = res.stream
               .transform(utf8.decoder)
               .transform(const LineSplitter())
-              .listen((line) {
-            if (line.trim().isEmpty) return;
-            try {
-              ctrl.add((jsonDecode(line) as Map).cast<String, dynamic>());
-            } catch (_) {}
-          }, onError: ctrl.addError, onDone: ctrl.close);
+              .listen(
+                (line) {
+                  if (line.trim().isEmpty) return;
+                  try {
+                    ctrl.add((jsonDecode(line) as Map).cast<String, dynamic>());
+                  } catch (_) {}
+                },
+                onError: ctrl.addError,
+                onDone: ctrl.close,
+              );
         } catch (e) {
           if (!ctrl.isClosed) {
             ctrl.addError(e);
@@ -93,7 +119,8 @@ class ClashApi {
   }
 
   Future<ConnectionsSnapshot> connections() async {
-    final r = await _client.get(_u('/connections'), headers: _h)
+    final r = await _client
+        .get(_u('/connections'), headers: _h)
         .timeout(const Duration(seconds: 3));
     final j = (jsonDecode(r.body) as Map).cast<String, dynamic>();
     return ConnectionsSnapshot(
@@ -106,41 +133,77 @@ class ClashApi {
 
   /// Closes all connections (so they reconnect through a new node).
   Future<void> closeAllConnections() async {
-    await _client.delete(_u('/connections'), headers: _h)
+    await _client
+        .delete(_u('/connections'), headers: _h)
         .timeout(const Duration(seconds: 3));
   }
 
   Future<Map<String, dynamic>> proxies() async {
-    final r = await _client.get(_u('/proxies'), headers: _h)
+    final r = await _client
+        .get(_u('/proxies'), headers: _h)
         .timeout(const Duration(seconds: 3));
     return ((jsonDecode(r.body) as Map)['proxies'] as Map? ?? {})
         .cast<String, dynamic>();
   }
 
-  /// Real URL test through [name]. Returns ms or null on failure/timeout.
-  Future<int?> delay(String name,
-      {required String url, int timeoutMs = 5000}) async {
+  /// Real URL test through [name], preserving a safe diagnostic category.
+  /// An HTTP error here is from the local control API, not the remote site.
+  Future<UrlProbeResult> probe(
+    String name, {
+    required String url,
+    int timeoutMs = 5000,
+  }) async {
     try {
       final r = await _client
           .get(
-              _u('/proxies/${Uri.encodeComponent(name)}/delay',
-                  {'url': url, 'timeout': '$timeoutMs'}),
-              headers: _h)
+            _u('/proxies/${Uri.encodeComponent(name)}/delay', {
+              'url': url,
+              'timeout': '$timeoutMs',
+            }),
+            headers: _h,
+          )
           .timeout(Duration(milliseconds: timeoutMs + 1500));
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) {
+        if (r.statusCode == 401 || r.statusCode == 403 || r.statusCode == 404) {
+          return const UrlProbeResult.failed(ProbeFailure.core);
+        }
+        String? message;
+        try {
+          final body = jsonDecode(r.body);
+          if (body is Map && body['message'] is String) {
+            message = body['message'] as String;
+          }
+        } catch (_) {}
+        return UrlProbeResult.failed(classifyProbeFailure(message));
+      }
       final d = (jsonDecode(r.body) as Map)['delay'];
-      return d is num && d > 0 ? d.toInt() : null;
+      return d is num && d.isFinite && d > 0
+          ? UrlProbeResult.success(d.toInt())
+          : const UrlProbeResult.failed(ProbeFailure.unknown);
+    } on TimeoutException {
+      return const UrlProbeResult.failed(ProbeFailure.timeout);
+    } on http.ClientException {
+      return const UrlProbeResult.failed(ProbeFailure.core);
     } catch (_) {
-      return null;
+      return const UrlProbeResult.failed(ProbeFailure.unknown);
     }
   }
+
+  /// Compatibility wrapper for latency-only callers.
+  Future<int?> delay(
+    String name, {
+    required String url,
+    int timeoutMs = 5000,
+  }) async => (await probe(name, url: url, timeoutMs: timeoutMs)).delayMs;
 
   /// Switches selector [selector] to outbound [name].
   Future<bool> select(String selector, String name) async {
     final r = await _client
-        .put(_u('/proxies/${Uri.encodeComponent(selector)}'),
-            headers: {..._h, 'Content-Type': 'application/json'},
-            body: jsonEncode({'name': name}))
+        .put(
+          _u('/proxies/${Uri.encodeComponent(selector)}'),
+          headers: {..._h, 'Content-Type': 'application/json'},
+          body: jsonEncode({'name': name}),
+        )
         .timeout(const Duration(seconds: 3));
     return r.statusCode < 300;
   }
