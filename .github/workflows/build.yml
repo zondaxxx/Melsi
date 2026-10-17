@@ -555,6 +555,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
 
+      - name: Installer lifecycle regression tests
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem dist/*-windows-x64-setup.exe).FullName
+          & ./packaging/windows/test-installer.ps1 -Installer $installer
+
       - uses: actions/upload-artifact@v5
         with:
           name: melsi-windows

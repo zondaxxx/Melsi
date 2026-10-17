@@ -443,3 +443,7 @@ writable.
   share tags, trimpath and CGO_ENABLED=0. Mobile registry has a separate check.
 - Windows installs the Flutter SDK and caches pub dependencies only, avoiding
   the expensive SDK archive upload observed in previous builds.
+- Windows installation and uninstallation require both the UI and core to be
+  stopped. The installer never force-kills an active VPN, because this skips
+  system-proxy restoration. Its CI smoke test checks blocked operations preserve
+  live processes and files, followed by a successful clean install/uninstall.

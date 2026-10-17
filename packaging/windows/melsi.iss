@@ -59,7 +59,7 @@ UninstallDisplayName={#AppName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=force
+CloseApplications=no
 RestartApplications=no
 ChangesAssociations=yes
 MinVersion=10.0
@@ -67,6 +67,12 @@ MinVersion=10.0
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+
+[CustomMessages]
+english.MelsiMustStop=Disconnect the VPN in Melsi, then fully quit Melsi and try again. The application and its VPN service must be stopped before installing, updating or uninstalling.
+russian.MelsiMustStop=Отключите VPN в Melsi, затем полностью закройте приложение и повторите попытку. Перед установкой, обновлением или удалением приложение и его VPN-служба должны быть остановлены.
+english.MelsiProcessCheckFailed=Could not verify that Melsi has stopped. Close Melsi and try again. Setup cannot safely continue while the running processes cannot be checked.
+russian.MelsiProcessCheckFailed=Не удалось проверить, завершена ли работа Melsi. Закройте приложение и повторите попытку. Установка или удаление не могут продолжиться без проверки запущенных процессов.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -102,27 +108,46 @@ Root: HKA; Subkey: "Software\Classes\hiddify\shell\open\command"; ValueType: str
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-; Runs before any file is removed: stop the elevated core first, then the UI.
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM {#CoreExe}"; Flags: runhidden waituntilterminated; RunOnceId: "KillCore"
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /T /IM {#AppExe}"; Flags: runhidden waituntilterminated; RunOnceId: "KillApp"
-
 [UninstallDelete]
 Type: files; Name: "{app}\melsi-core.pid"
 
 [Code]
-procedure KillImage(const Image: String);
+function CheckMelsiStopped: String;
 var
-  ResultCode: Integer;
+  Locator, Services, Processes: Variant;
 begin
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM ' + Image, '',
-       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    { Bound the WMI connection wait; use the current security context. }
+    Services := Locator.ConnectServer('.', 'root\CIMV2', '', '', '', '', 128);
+    { Check the UI too: it can reconnect the detached core. Do not restrict
+      this to the installer account, since elevation may use another user. }
+    Processes := Services.ExecQuery(
+      'SELECT Name FROM Win32_Process WHERE Name = ''{#CoreExe}'' OR Name = ''{#AppExe}''');
+    if Processes.Count > 0 then
+      Result := CustomMessage('MelsiMustStop');
+  except
+    Log('Unable to check Melsi processes: ' + GetExceptionMessage);
+    Result := CustomMessage('MelsiProcessCheckFailed');
+  end;
+  if Result <> '' then
+    Log(Result);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  { Upgrades: make sure no old binaries are locked. }
-  KillImage('{#CoreExe}');
-  KillImage('{#AppExe}');
-  Result := '';
+  { A forced core exit skips system-proxy restoration. Let Melsi perform
+    graceful disconnect before any installed files can be replaced. }
+  Result := CheckMelsiStopped;
+end;
+
+function InitializeUninstall: Boolean;
+var
+  Message: String;
+begin
+  Message := CheckMelsiStopped;
+  Result := Message = '';
+  if not Result then
+    SuppressibleMsgBox(Message, mbError, MB_OK, IDOK);
 end;
