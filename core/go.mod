@@ -9,9 +9,10 @@ require (
 	github.com/metacubex/mipstack v0.0.0-20260930071539-961d4b1c1983
 	github.com/metacubex/wireguard-go v0.0.0-20250820062549-a6cecdd7f57f
 	github.com/sagernet/gomobile v0.1.13
-	github.com/sagernet/sing v0.9.6-0.20260922013354-87c33f17688f
+	github.com/sagernet/sing v0.9.6
 	github.com/sagernet/sing-box v1.14.2
 	github.com/sagernet/sing-vmess v0.2.8
+	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f
 	github.com/xtls/xray-core v1.260327.0
 )
 
@@ -233,7 +234,6 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
